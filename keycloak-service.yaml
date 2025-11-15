@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","kind":"Service","metadata":{"annotations":{},"name":"keycloak","namespace":"caritas"},"spec":{"ports":[{"name":"http","port":8080,"targetPort":8080},{"name":"https","port":8443,"targetPort":8443}],"selector":{"app":"keycloak"},"type":"ClusterIP"}}
+  creationTimestamp: "2025-10-14T18:31:33Z"
+  name: keycloak
+  namespace: caritas
+  resourceVersion: "84328"
+  uid: ee73121f-d261-4c75-adff-226257cb3273
+spec:
+  clusterIP: 10.43.63.186
+  clusterIPs:
+  - 10.43.63.186
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app: keycloak
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
