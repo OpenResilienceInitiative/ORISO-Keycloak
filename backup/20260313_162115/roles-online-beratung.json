@@ -1,0 +1,105 @@
+[
+  {
+    "id": "72ad486f-5b75-4f4b-a035-c73c754dffb0",
+    "name": "offline_access",
+    "description": "${role_offline-access}",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "64f49518-c911-476d-b79c-ef177d6e2e24",
+    "name": "single-tenant-admin",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "c4bbdf79-9855-4086-95d7-2d25eb12ee9f",
+    "name": "USER_ADMIN",
+    "description": "User admin authority",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "c95aff4a-c6a9-4d12-8584-d0ec1f163839",
+    "name": "technical",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "327ab3cf-95d4-452c-b01d-b8c2ed34f11b",
+    "name": "user",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "c01a8697-4bbe-47a4-92b2-008cafbb5b08",
+    "name": "uma_authorization",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "39ed0b0e-db99-4357-8ce3-0d1f963b12b2",
+    "name": "user-admin",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "5fb1e335-e905-4081-ba81-32334e227cb6",
+    "name": "default-roles-online-beratung",
+    "description": "${role_default-roles}",
+    "composite": true,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "02f5415c-091a-402b-952b-93603b36d341",
+    "name": "TECHNICAL_DEFAULT",
+    "description": "Technical default authority",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "af9a3ea4-f589-4a55-a562-60da95989dd1",
+    "name": "agency-admin",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "02b23701-9fc0-43c4-8b87-d804787cc7f2",
+    "name": "tenant-admin",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "b02a8e11-a4aa-47ee-ab00-dc3fa6211fec",
+    "name": "topic-admin",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  },
+  {
+    "id": "44bd249d-3eed-4b6b-bf1f-9c6597238bda",
+    "name": "consultant",
+    "description": "",
+    "composite": false,
+    "clientRole": false,
+    "containerId": "online-beratung"
+  }
+]

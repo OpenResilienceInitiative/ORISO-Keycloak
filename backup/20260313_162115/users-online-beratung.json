@@ -1,0 +1,176 @@
+[
+  {
+    "id": "37cd1b3e-b654-4b87-a15e-37e50ad916cb",
+    "createdTimestamp": 1773417126333,
+    "username": "caritas",
+    "enabled": true,
+    "totp": false,
+    "emailVerified": true,
+    "firstName": "Caritas",
+    "lastName": "Superadmin",
+    "email": "caritas-superadmin@oriso-dev.site",
+    "attributes": {
+      "tenantId": [
+        "0"
+      ],
+      "userId": [
+        "17f459ce-58af-456d-84cf-2f44c9404ef7"
+      ]
+    },
+    "disableableCredentialTypes": [],
+    "requiredActions": [],
+    "notBefore": 0,
+    "access": {
+      "manageGroupMembership": true,
+      "view": true,
+      "mapRoles": true,
+      "impersonate": true,
+      "manage": true
+    }
+  },
+  {
+    "id": "fdd31d79-8285-4ab3-b042-654dacd6d93d",
+    "createdTimestamp": 1773415743020,
+    "username": "caritas-berlin-admin",
+    "enabled": true,
+    "totp": false,
+    "emailVerified": true,
+    "firstName": "Berlin",
+    "lastName": "Admin",
+    "email": "caritas-berlin-admin@oriso-dev.site",
+    "attributes": {
+      "tenantId": [
+        "1"
+      ],
+      "userId": [
+        "20f09062-f751-4c5d-9e9a-2a5cb7a6ab87"
+      ]
+    },
+    "disableableCredentialTypes": [],
+    "requiredActions": [],
+    "notBefore": 0,
+    "access": {
+      "manageGroupMembership": true,
+      "view": true,
+      "mapRoles": true,
+      "impersonate": true,
+      "manage": true
+    }
+  },
+  {
+    "id": "0b06420e-5331-4ae8-bd50-08c51b049878",
+    "createdTimestamp": 1773415741397,
+    "username": "caritas-frankfurt-admin",
+    "enabled": true,
+    "totp": false,
+    "emailVerified": true,
+    "firstName": "Caritas",
+    "lastName": "Frankfurt",
+    "email": "caritas-frankfurt-admin@oriso-dev.site",
+    "attributes": {
+      "tenantId": [
+        "4"
+      ],
+      "userId": [
+        "0ba195a0-fa29-4a55-a2f0-ee50e2704fb6"
+      ]
+    },
+    "disableableCredentialTypes": [],
+    "requiredActions": [],
+    "notBefore": 0,
+    "access": {
+      "manageGroupMembership": true,
+      "view": true,
+      "mapRoles": true,
+      "impersonate": true,
+      "manage": true
+    }
+  },
+  {
+    "id": "f169644b-4fea-4be4-b349-3eea15637961",
+    "createdTimestamp": 1773415743779,
+    "username": "caritas-hamburg-admin",
+    "enabled": true,
+    "totp": false,
+    "emailVerified": true,
+    "firstName": "Hamburg",
+    "lastName": "Admin",
+    "email": "caritas-hamburg-admin@oriso-dev.site",
+    "attributes": {
+      "tenantId": [
+        "2"
+      ],
+      "userId": [
+        "3755c0f1-f476-4028-b439-b1cdb23a54cb"
+      ]
+    },
+    "disableableCredentialTypes": [],
+    "requiredActions": [],
+    "notBefore": 0,
+    "access": {
+      "manageGroupMembership": true,
+      "view": true,
+      "mapRoles": true,
+      "impersonate": true,
+      "manage": true
+    }
+  },
+  {
+    "id": "2b50cc91-0cbb-41c3-af21-809e10127ecb",
+    "createdTimestamp": 1773415743424,
+    "username": "caritas-muenchen-admin",
+    "enabled": true,
+    "totp": false,
+    "emailVerified": true,
+    "firstName": "Muenchen",
+    "lastName": "Admin",
+    "email": "caritas-muenchen-admin@oriso-dev.site",
+    "attributes": {
+      "tenantId": [
+        "3"
+      ],
+      "userId": [
+        "30026250-79d9-41d1-864f-acf0acd1a178"
+      ]
+    },
+    "disableableCredentialTypes": [],
+    "requiredActions": [],
+    "notBefore": 0,
+    "access": {
+      "manageGroupMembership": true,
+      "view": true,
+      "mapRoles": true,
+      "impersonate": true,
+      "manage": true
+    }
+  },
+  {
+    "id": "b0ee2630-6b0a-4ebb-ac8d-e716741a6c0f",
+    "createdTimestamp": 1773415742945,
+    "username": "technical",
+    "enabled": true,
+    "totp": false,
+    "emailVerified": true,
+    "firstName": "Technical",
+    "lastName": "User",
+    "email": "technical@gmail.com",
+    "attributes": {
+      "tenantId": [
+        "0"
+      ],
+      "userId": [
+        "201b961d-51e9-4eff-8981-60d2a0edb6a8"
+      ]
+    },
+    "disableableCredentialTypes": [],
+    "requiredActions": [],
+    "notBefore": 0,
+    "access": {
+      "manageGroupMembership": true,
+      "view": true,
+      "mapRoles": true,
+      "impersonate": true,
+      "manage": true
+    }
+  }
+]
