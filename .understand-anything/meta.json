@@ -1,0 +1,21 @@
+{
+  "projectRoot": "/Users/nikunjchampakbhairohit/Developer/freelance/Germany/Oriso-frank-client/ORISO/ORISO-Keycloak",
+  "gitCommitHash": "5c82cf34c9518ccecdac2012d9af15338e1e8d66",
+  "generatedAt": "2026-05-28T03:28:07.928Z",
+  "skill": "understand-anything",
+  "scope": "current repository only",
+  "stats": {
+    "filesScanned": 10,
+    "nodes": 152,
+    "edges": 247,
+    "layers": 7,
+    "clients": 7,
+    "realmRoles": 13,
+    "clientScopes": 11,
+    "authFlows": 18
+  },
+  "workingTreeNotes": [
+    "realm.json had pre-existing unstaged modifications and was analyzed as-is.",
+    ".DS_Store was pre-existing and ignored by .understandignore."
+  ]
+}

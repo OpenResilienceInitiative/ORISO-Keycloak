@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant User
+  participant Frontend as ORISO Frontend/Admin
+  participant Keycloak as Keycloak online-beratung
+  participant Backend as ORISO Backend Service
+  User->>Frontend: Open application
+  Frontend->>Keycloak: Redirect to app client login
+  Keycloak->>Keycloak: Browser flow and forms flow
+  Keycloak-->>Frontend: Authorization result and tokens
+  Frontend->>Backend: API request with Bearer access token
+  Backend->>Keycloak: Fetch JWKs when cache misses
+  Backend->>Backend: Validate issuer, signature, roles, tenantId
+  Backend-->>Frontend: Authorized response

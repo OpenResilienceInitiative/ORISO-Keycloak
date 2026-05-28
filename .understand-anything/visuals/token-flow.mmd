@@ -1,0 +1,15 @@
+flowchart TD
+  UserAttrs[Keycloak user attributes] --> AppCustom[app-custom scope]
+  AppCustom --> Username[username claim]
+  AppCustom --> TenantId[tenantId claim]
+  AppCustom --> UserId[userId claim]
+  Roles[Realm role assignments] --> RolesScope[roles scope]
+  RolesScope --> RealmAccess[realm_access.roles]
+  AppClient[app client default scopes] --> AppCustom
+  AppClient --> RolesScope
+  AppClient --> Profile[profile and email scopes]
+  Claims[Access token] --> Services[ORISO backend services]
+  Username --> Claims
+  TenantId --> Claims
+  UserId --> Claims
+  RealmAccess --> Claims

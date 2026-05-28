@@ -1,0 +1,11 @@
+flowchart LR
+  Keycloak[ORISO-Keycloak online-beratung] --> Frontend[ORISO Frontend/Admin]
+  Frontend --> APIs[ORISO Backend Services]
+  APIs --> TenantService[TenantService tenant checks]
+  APIs --> UserService[UserService user/admin rules]
+  APIs --> AgencyService[AgencyService role checks]
+  APIs --> ConsultingType[ConsultingTypeService role checks]
+  Keycloak --> Roles[realm_access.roles]
+  Keycloak --> TenantClaim[tenantId claim]
+  Roles --> APIs
+  TenantClaim --> APIs

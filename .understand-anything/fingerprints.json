@@ -1,0 +1,107 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "5c82cf34c9518ccecdac2012d9af15338e1e8d66",
+  "generatedAt": "2026-05-28T03:28:14.227Z",
+  "files": {
+    "backup/realm-backup.sh": {
+      "filePath": "backup/realm-backup.sh",
+      "contentHash": "b6b412eac4c9e88ee2b473ffcb17624df1e1413ff17d7f6841e135235e8ff295",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 97,
+      "hasStructuralAnalysis": true
+    },
+    "configure-http-access.sh": {
+      "filePath": "configure-http-access.sh",
+      "contentHash": "c95dfe69f1ade6b240e82984449a3407a0d43bfe3ed36a5de387b439595af88f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 94,
+      "hasStructuralAnalysis": true
+    },
+    "DEPLOYMENT.md": {
+      "filePath": "DEPLOYMENT.md",
+      "contentHash": "4b93e1ed70d91d0a67337e5aa71b93f5d50028ad560399ae5791a283274e216e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 395,
+      "hasStructuralAnalysis": true
+    },
+    "ingress.yaml": {
+      "filePath": "ingress.yaml",
+      "contentHash": "835eef98ffbc7556785c0a1feb938a323a8cfa64593f2cecf8602d4bf1c295e8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 28,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-deployment.yaml": {
+      "filePath": "keycloak-deployment.yaml",
+      "contentHash": "2f2b2bfc7428982974ee19a2be160ee8d1dd1e33603cc481d0c305536f9ba460",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 82,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-service.yaml": {
+      "filePath": "keycloak-service.yaml",
+      "contentHash": "a65dd365d8387fa8fb7408591c4fd848d979108d57bb6ed590f91b78c179ed4f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 35,
+      "hasStructuralAnalysis": true
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "40613fc79c6f6198dca7a5fb3ac84333b2b8950db7117f34c30e2dcbf1a690a5",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 217,
+      "hasStructuralAnalysis": true
+    },
+    "realm.json": {
+      "filePath": "realm.json",
+      "contentHash": "483f7cb8354b5b6dcab0bb8a7e650400ced27bc1898d6d5549597ec5a878ff2c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2226,
+      "hasStructuralAnalysis": true
+    },
+    "realm.json.backup-http": {
+      "filePath": "realm.json.backup-http",
+      "contentHash": "cc09c4bb5ed0420d68aefe5c393c1870e7fdac4de2a9861750c5fdc1b10cb177",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2226,
+      "hasStructuralAnalysis": false
+    },
+    "STATUS.md": {
+      "filePath": "STATUS.md",
+      "contentHash": "f377931482f2a485f921d84f714df09187a801ecfe880a4caeed986c2b493d3c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 158,
+      "hasStructuralAnalysis": true
+    }
+  }
+}
