@@ -1,0 +1,11 @@
+# Understand-Anything ignore rules for ORISO-Keycloak
+# Syntax: same as .gitignore.
+
+.understand-anything/
+.git/
+.DS_Store
+*.log
+node_modules/
+target/
+dist/
+build/

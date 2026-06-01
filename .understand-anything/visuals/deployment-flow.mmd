@@ -1,0 +1,9 @@
+flowchart TD
+  Realm[realm.json] --> Import[Realm import]
+  Deployment[keycloak-deployment.yaml] --> Pod[Keycloak pod]
+  Service[keycloak-service.yaml] --> Pod
+  Ingress[ingress.yaml auth.oriso.site] --> Service
+  Pod --> Runtime[Keycloak 20.0.5 start-dev]
+  Configure[configure-http-access.sh] --> Pod
+  Backup[backup/realm-backup.sh] --> Realm
+  Ingress --> Users[Browsers and ORISO clients]

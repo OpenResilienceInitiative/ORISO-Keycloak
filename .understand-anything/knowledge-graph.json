@@ -1,0 +1,4120 @@
+{
+  "version": "1.0.0",
+  "kind": "codebase",
+  "project": {
+    "name": "ORISO-Keycloak",
+    "languages": [
+      "JSON",
+      "YAML",
+      "Shell",
+      "Markdown"
+    ],
+    "frameworks": [
+      "Keycloak 20.0.5",
+      "OpenID Connect",
+      "OAuth2",
+      "Kubernetes",
+      "Traefik Ingress",
+      "cert-manager"
+    ],
+    "description": "Keycloak realm and deployment configuration for ORISO identity, authentication, authorization, token issuance, and IAM integration.",
+    "analyzedAt": "2026-05-28T03:28:07.928Z",
+    "gitCommitHash": "5c82cf34c9518ccecdac2012d9af15338e1e8d66"
+  },
+  "nodes": [
+    {
+      "complexity": "moderate",
+      "tags": [
+        "scope",
+        "claims"
+      ],
+      "id": "concept:app-custom-scope",
+      "type": "concept",
+      "name": "app-custom scope",
+      "summary": "The app-custom client scope maps username, tenantId, and userId user attributes into access, ID, and userinfo tokens."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "backend",
+        "jwt"
+      ],
+      "id": "concept:backend-token-validation",
+      "type": "concept",
+      "name": "Backend token validation",
+      "summary": "Backend services validate JWTs through the realm issuer URI and JWK set URI, then read roles and tenant/user claims."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "risk",
+        "environment"
+      ],
+      "id": "concept:environment-drift",
+      "type": "concept",
+      "name": "Environment drift",
+      "summary": "Docs reference direct IPs, Nginx /auth proxy paths, auth.oriso.site ingress, current realm sslRequired=external, and scripts that set sslRequired=NONE."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "frontend",
+        "oidc"
+      ],
+      "id": "concept:frontend-oidc-login",
+      "type": "concept",
+      "name": "Frontend OIDC login",
+      "summary": "Frontend/admin clients authenticate through the public app client using browser-based OIDC authorization code flow."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "http",
+        "tls"
+      ],
+      "id": "concept:http-access-mode",
+      "type": "concept",
+      "name": "HTTP access mode",
+      "summary": "Docs and scripts intentionally disable SSL requirement for internal HTTP access while relying on proxy/TLS termination."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "kcadm",
+        "automation"
+      ],
+      "id": "concept:kcadm-admin-automation",
+      "type": "concept",
+      "name": "kcadm admin automation",
+      "summary": "configure-http-access.sh and backup/realm-backup.sh use kcadm inside the running Keycloak pod to change realm settings and export configuration."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "iam",
+        "keycloak"
+      ],
+      "id": "concept:keycloak-central-iam",
+      "type": "concept",
+      "name": "Keycloak as central IAM",
+      "summary": "ORISO-Keycloak is the identity provider for ORISO services, issuing OIDC tokens and centralizing user role management."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "groups",
+        "gap"
+      ],
+      "id": "concept:no-groups-configured",
+      "type": "concept",
+      "name": "No groups configured",
+      "summary": "realm.json exports an empty groups array; group-based authorization is not currently modeled in this repository."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "sso",
+        "idp"
+      ],
+      "id": "concept:no-identity-providers",
+      "type": "concept",
+      "name": "No external identity providers",
+      "summary": "identityProviders is empty; SSO is internal to Keycloak, with no Google/Azure/SAML/social broker configured in this realm export."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "realm"
+      ],
+      "id": "concept:online-beratung-realm",
+      "type": "concept",
+      "name": "online-beratung realm",
+      "summary": "The online-beratung realm is the tenant for ORISO identity configuration in realm.json."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "roles",
+        "authorization"
+      ],
+      "id": "concept:realm-roles-authorization",
+      "type": "concept",
+      "name": "Realm roles authorization",
+      "summary": "ORISO authorization is role-driven through realm_access.roles, including tenant-admin, agency-admin, consultant, user, and technical roles."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "risk",
+        "secret"
+      ],
+      "id": "concept:risk-hardcoded-admin",
+      "type": "concept",
+      "name": "Hardcoded admin credentials",
+      "summary": "keycloak-deployment.yaml and scripts use admin/admin directly instead of Kubernetes Secrets."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "risk",
+        "tokens"
+      ],
+      "id": "concept:risk-long-tokens",
+      "type": "concept",
+      "name": "Long token lifetimes",
+      "summary": "Access tokens last 18000 seconds and implicit-flow access token lifespan is 54000 seconds, increasing exposure if tokens leak."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "risk",
+        "deployment"
+      ],
+      "id": "concept:risk-start-dev",
+      "type": "concept",
+      "name": "start-dev runtime risk",
+      "summary": "The Deployment runs Keycloak with start-dev, no external database configuration, no probes, no resource limits, and hostNetwork enabled."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "risk",
+        "realm"
+      ],
+      "id": "concept:risk-weak-realm-defaults",
+      "type": "concept",
+      "name": "Weak realm security defaults",
+      "summary": "Brute force protection, password policy, email verification, event logging, and admin event logging are disabled or absent."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "risk",
+        "oidc"
+      ],
+      "id": "concept:risk-wide-redirects",
+      "type": "concept",
+      "name": "Wide redirect and CORS risk",
+      "summary": "The app client allows wildcard redirect URI and web origin entries, plus localhost and public IP HTTP origins."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "tenant",
+        "claim"
+      ],
+      "id": "concept:tenant-isolation-claim",
+      "type": "concept",
+      "name": "Tenant isolation by tenantId claim",
+      "summary": "Tenant isolation is represented by a user attribute mapped into the tenantId token claim; services enforce tenant boundaries from the token, not Keycloak groups."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "json",
+        "config"
+      ],
+      "id": "config:realm.json",
+      "type": "config",
+      "name": "realm.json",
+      "filePath": "realm.json",
+      "lineRange": [
+        1,
+        2225
+      ],
+      "summary": "Current Keycloak realm export for online-beratung."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "backup-http",
+        "code"
+      ],
+      "id": "config:realm.json.backup-http",
+      "type": "config",
+      "name": "realm.json.backup-http",
+      "filePath": "realm.json.backup-http",
+      "lineRange": [
+        1,
+        2225
+      ],
+      "summary": "Backup copy of the HTTP-enabled realm export."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "markdown",
+        "docs"
+      ],
+      "id": "document:DEPLOYMENT.md",
+      "type": "document",
+      "name": "DEPLOYMENT.md",
+      "filePath": "DEPLOYMENT.md",
+      "lineRange": [
+        1,
+        394
+      ],
+      "summary": "DEPLOYMENT.md documents or supports the ORISO-Keycloak IAM setup."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "markdown",
+        "docs"
+      ],
+      "id": "document:README.md",
+      "type": "document",
+      "name": "README.md",
+      "filePath": "README.md",
+      "lineRange": [
+        1,
+        216
+      ],
+      "summary": "README.md documents or supports the ORISO-Keycloak IAM setup."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "markdown",
+        "docs"
+      ],
+      "id": "document:STATUS.md",
+      "type": "document",
+      "name": "STATUS.md",
+      "filePath": "STATUS.md",
+      "lineRange": [
+        1,
+        157
+      ],
+      "summary": "STATUS.md documents or supports the ORISO-Keycloak IAM setup."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client",
+        "openid-connect",
+        "standard-flow",
+        "public-client"
+      ],
+      "id": "endpoint:realm.json:client:account",
+      "type": "endpoint",
+      "name": "client:account",
+      "filePath": "realm.json",
+      "summary": "OIDC client account; public=true, bearerOnly=false, standardFlow=true, directGrant=false."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client",
+        "openid-connect",
+        "standard-flow",
+        "public-client"
+      ],
+      "id": "endpoint:realm.json:client:account-console",
+      "type": "endpoint",
+      "name": "client:account-console",
+      "filePath": "realm.json",
+      "summary": "OIDC client account-console; public=true, bearerOnly=false, standardFlow=true, directGrant=false."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client",
+        "openid-connect",
+        "direct-grant",
+        "public-client"
+      ],
+      "id": "endpoint:realm.json:client:admin-cli",
+      "type": "endpoint",
+      "name": "client:admin-cli",
+      "filePath": "realm.json",
+      "summary": "OIDC client admin-cli; public=true, bearerOnly=false, standardFlow=false, directGrant=true."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "client",
+        "openid-connect",
+        "standard-flow",
+        "direct-grant",
+        "public-client"
+      ],
+      "id": "endpoint:realm.json:client:app",
+      "type": "endpoint",
+      "name": "client:app",
+      "filePath": "realm.json",
+      "summary": "OIDC client app; public=true, bearerOnly=false, standardFlow=true, directGrant=true."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client",
+        "openid-connect",
+        "standard-flow",
+        "bearer-only"
+      ],
+      "id": "endpoint:realm.json:client:broker",
+      "type": "endpoint",
+      "name": "client:broker",
+      "filePath": "realm.json",
+      "summary": "OIDC client broker; public=false, bearerOnly=true, standardFlow=true, directGrant=false."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client",
+        "openid-connect",
+        "standard-flow",
+        "bearer-only"
+      ],
+      "id": "endpoint:realm.json:client:realm-management",
+      "type": "endpoint",
+      "name": "client:realm-management",
+      "filePath": "realm.json",
+      "summary": "OIDC client realm-management; public=false, bearerOnly=true, standardFlow=true, directGrant=false."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client",
+        "openid-connect",
+        "standard-flow",
+        "public-client"
+      ],
+      "id": "endpoint:realm.json:client:security-admin-console",
+      "type": "endpoint",
+      "name": "client:security-admin-console",
+      "filePath": "realm.json",
+      "summary": "OIDC client security-admin-console; public=true, bearerOnly=false, standardFlow=true, directGrant=false."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "required-action",
+        "enabled"
+      ],
+      "id": "entity:realm.json:required-action:CONFIGURE_TOTP",
+      "type": "entity",
+      "name": "CONFIGURE_TOTP",
+      "filePath": "realm.json",
+      "summary": "Required action CONFIGURE_TOTP; enabled=true, defaultAction=false."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "required-action",
+        "disabled"
+      ],
+      "id": "entity:realm.json:required-action:delete_account",
+      "type": "entity",
+      "name": "delete_account",
+      "filePath": "realm.json",
+      "summary": "Required action delete_account; enabled=false, defaultAction=false."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "required-action",
+        "disabled"
+      ],
+      "id": "entity:realm.json:required-action:terms_and_conditions",
+      "type": "entity",
+      "name": "terms_and_conditions",
+      "filePath": "realm.json",
+      "summary": "Required action terms_and_conditions; enabled=false, defaultAction=false."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "required-action",
+        "enabled"
+      ],
+      "id": "entity:realm.json:required-action:UPDATE_PASSWORD",
+      "type": "entity",
+      "name": "UPDATE_PASSWORD",
+      "filePath": "realm.json",
+      "summary": "Required action UPDATE_PASSWORD; enabled=true, defaultAction=false."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "required-action",
+        "enabled"
+      ],
+      "id": "entity:realm.json:required-action:UPDATE_PROFILE",
+      "type": "entity",
+      "name": "UPDATE_PROFILE",
+      "filePath": "realm.json",
+      "summary": "Required action UPDATE_PROFILE; enabled=true, defaultAction=false."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "required-action",
+        "enabled"
+      ],
+      "id": "entity:realm.json:required-action:VERIFY_EMAIL",
+      "type": "entity",
+      "name": "VERIFY_EMAIL",
+      "filePath": "realm.json",
+      "summary": "Required action VERIFY_EMAIL; enabled=true, defaultAction=false."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:agency-admin",
+      "type": "entity",
+      "name": "agency-admin",
+      "filePath": "realm.json",
+      "summary": "Realm role agency-admin."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:consultant",
+      "type": "entity",
+      "name": "consultant",
+      "filePath": "realm.json",
+      "summary": "Realm role consultant."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "realm-role",
+        "composite"
+      ],
+      "id": "entity:realm.json:role:default-roles-online-beratung",
+      "type": "entity",
+      "name": "default-roles-online-beratung",
+      "filePath": "realm.json",
+      "summary": "Realm role default-roles-online-beratung is composite."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:offline_access",
+      "type": "entity",
+      "name": "offline_access",
+      "filePath": "realm.json",
+      "summary": "Realm role offline_access."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:single-tenant-admin",
+      "type": "entity",
+      "name": "single-tenant-admin",
+      "filePath": "realm.json",
+      "summary": "Realm role single-tenant-admin."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:technical",
+      "type": "entity",
+      "name": "technical",
+      "filePath": "realm.json",
+      "summary": "Realm role technical."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:TECHNICAL_DEFAULT",
+      "type": "entity",
+      "name": "TECHNICAL_DEFAULT",
+      "filePath": "realm.json",
+      "summary": "Realm role TECHNICAL_DEFAULT."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:tenant-admin",
+      "type": "entity",
+      "name": "tenant-admin",
+      "filePath": "realm.json",
+      "summary": "Realm role tenant-admin."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:topic-admin",
+      "type": "entity",
+      "name": "topic-admin",
+      "filePath": "realm.json",
+      "summary": "Realm role topic-admin."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:uma_authorization",
+      "type": "entity",
+      "name": "uma_authorization",
+      "filePath": "realm.json",
+      "summary": "Realm role uma_authorization."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:user",
+      "type": "entity",
+      "name": "user",
+      "filePath": "realm.json",
+      "summary": "Realm role user."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:USER_ADMIN",
+      "type": "entity",
+      "name": "USER_ADMIN",
+      "filePath": "realm.json",
+      "summary": "Realm role USER_ADMIN."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "realm-role",
+        "atomic"
+      ],
+      "id": "entity:realm.json:role:user-admin",
+      "type": "entity",
+      "name": "user-admin",
+      "filePath": "realm.json",
+      "summary": "Realm role user-admin."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "domain-flow"
+      ],
+      "id": "flow:admin-setup",
+      "type": "flow",
+      "name": "Admin Setup",
+      "summary": "DevOps deploys Keycloak, imports realm.json, applies HTTP access settings if needed, and backs up realm changes through kcadm scripts."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "domain-flow"
+      ],
+      "id": "flow:backend-api-call",
+      "type": "flow",
+      "name": "Backend API Authorization",
+      "summary": "The frontend sends the access token as a bearer token; Spring Boot services validate issuer/JWK and read realm roles plus tenant/user claims."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "domain-flow"
+      ],
+      "id": "flow:developer-login",
+      "type": "flow",
+      "name": "Developer/Admin Frontend Login",
+      "summary": "A browser user opens an ORISO frontend/admin app, is redirected to the app client in Keycloak, authenticates, receives tokens, and returns to the frontend."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:browser",
+      "type": "flow",
+      "name": "browser",
+      "filePath": "realm.json",
+      "summary": "browser based authentication"
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:clients",
+      "type": "flow",
+      "name": "clients",
+      "filePath": "realm.json",
+      "summary": "Base authentication for clients"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:direct-grant",
+      "type": "flow",
+      "name": "direct grant",
+      "filePath": "realm.json",
+      "summary": "OpenID Connect Resource Owner Grant"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:direct-grant-direct-grant-validate-otp-conditional",
+      "type": "flow",
+      "name": "direct grant - direct-grant-validate-otp - Conditional",
+      "filePath": "realm.json",
+      "summary": "Flow to determine if the direct-grant-validate-otp authenticator should be used or not."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:docker-auth",
+      "type": "flow",
+      "name": "docker auth",
+      "filePath": "realm.json",
+      "summary": "Used by Docker clients to authenticate against the IDP"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:first-broker-login",
+      "type": "flow",
+      "name": "first broker login",
+      "filePath": "realm.json",
+      "summary": "Actions taken after first broker login with identity provider account, which is not yet linked to any Keycloak account"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:first-broker-login-alternatives-0",
+      "type": "flow",
+      "name": "first broker login - Alternatives - 0",
+      "filePath": "realm.json",
+      "summary": "Subflow of first broker login with alternative executions"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:forms",
+      "type": "flow",
+      "name": "forms",
+      "filePath": "realm.json",
+      "summary": "Username, password, otp and other auth forms."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:forms-auth-otp-form-conditional",
+      "type": "flow",
+      "name": "forms - auth-otp-form - Conditional",
+      "filePath": "realm.json",
+      "summary": "Flow to determine if the auth-otp-form authenticator should be used or not."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:handle-existing-account",
+      "type": "flow",
+      "name": "Handle Existing Account",
+      "filePath": "realm.json",
+      "summary": "Handle what to do if there is existing account with same email/username like authenticated identity provider"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:handle-existing-account-alternatives-0",
+      "type": "flow",
+      "name": "Handle Existing Account - Alternatives - 0",
+      "filePath": "realm.json",
+      "summary": "Subflow of Handle Existing Account with alternative executions"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:registration",
+      "type": "flow",
+      "name": "registration",
+      "filePath": "realm.json",
+      "summary": "registration flow"
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:registration-form",
+      "type": "flow",
+      "name": "registration form",
+      "filePath": "realm.json",
+      "summary": "registration form"
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:reset-credentials",
+      "type": "flow",
+      "name": "reset credentials",
+      "filePath": "realm.json",
+      "summary": "Reset credentials for a user if they forgot their password or something"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:reset-credentials-reset-otp-conditional",
+      "type": "flow",
+      "name": "reset credentials - reset-otp - Conditional",
+      "filePath": "realm.json",
+      "summary": "Flow to determine if the reset-otp authenticator should be used or not."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "top-level"
+      ],
+      "id": "flow:realm.json:saml-ecp",
+      "type": "flow",
+      "name": "saml ecp",
+      "filePath": "realm.json",
+      "summary": "SAML ECP Profile Authentication Flow"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:verify-existing-account-by-re-authentication",
+      "type": "flow",
+      "name": "Verify Existing Account by Re-authentication",
+      "filePath": "realm.json",
+      "summary": "Reauthentication of existing account"
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth-flow",
+        "nested"
+      ],
+      "id": "flow:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional",
+      "type": "flow",
+      "name": "Verify Existing Account by Re-authentication - auth-otp-form - Conditional",
+      "filePath": "realm.json",
+      "summary": "Flow to determine if the auth-otp-form authenticator should be used or not."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "domain-flow"
+      ],
+      "id": "flow:tenant-isolation",
+      "type": "flow",
+      "name": "Tenant Isolation",
+      "summary": "tenantId is stored as a Keycloak user attribute, emitted through app-custom, and enforced by backend services such as TenantService."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "auth",
+        "flows"
+      ],
+      "id": "module:authentication-flows",
+      "type": "module",
+      "name": "Authentication Flows",
+      "summary": "Browser, direct grant, registration, reset credentials, client, and Docker auth flows exported from the realm."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "kubernetes",
+        "deployment"
+      ],
+      "id": "module:kubernetes-runtime",
+      "type": "module",
+      "name": "Kubernetes Runtime",
+      "summary": "Deployment, Service, Ingress, namespace, host networking, hostname, proxy, and TLS configuration."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "oidc",
+        "clients"
+      ],
+      "id": "module:oidc-clients",
+      "type": "module",
+      "name": "OIDC Clients",
+      "summary": "Keycloak clients used by the ORISO frontend, admin console, CLI, account console, and built-in realm management."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "operations",
+        "devops"
+      ],
+      "id": "module:operations",
+      "type": "module",
+      "name": "Operations and Admin Scripts",
+      "summary": "HTTP access setup, realm export/backup, deployment documentation, and status notes."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "oriso",
+        "integration"
+      ],
+      "id": "module:oriso-integration",
+      "type": "module",
+      "name": "ORISO Service Integration",
+      "summary": "How ORISO frontend, admin, and backend services authenticate against the realm and validate tokens."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "realm",
+        "iam"
+      ],
+      "id": "module:realm-configuration",
+      "type": "module",
+      "name": "Realm Configuration",
+      "summary": "The online-beratung Keycloak realm, clients, scopes, roles, flows, token settings, and user-attribute mappers."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "risk",
+        "security"
+      ],
+      "id": "module:risk-map",
+      "type": "module",
+      "name": "Security Risk Map",
+      "summary": "Hardcoded secrets, weak defaults, production gaps, and unclear environment ownership."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "roles",
+        "authorization"
+      ],
+      "id": "module:roles-permissions",
+      "type": "module",
+      "name": "Roles and Permissions",
+      "summary": "Realm roles and built-in client roles that ORISO services consume from JWT claims."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "token",
+        "claims"
+      ],
+      "id": "module:token-claims",
+      "type": "module",
+      "name": "Token Claims and Scopes",
+      "summary": "Default and optional client scopes that put roles, username, tenantId, userId, profile, and email into tokens."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "shell",
+        "script"
+      ],
+      "id": "pipeline:backup/realm-backup.sh",
+      "type": "pipeline",
+      "name": "realm-backup.sh",
+      "filePath": "backup/realm-backup.sh",
+      "lineRange": [
+        1,
+        96
+      ],
+      "summary": "Script for exporting the online-beratung realm from a running Keycloak pod."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "shell",
+        "script"
+      ],
+      "id": "pipeline:configure-http-access.sh",
+      "type": "pipeline",
+      "name": "configure-http-access.sh",
+      "filePath": "configure-http-access.sh",
+      "lineRange": [
+        1,
+        93
+      ],
+      "summary": "Post-deployment script that disables realm SSL requirement through kcadm."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "realm",
+        "keycloak"
+      ],
+      "id": "realm:online-beratung",
+      "type": "domain",
+      "name": "online-beratung",
+      "summary": "Keycloak realm containing ORISO clients, realm roles, token scopes, and authentication flows.",
+      "domainMeta": {
+        "entities": [
+          "clients",
+          "realm roles",
+          "client scopes",
+          "authentication flows",
+          "required actions"
+        ],
+        "businessRules": [
+          "Tokens are issued by the online-beratung realm.",
+          "Tenant isolation depends on tenantId being present as a user attribute and token claim.",
+          "ORISO services consume realm_access.roles and custom user claims from JWTs."
+        ],
+        "crossDomainInteractions": [
+          "ORISO frontend",
+          "ORISO admin",
+          "Spring Boot backend services",
+          "Kubernetes ingress/proxy"
+        ],
+        "entryPoint": "realm.json",
+        "entryType": "http"
+      }
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "yaml",
+        "config"
+      ],
+      "id": "resource:ingress.yaml",
+      "type": "resource",
+      "name": "ingress.yaml",
+      "filePath": "ingress.yaml",
+      "lineRange": [
+        1,
+        27
+      ],
+      "summary": "Ingress rule and TLS secret reference for auth.oriso.site."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "yaml",
+        "config"
+      ],
+      "id": "resource:keycloak-deployment.yaml",
+      "type": "resource",
+      "name": "keycloak-deployment.yaml",
+      "filePath": "keycloak-deployment.yaml",
+      "lineRange": [
+        1,
+        81
+      ],
+      "summary": "Kubernetes Deployment for the Keycloak pod."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "yaml",
+        "config"
+      ],
+      "id": "resource:keycloak-service.yaml",
+      "type": "resource",
+      "name": "keycloak-service.yaml",
+      "filePath": "keycloak-service.yaml",
+      "lineRange": [
+        1,
+        34
+      ],
+      "summary": "Kubernetes ClusterIP Service for Keycloak HTTP and HTTPS ports."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:acr",
+      "type": "schema",
+      "name": "scope:acr",
+      "filePath": "realm.json",
+      "summary": "Client scope acr with mappers: acr loa level."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:address",
+      "type": "schema",
+      "name": "scope:address",
+      "filePath": "realm.json",
+      "summary": "Client scope address with mappers: address."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:app-custom",
+      "type": "schema",
+      "name": "scope:app-custom",
+      "filePath": "realm.json",
+      "summary": "Client scope app-custom with mappers: username, tenantId, userId."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:email",
+      "type": "schema",
+      "name": "scope:email",
+      "filePath": "realm.json",
+      "summary": "Client scope email with mappers: email verified, email."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:microprofile-jwt",
+      "type": "schema",
+      "name": "scope:microprofile-jwt",
+      "filePath": "realm.json",
+      "summary": "Client scope microprofile-jwt with mappers: groups, upn."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:offline_access",
+      "type": "schema",
+      "name": "scope:offline_access",
+      "filePath": "realm.json",
+      "summary": "Client scope offline_access with mappers: none."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:phone",
+      "type": "schema",
+      "name": "scope:phone",
+      "filePath": "realm.json",
+      "summary": "Client scope phone with mappers: phone number, phone number verified."
+    },
+    {
+      "complexity": "complex",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:profile",
+      "type": "schema",
+      "name": "scope:profile",
+      "filePath": "realm.json",
+      "summary": "Client scope profile with mappers: full name, picture, zoneinfo, profile, gender, username, middle name, website, family name, given name, updated at, birthdate, nickname, locale."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "saml"
+      ],
+      "id": "schema:realm.json:scope:role_list",
+      "type": "schema",
+      "name": "scope:role_list",
+      "filePath": "realm.json",
+      "summary": "Client scope role_list with mappers: role list."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:roles",
+      "type": "schema",
+      "name": "scope:roles",
+      "filePath": "realm.json",
+      "summary": "Client scope roles with mappers: realm roles, audience resolve, client roles."
+    },
+    {
+      "complexity": "moderate",
+      "tags": [
+        "client-scope",
+        "openid-connect"
+      ],
+      "id": "schema:realm.json:scope:web-origins",
+      "type": "schema",
+      "name": "scope:web-origins",
+      "filePath": "realm.json",
+      "summary": "Client scope web-origins with mappers: allowed web origins."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:admin-setup:backup",
+      "type": "step",
+      "name": "Back up realm",
+      "summary": "Use backup/realm-backup.sh or admin console exports to keep realm.json current."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:admin-setup:deploy",
+      "type": "step",
+      "name": "Deploy Keycloak",
+      "summary": "Apply Deployment, Service, and optionally Ingress manifests."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:admin-setup:http",
+      "type": "step",
+      "name": "Configure HTTP access",
+      "summary": "Run configure-http-access.sh if the environment requires sslRequired=NONE behind a proxy."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:admin-setup:import",
+      "type": "step",
+      "name": "Import realm",
+      "summary": "Import realm.json into Keycloak using the admin console or startup import."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:backend-api-call:authorize",
+      "type": "step",
+      "name": "Authorize request",
+      "summary": "Services map realm roles and tenant claims into service-specific permissions."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:backend-api-call:bearer",
+      "type": "step",
+      "name": "Send bearer token",
+      "summary": "Frontend sends Authorization: Bearer <token> to ORISO backend services."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:backend-api-call:validate",
+      "type": "step",
+      "name": "Validate JWT",
+      "summary": "Services validate issuer URI and JWK set from online-beratung."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:developer-login:authenticate",
+      "type": "step",
+      "name": "Authenticate user",
+      "summary": "The browser flow checks existing cookies, identity-provider redirect, then username/password forms with conditional OTP."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:developer-login:issue-token",
+      "type": "step",
+      "name": "Issue tokens",
+      "summary": "Keycloak issues access and ID tokens with default client scopes including app-custom and roles."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:developer-login:redirect",
+      "type": "step",
+      "name": "Redirect to Keycloak",
+      "summary": "Frontend initializes Keycloak with realm online-beratung and client app, then redirects to browser login."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:developer-login:return",
+      "type": "step",
+      "name": "Return to frontend",
+      "summary": "The frontend receives tokens and stores runtime auth state for API calls."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:browser:auth-cookie:10",
+      "type": "step",
+      "name": "auth-cookie",
+      "filePath": "realm.json",
+      "summary": "auth-cookie runs in browser with requirement ALTERNATIVE and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "DISABLED"
+      ],
+      "id": "step:realm.json:browser:auth-spnego:20",
+      "type": "step",
+      "name": "auth-spnego",
+      "filePath": "realm.json",
+      "summary": "auth-spnego runs in browser with requirement DISABLED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:browser:forms:30",
+      "type": "step",
+      "name": "forms",
+      "filePath": "realm.json",
+      "summary": "forms runs in browser with requirement ALTERNATIVE and priority 30."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:browser:identity-provider-redirector:25",
+      "type": "step",
+      "name": "identity-provider-redirector",
+      "filePath": "realm.json",
+      "summary": "identity-provider-redirector runs in browser with requirement ALTERNATIVE and priority 25."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:clients:client-jwt:20",
+      "type": "step",
+      "name": "client-jwt",
+      "filePath": "realm.json",
+      "summary": "client-jwt runs in clients with requirement ALTERNATIVE and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:clients:client-secret-jwt:30",
+      "type": "step",
+      "name": "client-secret-jwt",
+      "filePath": "realm.json",
+      "summary": "client-secret-jwt runs in clients with requirement ALTERNATIVE and priority 30."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:clients:client-secret:10",
+      "type": "step",
+      "name": "client-secret",
+      "filePath": "realm.json",
+      "summary": "client-secret runs in clients with requirement ALTERNATIVE and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:clients:client-x509:40",
+      "type": "step",
+      "name": "client-x509",
+      "filePath": "realm.json",
+      "summary": "client-x509 runs in clients with requirement ALTERNATIVE and priority 40."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:direct-grant-direct-grant-validate-otp-conditional:conditional-user-configured:10",
+      "type": "step",
+      "name": "conditional-user-configured",
+      "filePath": "realm.json",
+      "summary": "conditional-user-configured runs in direct grant - direct-grant-validate-otp - Conditional with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:direct-grant-direct-grant-validate-otp-conditional:direct-grant-validate-otp:20",
+      "type": "step",
+      "name": "direct-grant-validate-otp",
+      "filePath": "realm.json",
+      "summary": "direct-grant-validate-otp runs in direct grant - direct-grant-validate-otp - Conditional with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "CONDITIONAL"
+      ],
+      "id": "step:realm.json:direct-grant:direct-grant-direct-grant-validate-otp-conditional:30",
+      "type": "step",
+      "name": "direct grant - direct-grant-validate-otp - Conditional",
+      "filePath": "realm.json",
+      "summary": "direct grant - direct-grant-validate-otp - Conditional runs in direct grant with requirement CONDITIONAL and priority 30."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:direct-grant:direct-grant-validate-password:20",
+      "type": "step",
+      "name": "direct-grant-validate-password",
+      "filePath": "realm.json",
+      "summary": "direct-grant-validate-password runs in direct grant with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:direct-grant:direct-grant-validate-username:10",
+      "type": "step",
+      "name": "direct-grant-validate-username",
+      "filePath": "realm.json",
+      "summary": "direct-grant-validate-username runs in direct grant with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:docker-auth:docker-http-basic-authenticator:10",
+      "type": "step",
+      "name": "docker-http-basic-authenticator",
+      "filePath": "realm.json",
+      "summary": "docker-http-basic-authenticator runs in docker auth with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:first-broker-login-alternatives-0:handle-existing-account:20",
+      "type": "step",
+      "name": "Handle Existing Account",
+      "filePath": "realm.json",
+      "summary": "Handle Existing Account runs in first broker login - Alternatives - 0 with requirement ALTERNATIVE and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:first-broker-login-alternatives-0:idp-create-user-if-unique:10",
+      "type": "step",
+      "name": "idp-create-user-if-unique",
+      "filePath": "realm.json",
+      "summary": "idp-create-user-if-unique runs in first broker login - Alternatives - 0 with requirement ALTERNATIVE and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:first-broker-login:first-broker-login-alternatives-0:20",
+      "type": "step",
+      "name": "first broker login - Alternatives - 0",
+      "filePath": "realm.json",
+      "summary": "first broker login - Alternatives - 0 runs in first broker login with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:first-broker-login:idp-review-profile:10",
+      "type": "step",
+      "name": "idp-review-profile",
+      "filePath": "realm.json",
+      "summary": "idp-review-profile runs in first broker login with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:forms-auth-otp-form-conditional:auth-otp-form:20",
+      "type": "step",
+      "name": "auth-otp-form",
+      "filePath": "realm.json",
+      "summary": "auth-otp-form runs in forms - auth-otp-form - Conditional with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:forms-auth-otp-form-conditional:conditional-user-configured:10",
+      "type": "step",
+      "name": "conditional-user-configured",
+      "filePath": "realm.json",
+      "summary": "conditional-user-configured runs in forms - auth-otp-form - Conditional with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:forms:auth-username-password-form:10",
+      "type": "step",
+      "name": "auth-username-password-form",
+      "filePath": "realm.json",
+      "summary": "auth-username-password-form runs in forms with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "CONDITIONAL"
+      ],
+      "id": "step:realm.json:forms:forms-auth-otp-form-conditional:20",
+      "type": "step",
+      "name": "forms - auth-otp-form - Conditional",
+      "filePath": "realm.json",
+      "summary": "forms - auth-otp-form - Conditional runs in forms with requirement CONDITIONAL and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:handle-existing-account-alternatives-0:idp-email-verification:10",
+      "type": "step",
+      "name": "idp-email-verification",
+      "filePath": "realm.json",
+      "summary": "idp-email-verification runs in Handle Existing Account - Alternatives - 0 with requirement ALTERNATIVE and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "ALTERNATIVE"
+      ],
+      "id": "step:realm.json:handle-existing-account-alternatives-0:verify-existing-account-by-re-authentication:20",
+      "type": "step",
+      "name": "Verify Existing Account by Re-authentication",
+      "filePath": "realm.json",
+      "summary": "Verify Existing Account by Re-authentication runs in Handle Existing Account - Alternatives - 0 with requirement ALTERNATIVE and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:handle-existing-account:handle-existing-account-alternatives-0:20",
+      "type": "step",
+      "name": "Handle Existing Account - Alternatives - 0",
+      "filePath": "realm.json",
+      "summary": "Handle Existing Account - Alternatives - 0 runs in Handle Existing Account with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:handle-existing-account:idp-confirm-link:10",
+      "type": "step",
+      "name": "idp-confirm-link",
+      "filePath": "realm.json",
+      "summary": "idp-confirm-link runs in Handle Existing Account with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:registration-form:registration-password-action:50",
+      "type": "step",
+      "name": "registration-password-action",
+      "filePath": "realm.json",
+      "summary": "registration-password-action runs in registration form with requirement REQUIRED and priority 50."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:registration-form:registration-profile-action:40",
+      "type": "step",
+      "name": "registration-profile-action",
+      "filePath": "realm.json",
+      "summary": "registration-profile-action runs in registration form with requirement REQUIRED and priority 40."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "DISABLED"
+      ],
+      "id": "step:realm.json:registration-form:registration-recaptcha-action:60",
+      "type": "step",
+      "name": "registration-recaptcha-action",
+      "filePath": "realm.json",
+      "summary": "registration-recaptcha-action runs in registration form with requirement DISABLED and priority 60."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:registration-form:registration-user-creation:20",
+      "type": "step",
+      "name": "registration-user-creation",
+      "filePath": "realm.json",
+      "summary": "registration-user-creation runs in registration form with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:registration:registration-page-form:10",
+      "type": "step",
+      "name": "registration-page-form",
+      "filePath": "realm.json",
+      "summary": "registration-page-form runs in registration with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:reset-credentials-reset-otp-conditional:conditional-user-configured:10",
+      "type": "step",
+      "name": "conditional-user-configured",
+      "filePath": "realm.json",
+      "summary": "conditional-user-configured runs in reset credentials - reset-otp - Conditional with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:reset-credentials-reset-otp-conditional:reset-otp:20",
+      "type": "step",
+      "name": "reset-otp",
+      "filePath": "realm.json",
+      "summary": "reset-otp runs in reset credentials - reset-otp - Conditional with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:reset-credentials:reset-credential-email:20",
+      "type": "step",
+      "name": "reset-credential-email",
+      "filePath": "realm.json",
+      "summary": "reset-credential-email runs in reset credentials with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:reset-credentials:reset-credentials-choose-user:10",
+      "type": "step",
+      "name": "reset-credentials-choose-user",
+      "filePath": "realm.json",
+      "summary": "reset-credentials-choose-user runs in reset credentials with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "CONDITIONAL"
+      ],
+      "id": "step:realm.json:reset-credentials:reset-credentials-reset-otp-conditional:40",
+      "type": "step",
+      "name": "reset credentials - reset-otp - Conditional",
+      "filePath": "realm.json",
+      "summary": "reset credentials - reset-otp - Conditional runs in reset credentials with requirement CONDITIONAL and priority 40."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:reset-credentials:reset-password:30",
+      "type": "step",
+      "name": "reset-password",
+      "filePath": "realm.json",
+      "summary": "reset-password runs in reset credentials with requirement REQUIRED and priority 30."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:saml-ecp:http-basic-authenticator:10",
+      "type": "step",
+      "name": "http-basic-authenticator",
+      "filePath": "realm.json",
+      "summary": "http-basic-authenticator runs in saml ecp with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional:auth-otp-form:20",
+      "type": "step",
+      "name": "auth-otp-form",
+      "filePath": "realm.json",
+      "summary": "auth-otp-form runs in Verify Existing Account by Re-authentication - auth-otp-form - Conditional with requirement REQUIRED and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional:conditional-user-configured:10",
+      "type": "step",
+      "name": "conditional-user-configured",
+      "filePath": "realm.json",
+      "summary": "conditional-user-configured runs in Verify Existing Account by Re-authentication - auth-otp-form - Conditional with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "REQUIRED"
+      ],
+      "id": "step:realm.json:verify-existing-account-by-re-authentication:idp-username-password-form:10",
+      "type": "step",
+      "name": "idp-username-password-form",
+      "filePath": "realm.json",
+      "summary": "idp-username-password-form runs in Verify Existing Account by Re-authentication with requirement REQUIRED and priority 10."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "auth-execution",
+        "CONDITIONAL"
+      ],
+      "id": "step:realm.json:verify-existing-account-by-re-authentication:verify-existing-account-by-re-authentication-auth-otp-form-conditional:20",
+      "type": "step",
+      "name": "Verify Existing Account by Re-authentication - auth-otp-form - Conditional",
+      "filePath": "realm.json",
+      "summary": "Verify Existing Account by Re-authentication - auth-otp-form - Conditional runs in Verify Existing Account by Re-authentication with requirement CONDITIONAL and priority 20."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:tenant-isolation:attribute",
+      "type": "step",
+      "name": "Maintain tenantId attribute",
+      "summary": "A user's Keycloak profile must carry tenantId for tenant-aware backend checks."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:tenant-isolation:enforce",
+      "type": "step",
+      "name": "Enforce in services",
+      "summary": "Backends compare requested tenant context to the token tenantId and role set."
+    },
+    {
+      "complexity": "simple",
+      "tags": [
+        "onboarding-step"
+      ],
+      "id": "step:tenant-isolation:mapper",
+      "type": "step",
+      "name": "Map tenantId claim",
+      "summary": "app-custom maps user attribute tenantId to access, ID, and userinfo token claims."
+    }
+  ],
+  "edges": [
+    {
+      "source": "concept:frontend-oidc-login",
+      "target": "concept:backend-token-validation",
+      "type": "triggers",
+      "direction": "forward",
+      "description": "Frontend sends bearer token to backend services after login.",
+      "weight": 0.8
+    },
+    {
+      "source": "concept:realm-roles-authorization",
+      "target": "concept:backend-token-validation",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Backends read realm roles from JWT realm_access.roles.",
+      "weight": 0.85
+    },
+    {
+      "source": "concept:tenant-isolation-claim",
+      "target": "concept:backend-token-validation",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Backends must enforce tenantId after JWT validation.",
+      "weight": 0.9
+    },
+    {
+      "source": "config:realm.json",
+      "target": "concept:environment-drift",
+      "type": "related",
+      "direction": "forward",
+      "description": "Current realm export has sslRequired=external.",
+      "weight": 0.75
+    },
+    {
+      "source": "config:realm.json",
+      "target": "concept:no-groups-configured",
+      "type": "defines_schema",
+      "direction": "forward",
+      "description": "groups is an empty array.",
+      "weight": 0.8
+    },
+    {
+      "source": "config:realm.json",
+      "target": "concept:no-identity-providers",
+      "type": "defines_schema",
+      "direction": "forward",
+      "description": "identityProviders is empty.",
+      "weight": 0.8
+    },
+    {
+      "source": "config:realm.json",
+      "target": "concept:risk-long-tokens",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Realm token lifespans are configured in realm.json.",
+      "weight": 0.85
+    },
+    {
+      "source": "config:realm.json",
+      "target": "concept:risk-weak-realm-defaults",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Realm disables brute force protection and lacks password policy.",
+      "weight": 0.85
+    },
+    {
+      "source": "config:realm.json",
+      "target": "realm:online-beratung",
+      "type": "defines_schema",
+      "direction": "forward",
+      "description": "realm.json defines the online-beratung realm.",
+      "weight": 0.95
+    },
+    {
+      "source": "document:STATUS.md",
+      "target": "concept:environment-drift",
+      "type": "documents",
+      "direction": "forward",
+      "description": "Status notes IP/proxy endpoints and SSL Required NONE.",
+      "weight": 0.75
+    },
+    {
+      "source": "endpoint:realm.json:client:app",
+      "target": "concept:app-custom-scope",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "app receives app-custom claims by default.",
+      "weight": 0.85
+    },
+    {
+      "source": "endpoint:realm.json:client:app",
+      "target": "concept:frontend-oidc-login",
+      "type": "routes",
+      "direction": "forward",
+      "description": "The app client is the frontend/admin login client.",
+      "weight": 0.9
+    },
+    {
+      "source": "endpoint:realm.json:client:app",
+      "target": "concept:risk-wide-redirects",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "The app client contains wildcard redirects/web origins.",
+      "weight": 0.85
+    },
+    {
+      "source": "entity:realm.json:role:agency-admin",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "agency-admin is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:consultant",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "consultant is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:default-roles-online-beratung",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "default-roles-online-beratung is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:offline_access",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "offline_access is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:single-tenant-admin",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "single-tenant-admin is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:TECHNICAL_DEFAULT",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "TECHNICAL_DEFAULT is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:technical",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "technical is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:tenant-admin",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "tenant-admin is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:topic-admin",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "topic-admin is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:uma_authorization",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "uma_authorization is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:USER_ADMIN",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "USER_ADMIN is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:user-admin",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "user-admin is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "entity:realm.json:role:user",
+      "target": "concept:realm-roles-authorization",
+      "type": "related",
+      "direction": "forward",
+      "description": "user is emitted through realm_access.roles when assigned to a user.",
+      "weight": 0.7
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "config:realm.json",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Admin Setup depends on realm.json.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "pipeline:backup/realm-backup.sh",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Admin Setup depends on realm-backup.sh.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "pipeline:configure-http-access.sh",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Admin Setup depends on configure-http-access.sh.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "resource:keycloak-deployment.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Admin Setup depends on keycloak-deployment.yaml.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "step:admin-setup:backup",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 4: Back up realm.",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "step:admin-setup:deploy",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 1: Deploy Keycloak.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "step:admin-setup:http",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 3: Configure HTTP access.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:admin-setup",
+      "target": "step:admin-setup:import",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 2: Import realm.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:backend-api-call",
+      "target": "concept:backend-token-validation",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Backend API Authorization depends on Backend token validation.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:backend-api-call",
+      "target": "concept:realm-roles-authorization",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Backend API Authorization depends on Realm roles authorization.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:backend-api-call",
+      "target": "concept:tenant-isolation-claim",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Backend API Authorization depends on Tenant isolation by tenantId claim.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:backend-api-call",
+      "target": "step:backend-api-call:authorize",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 3: Authorize request.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:backend-api-call",
+      "target": "step:backend-api-call:bearer",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 1: Send bearer token.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:backend-api-call",
+      "target": "step:backend-api-call:validate",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 2: Validate JWT.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:developer-login",
+      "target": "concept:frontend-oidc-login",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Developer/Admin Frontend Login depends on Frontend OIDC login.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:developer-login",
+      "target": "endpoint:realm.json:client:app",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Developer/Admin Frontend Login depends on client:app.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:developer-login",
+      "target": "step:developer-login:authenticate",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 2: Authenticate user.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:developer-login",
+      "target": "step:developer-login:issue-token",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 3: Issue tokens.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:developer-login",
+      "target": "step:developer-login:redirect",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 1: Redirect to Keycloak.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:developer-login",
+      "target": "step:developer-login:return",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 4: Return to frontend.",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:realm.json:browser",
+      "target": "step:realm.json:browser:auth-cookie:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "browser step 10: auth-cookie.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:browser",
+      "target": "step:realm.json:browser:auth-spnego:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "browser step 20: auth-spnego.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:browser",
+      "target": "step:realm.json:browser:forms:30",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "browser step 30: forms.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:realm.json:browser",
+      "target": "step:realm.json:browser:identity-provider-redirector:25",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "browser step 25: identity-provider-redirector.",
+      "weight": 0.25
+    },
+    {
+      "source": "flow:realm.json:clients",
+      "target": "step:realm.json:clients:client-jwt:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "clients step 20: client-jwt.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:clients",
+      "target": "step:realm.json:clients:client-secret-jwt:30",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "clients step 30: client-secret-jwt.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:realm.json:clients",
+      "target": "step:realm.json:clients:client-secret:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "clients step 10: client-secret.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:clients",
+      "target": "step:realm.json:clients:client-x509:40",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "clients step 40: client-x509.",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:realm.json:direct-grant-direct-grant-validate-otp-conditional",
+      "target": "step:realm.json:direct-grant-direct-grant-validate-otp-conditional:conditional-user-configured:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "direct grant - direct-grant-validate-otp - Conditional step 10: conditional-user-configured.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:direct-grant-direct-grant-validate-otp-conditional",
+      "target": "step:realm.json:direct-grant-direct-grant-validate-otp-conditional:direct-grant-validate-otp:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "direct grant - direct-grant-validate-otp - Conditional step 20: direct-grant-validate-otp.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:direct-grant",
+      "target": "step:realm.json:direct-grant:direct-grant-direct-grant-validate-otp-conditional:30",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "direct grant step 30: direct grant - direct-grant-validate-otp - Conditional.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:realm.json:direct-grant",
+      "target": "step:realm.json:direct-grant:direct-grant-validate-password:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "direct grant step 20: direct-grant-validate-password.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:direct-grant",
+      "target": "step:realm.json:direct-grant:direct-grant-validate-username:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "direct grant step 10: direct-grant-validate-username.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:docker-auth",
+      "target": "step:realm.json:docker-auth:docker-http-basic-authenticator:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "docker auth step 10: docker-http-basic-authenticator.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:first-broker-login-alternatives-0",
+      "target": "step:realm.json:first-broker-login-alternatives-0:handle-existing-account:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "first broker login - Alternatives - 0 step 20: Handle Existing Account.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:first-broker-login-alternatives-0",
+      "target": "step:realm.json:first-broker-login-alternatives-0:idp-create-user-if-unique:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "first broker login - Alternatives - 0 step 10: idp-create-user-if-unique.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:first-broker-login",
+      "target": "step:realm.json:first-broker-login:first-broker-login-alternatives-0:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "first broker login step 20: first broker login - Alternatives - 0.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:first-broker-login",
+      "target": "step:realm.json:first-broker-login:idp-review-profile:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "first broker login step 10: idp-review-profile.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:forms-auth-otp-form-conditional",
+      "target": "step:realm.json:forms-auth-otp-form-conditional:auth-otp-form:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "forms - auth-otp-form - Conditional step 20: auth-otp-form.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:forms-auth-otp-form-conditional",
+      "target": "step:realm.json:forms-auth-otp-form-conditional:conditional-user-configured:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "forms - auth-otp-form - Conditional step 10: conditional-user-configured.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:forms",
+      "target": "step:realm.json:forms:auth-username-password-form:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "forms step 10: auth-username-password-form.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:forms",
+      "target": "step:realm.json:forms:forms-auth-otp-form-conditional:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "forms step 20: forms - auth-otp-form - Conditional.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:handle-existing-account-alternatives-0",
+      "target": "step:realm.json:handle-existing-account-alternatives-0:idp-email-verification:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Handle Existing Account - Alternatives - 0 step 10: idp-email-verification.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:handle-existing-account-alternatives-0",
+      "target": "step:realm.json:handle-existing-account-alternatives-0:verify-existing-account-by-re-authentication:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Handle Existing Account - Alternatives - 0 step 20: Verify Existing Account by Re-authentication.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:handle-existing-account",
+      "target": "step:realm.json:handle-existing-account:handle-existing-account-alternatives-0:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Handle Existing Account step 20: Handle Existing Account - Alternatives - 0.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:handle-existing-account",
+      "target": "step:realm.json:handle-existing-account:idp-confirm-link:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Handle Existing Account step 10: idp-confirm-link.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:registration-form",
+      "target": "step:realm.json:registration-form:registration-password-action:50",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "registration form step 50: registration-password-action.",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:realm.json:registration-form",
+      "target": "step:realm.json:registration-form:registration-profile-action:40",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "registration form step 40: registration-profile-action.",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:realm.json:registration-form",
+      "target": "step:realm.json:registration-form:registration-recaptcha-action:60",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "registration form step 60: registration-recaptcha-action.",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:realm.json:registration-form",
+      "target": "step:realm.json:registration-form:registration-user-creation:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "registration form step 20: registration-user-creation.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:registration",
+      "target": "step:realm.json:registration:registration-page-form:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "registration step 10: registration-page-form.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:reset-credentials-reset-otp-conditional",
+      "target": "step:realm.json:reset-credentials-reset-otp-conditional:conditional-user-configured:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "reset credentials - reset-otp - Conditional step 10: conditional-user-configured.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:reset-credentials-reset-otp-conditional",
+      "target": "step:realm.json:reset-credentials-reset-otp-conditional:reset-otp:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "reset credentials - reset-otp - Conditional step 20: reset-otp.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:reset-credentials",
+      "target": "step:realm.json:reset-credentials:reset-credential-email:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "reset credentials step 20: reset-credential-email.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:reset-credentials",
+      "target": "step:realm.json:reset-credentials:reset-credentials-choose-user:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "reset credentials step 10: reset-credentials-choose-user.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:reset-credentials",
+      "target": "step:realm.json:reset-credentials:reset-credentials-reset-otp-conditional:40",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "reset credentials step 40: reset credentials - reset-otp - Conditional.",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:realm.json:reset-credentials",
+      "target": "step:realm.json:reset-credentials:reset-password:30",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "reset credentials step 30: reset-password.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:realm.json:saml-ecp",
+      "target": "step:realm.json:saml-ecp:http-basic-authenticator:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "saml ecp step 10: http-basic-authenticator.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional",
+      "target": "step:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional:auth-otp-form:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Verify Existing Account by Re-authentication - auth-otp-form - Conditional step 20: auth-otp-form.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional",
+      "target": "step:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional:conditional-user-configured:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Verify Existing Account by Re-authentication - auth-otp-form - Conditional step 10: conditional-user-configured.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:verify-existing-account-by-re-authentication",
+      "target": "step:realm.json:verify-existing-account-by-re-authentication:idp-username-password-form:10",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Verify Existing Account by Re-authentication step 10: idp-username-password-form.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:realm.json:verify-existing-account-by-re-authentication",
+      "target": "step:realm.json:verify-existing-account-by-re-authentication:verify-existing-account-by-re-authentication-auth-otp-form-conditional:20",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Verify Existing Account by Re-authentication step 20: Verify Existing Account by Re-authentication - auth-otp-form - Conditional.",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:tenant-isolation",
+      "target": "concept:tenant-isolation-claim",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Tenant Isolation depends on Tenant isolation by tenantId claim.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:tenant-isolation",
+      "target": "schema:realm.json:scope:app-custom",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Tenant Isolation depends on scope:app-custom.",
+      "weight": 0.65
+    },
+    {
+      "source": "flow:tenant-isolation",
+      "target": "step:tenant-isolation:attribute",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 1: Maintain tenantId attribute.",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:tenant-isolation",
+      "target": "step:tenant-isolation:enforce",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 3: Enforce in services.",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:tenant-isolation",
+      "target": "step:tenant-isolation:mapper",
+      "type": "flow_step",
+      "direction": "forward",
+      "description": "Step 2: Map tenantId claim.",
+      "weight": 0.2
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:browser",
+      "type": "contains",
+      "direction": "forward",
+      "description": "browser is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:clients",
+      "type": "contains",
+      "direction": "forward",
+      "description": "clients is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:direct-grant-direct-grant-validate-otp-conditional",
+      "type": "contains",
+      "direction": "forward",
+      "description": "direct grant - direct-grant-validate-otp - Conditional is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:direct-grant",
+      "type": "contains",
+      "direction": "forward",
+      "description": "direct grant is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:docker-auth",
+      "type": "contains",
+      "direction": "forward",
+      "description": "docker auth is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:first-broker-login-alternatives-0",
+      "type": "contains",
+      "direction": "forward",
+      "description": "first broker login - Alternatives - 0 is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:first-broker-login",
+      "type": "contains",
+      "direction": "forward",
+      "description": "first broker login is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:forms-auth-otp-form-conditional",
+      "type": "contains",
+      "direction": "forward",
+      "description": "forms - auth-otp-form - Conditional is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:forms",
+      "type": "contains",
+      "direction": "forward",
+      "description": "forms is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:handle-existing-account-alternatives-0",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Handle Existing Account - Alternatives - 0 is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:handle-existing-account",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Handle Existing Account is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:registration-form",
+      "type": "contains",
+      "direction": "forward",
+      "description": "registration form is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:registration",
+      "type": "contains",
+      "direction": "forward",
+      "description": "registration is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:reset-credentials-reset-otp-conditional",
+      "type": "contains",
+      "direction": "forward",
+      "description": "reset credentials - reset-otp - Conditional is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:reset-credentials",
+      "type": "contains",
+      "direction": "forward",
+      "description": "reset credentials is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:saml-ecp",
+      "type": "contains",
+      "direction": "forward",
+      "description": "saml ecp is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Verify Existing Account by Re-authentication - auth-otp-form - Conditional is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:authentication-flows",
+      "target": "flow:realm.json:verify-existing-account-by-re-authentication",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Verify Existing Account by Re-authentication is part of the Keycloak authentication flow set.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:kubernetes-runtime",
+      "target": "resource:ingress.yaml",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Ingress routes auth.oriso.site to the keycloak service.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:kubernetes-runtime",
+      "target": "resource:keycloak-deployment.yaml",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Deployment runs the Keycloak container.",
+      "weight": 0.9
+    },
+    {
+      "source": "module:kubernetes-runtime",
+      "target": "resource:keycloak-service.yaml",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Service exposes Keycloak on 8080 and 8443.",
+      "weight": 0.85
+    },
+    {
+      "source": "module:oidc-clients",
+      "target": "endpoint:realm.json:client:account-console",
+      "type": "contains",
+      "direction": "forward",
+      "description": "account-console belongs to the OIDC client map.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:oidc-clients",
+      "target": "endpoint:realm.json:client:account",
+      "type": "contains",
+      "direction": "forward",
+      "description": "account belongs to the OIDC client map.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:oidc-clients",
+      "target": "endpoint:realm.json:client:admin-cli",
+      "type": "contains",
+      "direction": "forward",
+      "description": "admin-cli belongs to the OIDC client map.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:oidc-clients",
+      "target": "endpoint:realm.json:client:app",
+      "type": "contains",
+      "direction": "forward",
+      "description": "app belongs to the OIDC client map.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:oidc-clients",
+      "target": "endpoint:realm.json:client:broker",
+      "type": "contains",
+      "direction": "forward",
+      "description": "broker belongs to the OIDC client map.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:oidc-clients",
+      "target": "endpoint:realm.json:client:realm-management",
+      "type": "contains",
+      "direction": "forward",
+      "description": "realm-management belongs to the OIDC client map.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:oidc-clients",
+      "target": "endpoint:realm.json:client:security-admin-console",
+      "type": "contains",
+      "direction": "forward",
+      "description": "security-admin-console belongs to the OIDC client map.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:operations",
+      "target": "document:DEPLOYMENT.md",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Deployment guide documents Kubernetes, Docker, Helm, and troubleshooting.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:operations",
+      "target": "document:README.md",
+      "type": "contains",
+      "direction": "forward",
+      "description": "README documents access points and integration snippets.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:operations",
+      "target": "document:STATUS.md",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Status document records the current operational assumptions.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:operations",
+      "target": "pipeline:backup/realm-backup.sh",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Script exports the realm and updates realm.json.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:operations",
+      "target": "pipeline:configure-http-access.sh",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Script applies post-deployment SSL requirement changes.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:oriso-integration",
+      "target": "concept:backend-token-validation",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Backend JWT validation is part of ORISO integration.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:oriso-integration",
+      "target": "concept:frontend-oidc-login",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Frontend/admin login is part of ORISO integration.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:realm-configuration",
+      "target": "config:realm.json",
+      "type": "contains",
+      "direction": "forward",
+      "description": "realm.json is the current realm export.",
+      "weight": 0.9
+    },
+    {
+      "source": "module:risk-map",
+      "target": "concept:environment-drift",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Conflicting environment assumptions are a deployment risk.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:risk-map",
+      "target": "concept:risk-hardcoded-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Hardcoded credentials are a security risk.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:risk-map",
+      "target": "concept:risk-long-tokens",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Long token lifetimes are a security risk.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:risk-map",
+      "target": "concept:risk-start-dev",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Development runtime settings are a production risk.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:risk-map",
+      "target": "concept:risk-weak-realm-defaults",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Weak realm defaults are a production risk.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:risk-map",
+      "target": "concept:risk-wide-redirects",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Wildcard OIDC redirect/CORS settings are a security risk.",
+      "weight": 0.8
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:agency-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "agency-admin is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:consultant",
+      "type": "contains",
+      "direction": "forward",
+      "description": "consultant is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:default-roles-online-beratung",
+      "type": "contains",
+      "direction": "forward",
+      "description": "default-roles-online-beratung is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:offline_access",
+      "type": "contains",
+      "direction": "forward",
+      "description": "offline_access is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:single-tenant-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "single-tenant-admin is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:TECHNICAL_DEFAULT",
+      "type": "contains",
+      "direction": "forward",
+      "description": "TECHNICAL_DEFAULT is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:technical",
+      "type": "contains",
+      "direction": "forward",
+      "description": "technical is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:tenant-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "tenant-admin is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:topic-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "topic-admin is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:uma_authorization",
+      "type": "contains",
+      "direction": "forward",
+      "description": "uma_authorization is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:USER_ADMIN",
+      "type": "contains",
+      "direction": "forward",
+      "description": "USER_ADMIN is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:user-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "user-admin is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:roles-permissions",
+      "target": "entity:realm.json:role:user",
+      "type": "contains",
+      "direction": "forward",
+      "description": "user is part of ORISO authorization vocabulary.",
+      "weight": 0.7
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:acr",
+      "type": "contains",
+      "direction": "forward",
+      "description": "acr contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:address",
+      "type": "contains",
+      "direction": "forward",
+      "description": "address contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:app-custom",
+      "type": "contains",
+      "direction": "forward",
+      "description": "app-custom contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:email",
+      "type": "contains",
+      "direction": "forward",
+      "description": "email contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:microprofile-jwt",
+      "type": "contains",
+      "direction": "forward",
+      "description": "microprofile-jwt contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:offline_access",
+      "type": "contains",
+      "direction": "forward",
+      "description": "offline_access contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:phone",
+      "type": "contains",
+      "direction": "forward",
+      "description": "phone contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:profile",
+      "type": "contains",
+      "direction": "forward",
+      "description": "profile contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:role_list",
+      "type": "contains",
+      "direction": "forward",
+      "description": "role_list contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:roles",
+      "type": "contains",
+      "direction": "forward",
+      "description": "roles contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "module:token-claims",
+      "target": "schema:realm.json:scope:web-origins",
+      "type": "contains",
+      "direction": "forward",
+      "description": "web-origins contributes token claims or scope behavior.",
+      "weight": 0.65
+    },
+    {
+      "source": "pipeline:backup/realm-backup.sh",
+      "target": "concept:risk-hardcoded-admin",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Backup script authenticates with admin/admin.",
+      "weight": 0.85
+    },
+    {
+      "source": "pipeline:configure-http-access.sh",
+      "target": "concept:http-access-mode",
+      "type": "configures",
+      "direction": "forward",
+      "description": "Script sets sslRequired=NONE for all realms.",
+      "weight": 0.85
+    },
+    {
+      "source": "pipeline:configure-http-access.sh",
+      "target": "concept:risk-hardcoded-admin",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "HTTP configuration script authenticates with admin/admin.",
+      "weight": 0.85
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "concept:keycloak-central-iam",
+      "type": "related",
+      "direction": "forward",
+      "description": "The realm is the IAM control plane for ORISO.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "concept:online-beratung-realm",
+      "type": "related",
+      "direction": "forward",
+      "description": "Realm settings are exported under the online-beratung realm name.",
+      "weight": 0.85
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "endpoint:realm.json:client:account-console",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client account-console.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "endpoint:realm.json:client:account",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client account.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "endpoint:realm.json:client:admin-cli",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client admin-cli.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "endpoint:realm.json:client:app",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client app.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "endpoint:realm.json:client:broker",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client broker.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "endpoint:realm.json:client:realm-management",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client realm-management.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "endpoint:realm.json:client:security-admin-console",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client security-admin-console.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:required-action:CONFIGURE_TOTP",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains required action CONFIGURE_TOTP.",
+      "weight": 0.6
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:required-action:delete_account",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains required action delete_account.",
+      "weight": 0.6
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:required-action:terms_and_conditions",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains required action terms_and_conditions.",
+      "weight": 0.6
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:required-action:UPDATE_PASSWORD",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains required action UPDATE_PASSWORD.",
+      "weight": 0.6
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:required-action:UPDATE_PROFILE",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains required action UPDATE_PROFILE.",
+      "weight": 0.6
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:required-action:VERIFY_EMAIL",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains required action VERIFY_EMAIL.",
+      "weight": 0.6
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:agency-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role agency-admin.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:consultant",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role consultant.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:default-roles-online-beratung",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role default-roles-online-beratung.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:offline_access",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role offline_access.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:single-tenant-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role single-tenant-admin.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:TECHNICAL_DEFAULT",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role TECHNICAL_DEFAULT.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:technical",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role technical.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:tenant-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role tenant-admin.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:topic-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role topic-admin.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:uma_authorization",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role uma_authorization.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:USER_ADMIN",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role USER_ADMIN.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:user-admin",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role user-admin.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "entity:realm.json:role:user",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains role user.",
+      "weight": 0.75
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:admin-setup",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm participates in Admin Setup.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:backend-api-call",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm participates in Backend API Authorization.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:developer-login",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm participates in Developer/Admin Frontend Login.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:browser",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow browser.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:clients",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow clients.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:direct-grant-direct-grant-validate-otp-conditional",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow direct grant - direct-grant-validate-otp - Conditional.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:direct-grant",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow direct grant.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:docker-auth",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow docker auth.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:first-broker-login-alternatives-0",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow first broker login - Alternatives - 0.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:first-broker-login",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow first broker login.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:forms-auth-otp-form-conditional",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow forms - auth-otp-form - Conditional.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:forms",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow forms.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:handle-existing-account-alternatives-0",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow Handle Existing Account - Alternatives - 0.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:handle-existing-account",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow Handle Existing Account.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:registration-form",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow registration form.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:registration",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow registration.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:reset-credentials-reset-otp-conditional",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow reset credentials - reset-otp - Conditional.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:reset-credentials",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow reset credentials.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:saml-ecp",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow saml ecp.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow Verify Existing Account by Re-authentication - auth-otp-form - Conditional.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:realm.json:verify-existing-account-by-re-authentication",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm contains authentication flow Verify Existing Account by Re-authentication.",
+      "weight": 0.7
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "flow:tenant-isolation",
+      "type": "contains_flow",
+      "direction": "forward",
+      "description": "Realm participates in Tenant Isolation.",
+      "weight": 0.8
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:acr",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope acr.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:address",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope address.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:app-custom",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope app-custom.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:email",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope email.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:microprofile-jwt",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope microprofile-jwt.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:offline_access",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope offline_access.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:phone",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope phone.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:profile",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope profile.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:role_list",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope role_list.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:roles",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope roles.",
+      "weight": 0.65
+    },
+    {
+      "source": "realm:online-beratung",
+      "target": "schema:realm.json:scope:web-origins",
+      "type": "contains",
+      "direction": "forward",
+      "description": "Realm contains client scope web-origins.",
+      "weight": 0.65
+    },
+    {
+      "source": "resource:ingress.yaml",
+      "target": "concept:http-access-mode",
+      "type": "routes",
+      "direction": "forward",
+      "description": "Ingress terminates TLS for auth.oriso.site and sends traffic to HTTP service port 8080.",
+      "weight": 0.75
+    },
+    {
+      "source": "resource:keycloak-deployment.yaml",
+      "target": "concept:risk-hardcoded-admin",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Deployment contains KEYCLOAK_ADMIN and KEYCLOAK_ADMIN_PASSWORD values.",
+      "weight": 0.9
+    },
+    {
+      "source": "resource:keycloak-deployment.yaml",
+      "target": "concept:risk-start-dev",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Deployment uses start-dev and hostNetwork with no resources.",
+      "weight": 0.9
+    },
+    {
+      "source": "resource:keycloak-service.yaml",
+      "target": "concept:environment-drift",
+      "type": "related",
+      "direction": "forward",
+      "description": "Service manifest contains a concrete ClusterIP from a live cluster export.",
+      "weight": 0.75
+    },
+    {
+      "source": "schema:realm.json:scope:app-custom",
+      "target": "concept:app-custom-scope",
+      "type": "defines_schema",
+      "direction": "forward",
+      "description": "app-custom defines username, tenantId, and userId mappers.",
+      "weight": 0.9
+    },
+    {
+      "source": "schema:realm.json:scope:app-custom",
+      "target": "concept:tenant-isolation-claim",
+      "type": "defines_schema",
+      "direction": "forward",
+      "description": "tenantId is emitted from app-custom.",
+      "weight": 0.9
+    },
+    {
+      "source": "step:admin-setup:backup",
+      "target": "pipeline:backup/realm-backup.sh",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Back up realm uses realm-backup.sh.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:admin-setup:deploy",
+      "target": "resource:ingress.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Deploy Keycloak uses ingress.yaml.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:admin-setup:deploy",
+      "target": "resource:keycloak-deployment.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Deploy Keycloak uses keycloak-deployment.yaml.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:admin-setup:deploy",
+      "target": "resource:keycloak-service.yaml",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Deploy Keycloak uses keycloak-service.yaml.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:admin-setup:http",
+      "target": "pipeline:configure-http-access.sh",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Configure HTTP access uses configure-http-access.sh.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:admin-setup:import",
+      "target": "config:realm.json",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Import realm uses realm.json.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:backend-api-call:authorize",
+      "target": "concept:realm-roles-authorization",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Authorize request uses Realm roles authorization.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:backend-api-call:authorize",
+      "target": "concept:tenant-isolation-claim",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Authorize request uses Tenant isolation by tenantId claim.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:backend-api-call:bearer",
+      "target": "concept:backend-token-validation",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Send bearer token uses Backend token validation.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:backend-api-call:validate",
+      "target": "config:realm.json",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Validate JWT uses realm.json.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:developer-login:authenticate",
+      "target": "flow:realm.json:browser",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Authenticate user uses browser.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:developer-login:issue-token",
+      "target": "schema:realm.json:scope:app-custom",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Issue tokens uses scope:app-custom.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:developer-login:issue-token",
+      "target": "schema:realm.json:scope:roles",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Issue tokens uses scope:roles.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:developer-login:redirect",
+      "target": "endpoint:realm.json:client:app",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Redirect to Keycloak uses client:app.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:developer-login:return",
+      "target": "concept:frontend-oidc-login",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Return to frontend uses Frontend OIDC login.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:tenant-isolation:attribute",
+      "target": "concept:tenant-isolation-claim",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Maintain tenantId attribute uses Tenant isolation by tenantId claim.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:tenant-isolation:enforce",
+      "target": "concept:backend-token-validation",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Enforce in services uses Backend token validation.",
+      "weight": 0.55
+    },
+    {
+      "source": "step:tenant-isolation:mapper",
+      "target": "schema:realm.json:scope:app-custom",
+      "type": "depends_on",
+      "direction": "forward",
+      "description": "Map tenantId claim uses scope:app-custom.",
+      "weight": 0.55
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer-realm",
+      "name": "Realm and IAM Model",
+      "description": "Realm export, online-beratung realm node, client scopes, roles, required actions, and tenant claim model.",
+      "nodeIds": [
+        "concept:app-custom-scope",
+        "concept:no-groups-configured",
+        "concept:no-identity-providers",
+        "concept:online-beratung-realm",
+        "concept:tenant-isolation-claim",
+        "entity:realm.json:required-action:CONFIGURE_TOTP",
+        "entity:realm.json:required-action:delete_account",
+        "entity:realm.json:required-action:terms_and_conditions",
+        "entity:realm.json:required-action:UPDATE_PASSWORD",
+        "entity:realm.json:required-action:UPDATE_PROFILE",
+        "entity:realm.json:required-action:VERIFY_EMAIL",
+        "entity:realm.json:role:agency-admin",
+        "entity:realm.json:role:consultant",
+        "entity:realm.json:role:default-roles-online-beratung",
+        "entity:realm.json:role:offline_access",
+        "entity:realm.json:role:single-tenant-admin",
+        "entity:realm.json:role:technical",
+        "entity:realm.json:role:TECHNICAL_DEFAULT",
+        "entity:realm.json:role:tenant-admin",
+        "entity:realm.json:role:topic-admin",
+        "entity:realm.json:role:uma_authorization",
+        "entity:realm.json:role:user",
+        "entity:realm.json:role:USER_ADMIN",
+        "entity:realm.json:role:user-admin",
+        "module:realm-configuration",
+        "realm:online-beratung",
+        "schema:realm.json:scope:acr",
+        "schema:realm.json:scope:address",
+        "schema:realm.json:scope:app-custom",
+        "schema:realm.json:scope:email",
+        "schema:realm.json:scope:microprofile-jwt",
+        "schema:realm.json:scope:offline_access",
+        "schema:realm.json:scope:phone",
+        "schema:realm.json:scope:profile",
+        "schema:realm.json:scope:role_list",
+        "schema:realm.json:scope:roles",
+        "schema:realm.json:scope:web-origins"
+      ]
+    },
+    {
+      "id": "layer-clients",
+      "name": "OIDC Clients and OAuth2 Surface",
+      "description": "Application and built-in Keycloak clients, redirect/web origin settings, and supported OAuth2 flows.",
+      "nodeIds": [
+        "concept:frontend-oidc-login",
+        "concept:risk-wide-redirects",
+        "endpoint:realm.json:client:account",
+        "endpoint:realm.json:client:account-console",
+        "endpoint:realm.json:client:admin-cli",
+        "endpoint:realm.json:client:app",
+        "endpoint:realm.json:client:broker",
+        "endpoint:realm.json:client:realm-management",
+        "endpoint:realm.json:client:security-admin-console",
+        "module:oidc-clients"
+      ]
+    },
+    {
+      "id": "layer-auth-flows",
+      "name": "Authentication and Token Flows",
+      "description": "Browser, direct grant, registration, reset credentials, client authentication, and onboarding auth flows.",
+      "nodeIds": [
+        "concept:backend-token-validation",
+        "flow:backend-api-call",
+        "flow:developer-login",
+        "flow:realm.json:browser",
+        "flow:realm.json:clients",
+        "flow:realm.json:direct-grant",
+        "flow:realm.json:direct-grant-direct-grant-validate-otp-conditional",
+        "flow:realm.json:docker-auth",
+        "flow:realm.json:first-broker-login",
+        "flow:realm.json:first-broker-login-alternatives-0",
+        "flow:realm.json:forms",
+        "flow:realm.json:forms-auth-otp-form-conditional",
+        "flow:realm.json:handle-existing-account",
+        "flow:realm.json:handle-existing-account-alternatives-0",
+        "flow:realm.json:registration",
+        "flow:realm.json:registration-form",
+        "flow:realm.json:reset-credentials",
+        "flow:realm.json:reset-credentials-reset-otp-conditional",
+        "flow:realm.json:saml-ecp",
+        "flow:realm.json:verify-existing-account-by-re-authentication",
+        "flow:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional",
+        "flow:tenant-isolation",
+        "module:authentication-flows",
+        "step:backend-api-call:authorize",
+        "step:backend-api-call:bearer",
+        "step:backend-api-call:validate",
+        "step:developer-login:authenticate",
+        "step:developer-login:issue-token",
+        "step:developer-login:redirect",
+        "step:developer-login:return",
+        "step:realm.json:browser:auth-cookie:10",
+        "step:realm.json:browser:auth-spnego:20",
+        "step:realm.json:browser:forms:30",
+        "step:realm.json:browser:identity-provider-redirector:25",
+        "step:realm.json:clients:client-jwt:20",
+        "step:realm.json:clients:client-secret-jwt:30",
+        "step:realm.json:clients:client-secret:10",
+        "step:realm.json:clients:client-x509:40",
+        "step:realm.json:direct-grant-direct-grant-validate-otp-conditional:conditional-user-configured:10",
+        "step:realm.json:direct-grant-direct-grant-validate-otp-conditional:direct-grant-validate-otp:20",
+        "step:realm.json:direct-grant:direct-grant-direct-grant-validate-otp-conditional:30",
+        "step:realm.json:direct-grant:direct-grant-validate-password:20",
+        "step:realm.json:direct-grant:direct-grant-validate-username:10",
+        "step:realm.json:docker-auth:docker-http-basic-authenticator:10",
+        "step:realm.json:first-broker-login-alternatives-0:handle-existing-account:20",
+        "step:realm.json:first-broker-login-alternatives-0:idp-create-user-if-unique:10",
+        "step:realm.json:first-broker-login:first-broker-login-alternatives-0:20",
+        "step:realm.json:first-broker-login:idp-review-profile:10",
+        "step:realm.json:forms-auth-otp-form-conditional:auth-otp-form:20",
+        "step:realm.json:forms-auth-otp-form-conditional:conditional-user-configured:10",
+        "step:realm.json:forms:auth-username-password-form:10",
+        "step:realm.json:forms:forms-auth-otp-form-conditional:20",
+        "step:realm.json:handle-existing-account-alternatives-0:idp-email-verification:10",
+        "step:realm.json:handle-existing-account-alternatives-0:verify-existing-account-by-re-authentication:20",
+        "step:realm.json:handle-existing-account:handle-existing-account-alternatives-0:20",
+        "step:realm.json:handle-existing-account:idp-confirm-link:10",
+        "step:realm.json:registration-form:registration-password-action:50",
+        "step:realm.json:registration-form:registration-profile-action:40",
+        "step:realm.json:registration-form:registration-recaptcha-action:60",
+        "step:realm.json:registration-form:registration-user-creation:20",
+        "step:realm.json:registration:registration-page-form:10",
+        "step:realm.json:reset-credentials-reset-otp-conditional:conditional-user-configured:10",
+        "step:realm.json:reset-credentials-reset-otp-conditional:reset-otp:20",
+        "step:realm.json:reset-credentials:reset-credential-email:20",
+        "step:realm.json:reset-credentials:reset-credentials-choose-user:10",
+        "step:realm.json:reset-credentials:reset-credentials-reset-otp-conditional:40",
+        "step:realm.json:reset-credentials:reset-password:30",
+        "step:realm.json:saml-ecp:http-basic-authenticator:10",
+        "step:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional:auth-otp-form:20",
+        "step:realm.json:verify-existing-account-by-re-authentication-auth-otp-form-conditional:conditional-user-configured:10",
+        "step:realm.json:verify-existing-account-by-re-authentication:idp-username-password-form:10",
+        "step:realm.json:verify-existing-account-by-re-authentication:verify-existing-account-by-re-authentication-auth-otp-form-conditional:20",
+        "step:tenant-isolation:attribute",
+        "step:tenant-isolation:enforce",
+        "step:tenant-isolation:mapper"
+      ]
+    },
+    {
+      "id": "layer-kubernetes",
+      "name": "Kubernetes Runtime",
+      "description": "Deployment, Service, Ingress, namespace, hostname, proxy, HTTP/TLS behavior, and runtime risks.",
+      "nodeIds": [
+        "concept:environment-drift",
+        "concept:http-access-mode",
+        "concept:risk-start-dev",
+        "module:kubernetes-runtime",
+        "resource:ingress.yaml",
+        "resource:keycloak-deployment.yaml",
+        "resource:keycloak-service.yaml"
+      ]
+    },
+    {
+      "id": "layer-operations",
+      "name": "Operations and Admin",
+      "description": "Admin setup, backup, HTTP access script, docs, and local/deployment workflows.",
+      "nodeIds": [
+        "concept:kcadm-admin-automation",
+        "document:DEPLOYMENT.md",
+        "document:README.md",
+        "document:STATUS.md",
+        "flow:admin-setup",
+        "module:operations",
+        "pipeline:backup/realm-backup.sh",
+        "pipeline:configure-http-access.sh",
+        "step:admin-setup:backup",
+        "step:admin-setup:deploy",
+        "step:admin-setup:http",
+        "step:admin-setup:import"
+      ]
+    },
+    {
+      "id": "layer-oriso-integration",
+      "name": "ORISO Integration",
+      "description": "How frontend, admin, and backend services consume Keycloak login, token claims, and JWT validation.",
+      "nodeIds": [
+        "concept:backend-token-validation",
+        "concept:frontend-oidc-login",
+        "concept:keycloak-central-iam",
+        "concept:realm-roles-authorization",
+        "concept:tenant-isolation-claim",
+        "module:oriso-integration"
+      ]
+    },
+    {
+      "id": "layer-risk",
+      "name": "Security and Production Risk Map",
+      "description": "Hardcoded credentials, weak defaults, token lifetimes, wildcard redirects, and environment drift.",
+      "nodeIds": [
+        "concept:environment-drift",
+        "concept:risk-hardcoded-admin",
+        "concept:risk-long-tokens",
+        "concept:risk-start-dev",
+        "concept:risk-weak-realm-defaults",
+        "concept:risk-wide-redirects",
+        "module:risk-map"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "Start with the realm export",
+      "description": "realm.json is the source of truth in this repository. It defines online-beratung, the app client, realm roles, token scopes, required actions, and authentication flows.",
+      "nodeIds": [
+        "config:realm.json",
+        "realm:online-beratung",
+        "concept:online-beratung-realm"
+      ]
+    },
+    {
+      "order": 2,
+      "title": "Understand the app client",
+      "description": "The app client is the ORISO frontend/admin OIDC client. It enables standard authorization flow and direct access grants, includes app-custom and roles scopes, and currently uses broad redirect/web-origin settings.",
+      "nodeIds": [
+        "endpoint:realm.json:client:app",
+        "concept:frontend-oidc-login",
+        "concept:risk-wide-redirects"
+      ]
+    },
+    {
+      "order": 3,
+      "title": "Trace token claims",
+      "description": "app-custom maps username, tenantId, and userId user attributes into access, ID, and userinfo tokens. Backend services rely on tenantId and realm roles for tenant-aware authorization.",
+      "nodeIds": [
+        "schema:realm.json:scope:app-custom",
+        "concept:tenant-isolation-claim",
+        "concept:backend-token-validation"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "Review auth flows",
+      "description": "The realm uses the built-in browser flow for login and direct grant for password token requests. OTP is conditional when the user has configured it.",
+      "nodeIds": [
+        "flow:realm.json:browser",
+        "flow:realm.json:direct-grant",
+        "flow:realm.json:forms"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "Review runtime configuration",
+      "description": "Kubernetes manifests run Keycloak 20.0.5 with start-dev, hostNetwork, HTTP enabled, and auth.oriso.site ingress. These are the main DevOps-owned files.",
+      "nodeIds": [
+        "resource:keycloak-deployment.yaml",
+        "resource:keycloak-service.yaml",
+        "resource:ingress.yaml"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "Review operations scripts",
+      "description": "configure-http-access.sh changes sslRequired after deployment, while backup/realm-backup.sh exports the realm back into this repository. Both assume admin credentials and the caritas namespace.",
+      "nodeIds": [
+        "pipeline:configure-http-access.sh",
+        "pipeline:backup/realm-backup.sh",
+        "concept:kcadm-admin-automation"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "Review the risk map",
+      "description": "The highest priority production issues are hardcoded admin credentials, start-dev runtime, wildcard app redirects/web origins, weak realm defaults, long token lifetimes, and environment drift between docs, scripts, and realm export.",
+      "nodeIds": [
+        "concept:risk-hardcoded-admin",
+        "concept:risk-start-dev",
+        "concept:risk-wide-redirects",
+        "concept:risk-weak-realm-defaults",
+        "concept:environment-drift"
+      ]
+    }
+  ]
+}
