@@ -147,6 +147,15 @@
         "attributes": {}
       },
       {
+        "id": "c7d3f2a1-5b80-4e26-9d14-3a9f6c1e8b42",
+        "name": "restricted-agency-admin",
+        "description": "Beratungsstellen-Admin (auf zugewiesene Beratungsstellen beschränkt)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "online-beratung",
+        "attributes": {}
+      },
+      {
         "id": "02b23701-9fc0-43c4-8b87-d804787cc7f2",
         "name": "tenant-admin",
         "description": "",
