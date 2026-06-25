@@ -880,16 +880,16 @@
           "id": "d727edf5-2881-4321-9be9-5c7c9201a4fe",
           "name": "username",
           "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "protocolMapper": "oidc-usermodel-property-mapper",
           "consentRequired": false,
           "config": {
-            "aggregate.attrs": "false",
             "userinfo.token.claim": "true",
-            "multivalued": "false",
             "user.attribute": "username",
             "id.token.claim": "true",
             "access.token.claim": "true",
-            "claim.name": "username"
+            "claim.name": "username",
+            "introspection.token.claim": "true",
+            "jsonType.label": "String"
           }
         },
         {
