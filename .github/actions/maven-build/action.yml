@@ -1,0 +1,25 @@
+name: Reusable Maven Build steps
+
+inputs:
+  java_version:
+    required: true
+    type: string
+  working_directory:
+    required: false
+    default: "."
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up JDK and Maven
+      uses: actions/setup-java@v5
+      with:
+        java-version: ${{ inputs.java_version }}
+        distribution: "temurin"
+        cache: maven
+
+    - name: Build with Maven
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: mvn -B package
