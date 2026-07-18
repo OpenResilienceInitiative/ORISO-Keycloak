@@ -1,0 +1,67 @@
+name: keycloak-image
+
+# Builds the custom Keycloak image (stock 26.6.3 + vendored otp-config SPI,
+# see keycloak-image/README.md) and pushes it to ghcr. The SPI unit tests run
+# on every PR touching the image; push happens only on pre-dev/dev/main.
+on:
+  pull_request:
+    paths:
+      - "keycloak-image/**"
+      - ".github/workflows/keycloak-image.yml"
+  push:
+    branches: [pre-dev, dev, main]
+    paths:
+      - "keycloak-image/**"
+      - ".github/workflows/keycloak-image.yml"
+
+env:
+  IMAGE: ghcr.io/openresilienceinitiative/oriso-keycloak
+
+jobs:
+  test-spi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: SPI unit tests
+        run: mvn -B test
+        working-directory: keycloak-image/otp-config-spi
+
+  build-image:
+    runs-on: ubuntu-latest
+    needs: test-spi
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to ghcr
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute tags
+        id: tags
+        # On pull_request github.ref_name is "<pr>/merge", which is not a valid
+        # image tag — PR builds only get the version tag (and are not pushed).
+        run: |
+          TAGS="$IMAGE:26.6.3-otp"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAGS="$TAGS,$IMAGE:${{ github.ref_name }}"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+      - name: Build (and push on branch)
+        uses: docker/build-push-action@v6
+        with:
+          context: keycloak-image
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
