@@ -57,25 +57,67 @@ for id in $ids; do
   $KC update "authentication/flows/$FLOW/executions" -r "$REALM" -f /tmp/2fa-one.json
 done
 
-# attach email-otp-config to the email-authenticator execution so the SPI reads
-# length/ttl/senderId/simulation from realm config instead of the hard-coded
-# fallbacks in MemoryOtpService. Idempotent: kcadm rejects duplicate-alias
-# creates, which we swallow so re-running the script does not fail.
-EMAIL_AUTH_ID=$($KC get "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
+# Attach email-otp-config to the freshly recreated email-authenticator execution
+# so the SPI reads length/ttl/senderId/simulation from realm config instead of
+# the fallbacks hard-coded in MemoryOtpService.
+#
+# Truly idempotent: Keycloak does not cascade-delete authenticatorConfig rows
+# when the executions that reference them are removed, so a prior run of this
+# script leaves an orphaned email-otp-config behind. On rerun we look that row
+# up by alias, update it in place, and rebind it to the new execution — so the
+# config ID stays stable across reruns and the new execution is guaranteed to
+# have it attached (the previous `|| echo` fallback would silently leave the
+# execution unconfigured).
+
+EMAIL_AUTH_ROW=$($KC get "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
   | tr -d ' \n' \
-  | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' \
-  | grep -o '"id":"[^"]*"' | head -1 \
+  | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' || true)
+EMAIL_AUTH_ID=$(echo "$EMAIL_AUTH_ROW" | grep -o '"id":"[^"]*"' | head -1 \
   | sed 's/"id":"\([^"]*\)"/\1/' || true)
-if [ -n "$EMAIL_AUTH_ID" ]; then
-  $KC create "authentication/executions/$EMAIL_AUTH_ID/config" -r "$REALM" \
-    -s alias=email-otp-config \
-    -s 'config.length="6"' \
-    -s 'config.ttl="900"' \
-    -s 'config.senderId="Onlineberatung"' \
-    -s 'config.simulation="false"' \
-    || echo "email-otp-config already exists; skipping create"
-else
+
+if [ -z "$EMAIL_AUTH_ID" ]; then
   echo "WARN: email-authenticator execution not found; email-otp-config not attached"
+else
+  # kcadm has no list-authenticator-configs endpoint; the realm representation
+  # carries the array we need under `authenticatorConfig`.
+  EXISTING_CONFIG_ID=$($KC get "realms/$REALM" 2>/dev/null \
+    | tr -d ' \n' \
+    | grep -o '{[^{}]*"alias":"email-otp-config"[^{}]*}' \
+    | grep -o '"id":"[^"]*"' | head -1 \
+    | sed 's/"id":"\([^"]*\)"/\1/' || true)
+
+  if [ -n "$EXISTING_CONFIG_ID" ]; then
+    $KC update "authentication/config/$EXISTING_CONFIG_ID" -r "$REALM" \
+      -s alias=email-otp-config \
+      -s 'config.length="6"' \
+      -s 'config.ttl="900"' \
+      -s 'config.senderId="Onlineberatung"' \
+      -s 'config.simulation="false"'
+
+    # kcadm cannot patch a single field on an execution row — the endpoint
+    # takes a full AuthenticationExecutionInfoRepresentation. Inject the
+    # authenticationConfig id into the row we already fetched and PUT it back.
+    if echo "$EMAIL_AUTH_ROW" | grep -q '"authenticationConfig"'; then
+      UPDATED_ROW=$(echo "$EMAIL_AUTH_ROW" \
+        | sed "s/\"authenticationConfig\":\"[^\"]*\"/\"authenticationConfig\":\"$EXISTING_CONFIG_ID\"/")
+    else
+      UPDATED_ROW=$(echo "$EMAIL_AUTH_ROW" \
+        | sed "s/}$/,\"authenticationConfig\":\"$EXISTING_CONFIG_ID\"}/")
+    fi
+    echo "$UPDATED_ROW" > /tmp/2fa-email-exec.json
+    $KC update "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
+      -f /tmp/2fa-email-exec.json
+    echo "reused existing email-otp-config ($EXISTING_CONFIG_ID) and bound it to execution $EMAIL_AUTH_ID"
+  else
+    # Fresh install: create + attach in a single call.
+    $KC create "authentication/executions/$EMAIL_AUTH_ID/config" -r "$REALM" \
+      -s alias=email-otp-config \
+      -s 'config.length="6"' \
+      -s 'config.ttl="900"' \
+      -s 'config.senderId="Onlineberatung"' \
+      -s 'config.simulation="false"'
+    echo "created email-otp-config and bound it to execution $EMAIL_AUTH_ID"
+  fi
 fi
 
 # grant the technical role (SPI endpoints require it) and bind the flow
