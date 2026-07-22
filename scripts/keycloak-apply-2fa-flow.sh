@@ -23,6 +23,22 @@ fi
 # rebind to stock flow first so the old custom flow can be deleted
 $KC update "realms/$REALM" -s 'directGrantFlow=direct grant'
 
+# Before deleting the flow, capture any existing email-otp-config id from the
+# current email-authenticator execution row. Execution rows are FLAT JSON
+# (no nested `config:{...}` block), so a simple grep on the row is
+# parser-safe — whereas scanning the realm's authenticatorConfig array is
+# not, because each entry contains a nested `config` object whose braces
+# defeat regex-based object matching.
+EXISTING_CONFIG_ID=""
+if $KC get "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
+    > /tmp/2fa-old-email-execs.json 2>/dev/null; then
+  OLD_EMAIL_ROW=$(tr -d ' \n' < /tmp/2fa-old-email-execs.json \
+    | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' || true)
+  EXISTING_CONFIG_ID=$(echo "$OLD_EMAIL_ROW" \
+    | grep -o '"authenticationConfig":"[^"]*"' \
+    | sed 's/"authenticationConfig":"\([^"]*\)"/\1/' || true)
+fi
+
 for alias in "$FLOW"; do
   ID=$($KC get authentication/flows -r "$REALM" --fields id,alias 2>/dev/null \
     | tr -d ' \n' | grep -o "{\"id\":\"[^\"]*\",\"alias\":\"$alias\"}" \
@@ -56,6 +72,65 @@ for id in $ids; do
   echo "$row" | sed "s/\"requirement\":\"[A-Z]*\"/\"requirement\":\"$req\"/" > /tmp/2fa-one.json
   $KC update "authentication/flows/$FLOW/executions" -r "$REALM" -f /tmp/2fa-one.json
 done
+
+# Attach email-otp-config to the freshly recreated email-authenticator execution
+# so the SPI reads length/ttl/senderId/simulation from realm config instead of
+# the fallbacks hard-coded in MemoryOtpService.
+#
+# Truly idempotent: Keycloak does not cascade-delete authenticatorConfig rows
+# when the executions that reference them are removed. If EXISTING_CONFIG_ID
+# was captured above (pre-delete), we reuse and rebind that row so the config
+# id stays stable across reruns. Otherwise we create + attach fresh.
+
+EMAIL_AUTH_ROW=$($KC get "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
+  | tr -d ' \n' \
+  | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' || true)
+EMAIL_AUTH_ID=$(echo "$EMAIL_AUTH_ROW" | grep -o '"id":"[^"]*"' | head -1 \
+  | sed 's/"id":"\([^"]*\)"/\1/' || true)
+
+if [ -z "$EMAIL_AUTH_ID" ]; then
+  echo "WARN: email-authenticator execution not found; email-otp-config not attached"
+elif [ -n "$EXISTING_CONFIG_ID" ]; then
+  $KC update "authentication/config/$EXISTING_CONFIG_ID" -r "$REALM" \
+    -s alias=email-otp-config \
+    -s 'config.length="6"' \
+    -s 'config.ttl="900"' \
+    -s 'config.senderId="Onlineberatung"' \
+    -s 'config.simulation="false"'
+
+  # kcadm cannot patch a single field on an execution row — the endpoint
+  # takes a full AuthenticationExecutionInfoRepresentation. Inject the
+  # authenticationConfig id into the row we already fetched and PUT it back.
+  if echo "$EMAIL_AUTH_ROW" | grep -q '"authenticationConfig"'; then
+    UPDATED_ROW=$(echo "$EMAIL_AUTH_ROW" \
+      | sed "s/\"authenticationConfig\":\"[^\"]*\"/\"authenticationConfig\":\"$EXISTING_CONFIG_ID\"/")
+  else
+    UPDATED_ROW=$(echo "$EMAIL_AUTH_ROW" \
+      | sed "s/}$/,\"authenticationConfig\":\"$EXISTING_CONFIG_ID\"}/")
+  fi
+  echo "$UPDATED_ROW" > /tmp/2fa-email-exec.json
+  $KC update "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
+    -f /tmp/2fa-email-exec.json
+  echo "reused existing email-otp-config ($EXISTING_CONFIG_ID) and bound it to execution $EMAIL_AUTH_ID"
+else
+  # Fresh install: create + attach in a single call. If this fails with
+  # "already exists" it means an orphan config with our alias survived from a
+  # broken prior run; log clearly instead of silently leaving the execution
+  # unconfigured.
+  if $KC create "authentication/executions/$EMAIL_AUTH_ID/config" -r "$REALM" \
+      -s alias=email-otp-config \
+      -s 'config.length="6"' \
+      -s 'config.ttl="900"' \
+      -s 'config.senderId="Onlineberatung"' \
+      -s 'config.simulation="false"'; then
+    echo "created email-otp-config and bound it to execution $EMAIL_AUTH_ID"
+  else
+    echo "ERROR: could not create email-otp-config for execution $EMAIL_AUTH_ID." >&2
+    echo "       An orphaned config with this alias likely exists. Delete it via" >&2
+    echo "       kcadm delete authentication/config/{id} and rerun this script." >&2
+    exit 1
+  fi
+fi
 
 # grant the technical role (SPI endpoints require it) and bind the flow
 $KC add-roles -r "$REALM" --uusername technical --rolename technical || true

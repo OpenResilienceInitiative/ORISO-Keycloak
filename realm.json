@@ -2298,7 +2298,8 @@
           "priority": 20,
           "autheticatorFlow": false,
           "userSetupAllowed": false,
-          "authenticator": "email-authenticator"
+          "authenticator": "email-authenticator",
+          "authenticatorConfig": "email-otp-config"
         }
       ]
     }
@@ -2316,6 +2317,16 @@
       "alias": "review profile config",
       "config": {
         "update.profile.on.first.login": "missing"
+      }
+    },
+    {
+      "id": "1c76a5df-2c30-4d5b-a7ea-4d2f65b93f10",
+      "alias": "email-otp-config",
+      "config": {
+        "length": "6",
+        "ttl": "900",
+        "senderId": "Onlineberatung",
+        "simulation": "false"
       }
     }
   ],

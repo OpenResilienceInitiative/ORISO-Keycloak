@@ -3,6 +3,7 @@ package de.onlineberatung;
 import de.onlineberatung.authenticator.SessionAuthenticator;
 import de.onlineberatung.credential.AppOtpCredentialService;
 import de.onlineberatung.credential.CredentialContext;
+import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Error;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.*;
@@ -10,6 +11,7 @@ import de.onlineberatung.mail.MailSendingException;
 import de.onlineberatung.otp.Otp;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpService;
+import de.onlineberatung.otp.ValidationResult;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -28,7 +30,6 @@ import org.keycloak.models.UserModel;
 import org.keycloak.services.resource.RealmResourceProvider;
 
 import static java.util.Objects.isNull;
-import static java.util.Objects.nonNull;
 
 public class RealmOtpResourceProvider implements RealmResourceProvider {
 
@@ -160,6 +161,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
 
   @PUT
   @Path("send-verification-mail/{username}")
+  @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
   public Response sendVerificationMail(@PathParam("username") final String username,
       final OtpSetupDTO mailSetup) {
@@ -232,22 +234,24 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   }
 
   private Response verifyAndSendMail(CredentialContext context, Otp otp) {
-    var credentialModel = mailCredentialService.getCredential(context);
-    if (isNull(credentialModel)) {
-      credentialModel = mailCredentialService.createCredential(otp, context);
-    } else if (credentialModel.isActive()) {
+    var activeCredential = mailCredentialService.getAllCredentials(context).stream()
+        .filter(MailOtpCredentialModel::isActive)
+        .findFirst();
+    if (activeCredential.isPresent()) {
       return Response.status(Status.CONFLICT).entity(new Error().error(MAIL_OTP_ALREADY_ACTIVE))
           .build();
-    } else {
-      mailCredentialService.update(credentialModel.updateFrom(otp), context);
     }
+
+    // Purge any pending-but-unverified credentials so getDefaultCredential on
+    // the following verify call cannot resolve to a stale row from a duplicate
+    // send-verification-mail request.
+    mailCredentialService.deleteInactiveCredentials(context);
+    var credentialModel = mailCredentialService.createCredential(otp, context);
 
     try {
       mailSender.sendOtpCode(otp, context);
     } catch (MailSendingException e) {
-      if (nonNull(credentialModel)) {
-        mailCredentialService.invalidate(credentialModel, context);
-      }
+      mailCredentialService.invalidate(credentialModel, context);
       logger.error("failed to send verification mail", e);
       return Response.status(Status.INTERNAL_SERVER_ERROR)
           .entity(new Error().error(FAILED_TO_SENT))
@@ -258,47 +262,79 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   }
 
   private Response verifyMailSetup(String initialCode, CredentialContext context) {
-    var credentialModel = mailCredentialService.getCredential(context);
-    if (isNull(credentialModel)) {
+    var credentials = mailCredentialService.getAllCredentials(context);
+    if (credentials.isEmpty()) {
       return Response.status(Status.BAD_REQUEST).entity(
               new Error().error(INVALID_GRANT_ERROR).errorDescription(MISSING_CREDENTIAL_CONFIG))
           .build();
     }
 
-    var otp = credentialModel.getOtp();
-    if (credentialModel.isActive()) {
+    var active = credentials.stream().filter(MailOtpCredentialModel::isActive).findFirst();
+    if (active.isPresent()) {
       return Response.ok(
           new SuccessWithEmail().info("Mail OTP credential is already configured for this User")
-              .email(otp.getEmail())).build();
+              .email(active.get().getOtp().getEmail())).build();
     }
 
-    var validationResult = otpService.validate(initialCode, otp);
-    switch (validationResult) {
-      case NOT_PRESENT:
-        return Response.status(Status.UNAUTHORIZED).entity(
-                new Error().error(INVALID_GRANT_ERROR).errorDescription("No corresponding code"))
-            .build();
-      case EXPIRED:
-        return Response.status(Status.UNAUTHORIZED).entity(
-            new Error().error(INVALID_GRANT_ERROR).errorDescription("Code expired")).build();
-      case INVALID:
-        mailCredentialService.incrementFailedAttempts(credentialModel, context,
-            otp.getFailedVerifications());
-        return Response.status(Status.UNAUTHORIZED).entity(
-            new Error().error(INVALID_GRANT_ERROR).errorDescription("Invalid code")).build();
+    // Validate against every pending credential — under a resend race two
+    // rows can coexist, and the user's code legitimately matches one of them.
+    MailOtpCredentialModel match = null;
+    ValidationResult aggregate = ValidationResult.NOT_PRESENT;
+    for (var cred : credentials) {
+      var result = otpService.validate(initialCode, cred.getOtp());
+      if (result == ValidationResult.VALID) {
+        match = cred;
+        break;
+      }
+      if (severity(result) > severity(aggregate)) {
+        aggregate = result;
+      }
+    }
+
+    if (match != null) {
+      // `match` is a reference into `credentials`, so reference equality
+      // uniquely identifies the winning row — and unlike getId() it is safe
+      // for freshly-built credential models that have not been persisted yet.
+      for (var cred : credentials) {
+        if (cred != match) {
+          mailCredentialService.deleteById(context, cred.getId());
+        }
+      }
+      mailCredentialService.activate(match, context);
+      return Response.status(Status.CREATED)
+          .entity(new SuccessWithEmail().email(match.getOtp().getEmail()).info("OTP setup created"))
+          .build();
+    }
+
+    for (var cred : credentials) {
+      mailCredentialService.incrementFailedAttempts(cred, context,
+          cred.getOtp().getFailedVerifications());
+    }
+    switch (aggregate) {
       case TOO_MANY_FAILED_ATTEMPTS:
         return Response.status(Status.TOO_MANY_REQUESTS).entity(
             new Error().error(INVALID_GRANT_ERROR)
                 .errorDescription("Maximal number of failed attempts reached")).build();
-      case VALID:
-        mailCredentialService.activate(credentialModel, context);
-        return Response.status(Status.CREATED)
-            .entity(new SuccessWithEmail().email(otp.getEmail()).info("OTP setup created"))
+      case EXPIRED:
+        return Response.status(Status.UNAUTHORIZED).entity(
+            new Error().error(INVALID_GRANT_ERROR).errorDescription("Code expired")).build();
+      case NOT_PRESENT:
+        return Response.status(Status.UNAUTHORIZED).entity(
+                new Error().error(INVALID_GRANT_ERROR).errorDescription("No corresponding code"))
             .build();
       default:
-        return Response.status(Status.INTERNAL_SERVER_ERROR).entity(
-                new Error().error(INVALID_GRANT_ERROR).errorDescription("failed to validate code"))
-            .build();
+        return Response.status(Status.UNAUTHORIZED).entity(
+            new Error().error(INVALID_GRANT_ERROR).errorDescription("Invalid code")).build();
+    }
+  }
+
+  private static int severity(ValidationResult result) {
+    switch (result) {
+      case TOO_MANY_FAILED_ATTEMPTS: return 4;
+      case EXPIRED: return 3;
+      case INVALID: return 2;
+      case NOT_PRESENT: return 1;
+      default: return 0;
     }
   }
 }
