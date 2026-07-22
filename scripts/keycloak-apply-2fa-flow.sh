@@ -57,6 +57,27 @@ for id in $ids; do
   $KC update "authentication/flows/$FLOW/executions" -r "$REALM" -f /tmp/2fa-one.json
 done
 
+# attach email-otp-config to the email-authenticator execution so the SPI reads
+# length/ttl/senderId/simulation from realm config instead of the hard-coded
+# fallbacks in MemoryOtpService. Idempotent: kcadm rejects duplicate-alias
+# creates, which we swallow so re-running the script does not fail.
+EMAIL_AUTH_ID=$($KC get "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
+  | tr -d ' \n' \
+  | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' \
+  | grep -o '"id":"[^"]*"' | head -1 \
+  | sed 's/"id":"\([^"]*\)"/\1/' || true)
+if [ -n "$EMAIL_AUTH_ID" ]; then
+  $KC create "authentication/executions/$EMAIL_AUTH_ID/config" -r "$REALM" \
+    -s alias=email-otp-config \
+    -s 'config.length="6"' \
+    -s 'config.ttl="900"' \
+    -s 'config.senderId="Onlineberatung"' \
+    -s 'config.simulation="false"' \
+    || echo "email-otp-config already exists; skipping create"
+else
+  echo "WARN: email-authenticator execution not found; email-otp-config not attached"
+fi
+
 # grant the technical role (SPI endpoints require it) and bind the flow
 $KC add-roles -r "$REALM" --uusername technical --rolename technical || true
 $KC update "realms/$REALM" -s "directGrantFlow=$FLOW"

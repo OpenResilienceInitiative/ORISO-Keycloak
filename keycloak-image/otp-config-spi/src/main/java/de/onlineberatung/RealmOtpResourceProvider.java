@@ -11,6 +11,7 @@ import de.onlineberatung.mail.MailSendingException;
 import de.onlineberatung.otp.Otp;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpService;
+import de.onlineberatung.otp.ValidationResult;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -261,47 +262,76 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   }
 
   private Response verifyMailSetup(String initialCode, CredentialContext context) {
-    var credentialModel = mailCredentialService.getCredential(context);
-    if (isNull(credentialModel)) {
+    var credentials = mailCredentialService.getAllCredentials(context);
+    if (credentials.isEmpty()) {
       return Response.status(Status.BAD_REQUEST).entity(
               new Error().error(INVALID_GRANT_ERROR).errorDescription(MISSING_CREDENTIAL_CONFIG))
           .build();
     }
 
-    var otp = credentialModel.getOtp();
-    if (credentialModel.isActive()) {
+    var active = credentials.stream().filter(MailOtpCredentialModel::isActive).findFirst();
+    if (active.isPresent()) {
       return Response.ok(
           new SuccessWithEmail().info("Mail OTP credential is already configured for this User")
-              .email(otp.getEmail())).build();
+              .email(active.get().getOtp().getEmail())).build();
     }
 
-    var validationResult = otpService.validate(initialCode, otp);
-    switch (validationResult) {
-      case NOT_PRESENT:
-        return Response.status(Status.UNAUTHORIZED).entity(
-                new Error().error(INVALID_GRANT_ERROR).errorDescription("No corresponding code"))
-            .build();
-      case EXPIRED:
-        return Response.status(Status.UNAUTHORIZED).entity(
-            new Error().error(INVALID_GRANT_ERROR).errorDescription("Code expired")).build();
-      case INVALID:
-        mailCredentialService.incrementFailedAttempts(credentialModel, context,
-            otp.getFailedVerifications());
-        return Response.status(Status.UNAUTHORIZED).entity(
-            new Error().error(INVALID_GRANT_ERROR).errorDescription("Invalid code")).build();
+    // Validate against every pending credential — under a resend race two
+    // rows can coexist, and the user's code legitimately matches one of them.
+    MailOtpCredentialModel match = null;
+    ValidationResult aggregate = ValidationResult.NOT_PRESENT;
+    for (var cred : credentials) {
+      var result = otpService.validate(initialCode, cred.getOtp());
+      if (result == ValidationResult.VALID) {
+        match = cred;
+        break;
+      }
+      if (severity(result) > severity(aggregate)) {
+        aggregate = result;
+      }
+    }
+
+    if (match != null) {
+      for (var cred : credentials) {
+        if (!cred.getId().equals(match.getId())) {
+          mailCredentialService.deleteById(context, cred.getId());
+        }
+      }
+      mailCredentialService.activate(match, context);
+      return Response.status(Status.CREATED)
+          .entity(new SuccessWithEmail().email(match.getOtp().getEmail()).info("OTP setup created"))
+          .build();
+    }
+
+    for (var cred : credentials) {
+      mailCredentialService.incrementFailedAttempts(cred, context,
+          cred.getOtp().getFailedVerifications());
+    }
+    switch (aggregate) {
       case TOO_MANY_FAILED_ATTEMPTS:
         return Response.status(Status.TOO_MANY_REQUESTS).entity(
             new Error().error(INVALID_GRANT_ERROR)
                 .errorDescription("Maximal number of failed attempts reached")).build();
-      case VALID:
-        mailCredentialService.activate(credentialModel, context);
-        return Response.status(Status.CREATED)
-            .entity(new SuccessWithEmail().email(otp.getEmail()).info("OTP setup created"))
+      case EXPIRED:
+        return Response.status(Status.UNAUTHORIZED).entity(
+            new Error().error(INVALID_GRANT_ERROR).errorDescription("Code expired")).build();
+      case NOT_PRESENT:
+        return Response.status(Status.UNAUTHORIZED).entity(
+                new Error().error(INVALID_GRANT_ERROR).errorDescription("No corresponding code"))
             .build();
       default:
-        return Response.status(Status.INTERNAL_SERVER_ERROR).entity(
-                new Error().error(INVALID_GRANT_ERROR).errorDescription("failed to validate code"))
-            .build();
+        return Response.status(Status.UNAUTHORIZED).entity(
+            new Error().error(INVALID_GRANT_ERROR).errorDescription("Invalid code")).build();
+    }
+  }
+
+  private static int severity(ValidationResult result) {
+    switch (result) {
+      case TOO_MANY_FAILED_ATTEMPTS: return 4;
+      case EXPIRED: return 3;
+      case INVALID: return 2;
+      case NOT_PRESENT: return 1;
+      default: return 0;
     }
   }
 }

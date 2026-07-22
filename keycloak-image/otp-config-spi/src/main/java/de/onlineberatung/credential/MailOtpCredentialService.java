@@ -75,6 +75,10 @@ public class MailOtpCredentialService {
     }
   }
 
+  public void deleteById(CredentialContext context, String credentialId) {
+    credentialProvider.deleteCredential(context.getRealm(), context.getUser(), credentialId);
+  }
+
   public void invalidate(MailOtpCredentialModel credentialModel, CredentialContext context) {
     credentialModel.updateFailedVerifications(0);
     credentialModel.invalidateCode();

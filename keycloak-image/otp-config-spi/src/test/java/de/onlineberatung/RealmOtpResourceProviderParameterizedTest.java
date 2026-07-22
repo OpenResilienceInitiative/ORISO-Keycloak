@@ -17,6 +17,7 @@ import de.onlineberatung.otp.ValidationResult;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -62,7 +63,7 @@ public class RealmOtpResourceProviderParameterizedTest {
     otp = new Otp("123", 11L, 112L, null, 0);
     MailOtpCredentialModel credentialModel = MailOtpCredentialModel.createOtpModel(otp,
         Clock.systemDefaultZone(), false);
-    when(credentialService.getCredential(any())).thenReturn(credentialModel);
+    when(credentialService.getAllCredentials(any())).thenReturn(List.of(credentialModel));
     var mailSender = mock(OtpMailSender.class);
     var sessionAuthenticator = mock(SessionAuthenticator.class);
     var keycloakContext = mock(KeycloakContext.class);

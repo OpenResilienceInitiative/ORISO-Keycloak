@@ -25,6 +25,7 @@ import java.util.List;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class RealmOtpResourceProviderTest {
@@ -179,11 +180,9 @@ public class RealmOtpResourceProviderTest {
     mailSetup.setInitialCode("1223");
     var otp = new Otp("1223", 1L, 2L, "hk@test.de", 0);
     var credentialModel = MailOtpCredentialModel.createOtpModel(otp, Clock.systemDefaultZone());
-    when(otpService.validate("1223", otp)).thenReturn(
-        ValidationResult.VALID);
-    when(mailCredentialService.getCredential(credentialContext)).thenReturn(credentialModel);
-    when(mailCredentialService.createCredential(otp, credentialContext)).thenReturn(
-        credentialModel);
+    when(otpService.validate(eq("1223"), any())).thenReturn(ValidationResult.VALID);
+    when(mailCredentialService.getAllCredentials(credentialContext)).thenReturn(
+        List.of(credentialModel));
 
     var response = resourceProvider.setupOtpMail("heinrich", mailSetup);
 
@@ -214,9 +213,8 @@ public class RealmOtpResourceProviderTest {
     var otp = new Otp("1223", 1L, 2L, "hk@test.de", 0);
     var activatedCredentials = MailOtpCredentialModel.createOtpModel(otp, Clock.systemDefaultZone(),
         true);
-    when(mailCredentialService.getCredential(credentialContext)).thenReturn(activatedCredentials);
-    when(mailCredentialService.createCredential(otp, credentialContext)).thenReturn(
-        activatedCredentials);
+    when(mailCredentialService.getAllCredentials(credentialContext)).thenReturn(
+        List.of(activatedCredentials));
 
     var response = resourceProvider.setupOtpMail("heinrich", mailSetup);
 
@@ -231,16 +229,38 @@ public class RealmOtpResourceProviderTest {
     when(userProvider.getUserByUsername(realm, "heinrich")).thenReturn(user);
     var otp = new Otp("1223", 1L, 2L, "hk@test.de", 0);
     var credentialModel = MailOtpCredentialModel.createOtpModel(otp, Clock.systemDefaultZone());
-    when(otpService.validate("1223", otp)).thenReturn(
-        ValidationResult.VALID);
-    when(mailCredentialService.getCredential(credentialContext)).thenReturn(credentialModel);
-    when(mailCredentialService.createCredential(otp, credentialContext)).thenReturn(
-        credentialModel);
+    when(otpService.validate(eq("1223"), any())).thenReturn(ValidationResult.VALID);
+    when(mailCredentialService.getAllCredentials(credentialContext)).thenReturn(
+        List.of(credentialModel));
 
     var response = resourceProvider.setupOtpMail("heinrich", mailSetup);
 
     assertThat(response.getStatus()).isEqualTo(201);
     verify(appCredentialService).deleteCredentials(any(CredentialContext.class));
+  }
+
+  @Test
+  public void setupOtpMail_should_accept_code_matching_a_second_pending_credential() {
+    when(userProvider.getUserByUsername(realm, "heinrich")).thenReturn(user);
+    var mailSetup = new OtpSetupDTO();
+    mailSetup.setInitialCode("999999");
+    var staleOtp = new Otp("111111", 1L, 2L, "hk@test.de", 0);
+    var freshOtp = new Otp("999999", 1L, 3L, "hk@test.de", 0);
+    var stale = MailOtpCredentialModel.createOtpModel(staleOtp, Clock.systemDefaultZone(), false);
+    stale.setId("stale-id");
+    var fresh = MailOtpCredentialModel.createOtpModel(freshOtp, Clock.systemDefaultZone(), false);
+    fresh.setId("fresh-id");
+    when(mailCredentialService.getAllCredentials(credentialContext)).thenReturn(
+        List.of(stale, fresh));
+    when(otpService.validate("999999", stale.getOtp())).thenReturn(ValidationResult.INVALID);
+    when(otpService.validate("999999", fresh.getOtp())).thenReturn(ValidationResult.VALID);
+
+    var response = resourceProvider.setupOtpMail("heinrich", mailSetup);
+
+    assertThat(response.getStatus()).isEqualTo(201);
+    verify(mailCredentialService).deleteById(credentialContext, "stale-id");
+    verify(mailCredentialService).activate(fresh, credentialContext);
+    verify(mailCredentialService, never()).deleteById(credentialContext, "fresh-id");
   }
 
   @Test
