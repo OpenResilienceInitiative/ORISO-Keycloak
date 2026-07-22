@@ -292,8 +292,11 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
     }
 
     if (match != null) {
+      // `match` is a reference into `credentials`, so reference equality
+      // uniquely identifies the winning row — and unlike getId() it is safe
+      // for freshly-built credential models that have not been persisted yet.
       for (var cred : credentials) {
-        if (!cred.getId().equals(match.getId())) {
+        if (cred != match) {
           mailCredentialService.deleteById(context, cred.getId());
         }
       }
