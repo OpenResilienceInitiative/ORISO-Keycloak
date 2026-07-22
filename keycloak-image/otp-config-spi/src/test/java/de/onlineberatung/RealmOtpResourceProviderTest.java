@@ -21,6 +21,7 @@ import org.keycloak.models.credential.OTPCredentialModel;
 import org.mockito.Mockito;
 
 import java.time.Clock;
+import java.util.List;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -73,24 +74,24 @@ public class RealmOtpResourceProviderTest {
   }
 
   @Test
-  public void sendVerificationMail_should_update_and_send_credentials_if_mail_was_already_send_but_not_verified_yet() {
+  public void sendVerificationMail_should_replace_pending_credentials_when_resent() {
     var mailSetup = new OtpSetupDTO();
     mailSetup.setEmail("hk@test.de");
     when(userProvider.getUserByUsername(realm, "heinrich")).thenReturn(user);
     var oldOtp = new Otp("1223", 1L, 2L, "hk@test.de", 0);
     var notYetActivatedCredentials = MailOtpCredentialModel.createOtpModel(oldOtp,
         Clock.systemDefaultZone(), false);
-    when(mailCredentialService.getCredential(credentialContext)).thenReturn(
-        notYetActivatedCredentials);
+    when(mailCredentialService.getAllCredentials(credentialContext)).thenReturn(
+        List.of(notYetActivatedCredentials));
     var newOtp = new Otp("667722", 1L, 3L, "hk@test.de", 0);
     when(otpService.createOtp("hk@test.de")).thenReturn(newOtp);
 
     var response = resourceProvider.sendVerificationMail("heinrich", mailSetup);
 
     assertThat(response.getStatus()).isEqualTo(200);
-    var expectedCredentials = notYetActivatedCredentials.updateFrom(newOtp);
+    verify(mailCredentialService).deleteInactiveCredentials(credentialContext);
+    verify(mailCredentialService).createCredential(newOtp, credentialContext);
     verify(mailSender).sendOtpCode(newOtp, credentialContext);
-    verify(mailCredentialService).update(expectedCredentials, credentialContext);
   }
 
   @Test
@@ -137,13 +138,14 @@ public class RealmOtpResourceProviderTest {
     var otp = new Otp("1223", 1L, 2L, "hk@test.de", 0);
     var activatedCredentials = MailOtpCredentialModel.createOtpModel(otp, Clock.systemDefaultZone(),
         true);
-    when(mailCredentialService.getCredential(credentialContext)).thenReturn(activatedCredentials);
-    when(mailCredentialService.createCredential(otp, credentialContext)).thenReturn(
-        activatedCredentials);
+    when(mailCredentialService.getAllCredentials(credentialContext)).thenReturn(
+        List.of(activatedCredentials));
 
     var response = resourceProvider.sendVerificationMail("heinrich", mailSetup);
 
     assertThat(response.getStatus()).isEqualTo(409);
+    verify(mailCredentialService, never()).createCredential(any(), any());
+    verify(mailCredentialService, never()).deleteInactiveCredentials(any());
   }
 
   @Test

@@ -6,6 +6,7 @@ import de.onlineberatung.otp.OtpMailSender;
 import org.keycloak.email.EmailTemplateProvider;
 import org.keycloak.email.freemarker.FreeMarkerEmailTemplateProvider;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.utils.UserModelDelegate;
 
 import java.util.HashMap;
 
@@ -32,11 +33,15 @@ public class DefaultMailSender implements OtpMailSender {
     }
   }
 
+  // Wrap the user so the verification email goes to the address being
+  // enrolled without persisting it as the account email before verification.
   private UserModel createMailRecipient(Otp otp, CredentialContext context) {
-    var mailRecipient = context.getUser();
-    mailRecipient.setEmail(otp.getEmail());
-
-    return mailRecipient;
+    return new UserModelDelegate(context.getUser()) {
+      @Override
+      public String getEmail() {
+        return otp.getEmail();
+      }
+    };
   }
 
   private HashMap<String, Object> createMailAttributes(Otp otp) {

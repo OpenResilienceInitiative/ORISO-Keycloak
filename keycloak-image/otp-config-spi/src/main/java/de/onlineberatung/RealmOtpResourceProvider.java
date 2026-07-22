@@ -3,6 +3,7 @@ package de.onlineberatung;
 import de.onlineberatung.authenticator.SessionAuthenticator;
 import de.onlineberatung.credential.AppOtpCredentialService;
 import de.onlineberatung.credential.CredentialContext;
+import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Error;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.*;
@@ -28,7 +29,6 @@ import org.keycloak.models.UserModel;
 import org.keycloak.services.resource.RealmResourceProvider;
 
 import static java.util.Objects.isNull;
-import static java.util.Objects.nonNull;
 
 public class RealmOtpResourceProvider implements RealmResourceProvider {
 
@@ -160,6 +160,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
 
   @PUT
   @Path("send-verification-mail/{username}")
+  @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
   public Response sendVerificationMail(@PathParam("username") final String username,
       final OtpSetupDTO mailSetup) {
@@ -232,22 +233,24 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   }
 
   private Response verifyAndSendMail(CredentialContext context, Otp otp) {
-    var credentialModel = mailCredentialService.getCredential(context);
-    if (isNull(credentialModel)) {
-      credentialModel = mailCredentialService.createCredential(otp, context);
-    } else if (credentialModel.isActive()) {
+    var activeCredential = mailCredentialService.getAllCredentials(context).stream()
+        .filter(MailOtpCredentialModel::isActive)
+        .findFirst();
+    if (activeCredential.isPresent()) {
       return Response.status(Status.CONFLICT).entity(new Error().error(MAIL_OTP_ALREADY_ACTIVE))
           .build();
-    } else {
-      mailCredentialService.update(credentialModel.updateFrom(otp), context);
     }
+
+    // Purge any pending-but-unverified credentials so getDefaultCredential on
+    // the following verify call cannot resolve to a stale row from a duplicate
+    // send-verification-mail request.
+    mailCredentialService.deleteInactiveCredentials(context);
+    var credentialModel = mailCredentialService.createCredential(otp, context);
 
     try {
       mailSender.sendOtpCode(otp, context);
     } catch (MailSendingException e) {
-      if (nonNull(credentialModel)) {
-        mailCredentialService.invalidate(credentialModel, context);
-      }
+      mailCredentialService.invalidate(credentialModel, context);
       logger.error("failed to send verification mail", e);
       return Response.status(Status.INTERNAL_SERVER_ERROR)
           .entity(new Error().error(FAILED_TO_SENT))

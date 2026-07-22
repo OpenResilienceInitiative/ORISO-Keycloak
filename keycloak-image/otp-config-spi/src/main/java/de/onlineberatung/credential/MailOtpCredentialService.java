@@ -1,10 +1,11 @@
 package de.onlineberatung.credential;
 
-import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
 
 import de.onlineberatung.otp.Otp;
 import java.time.Clock;
+import java.util.List;
+import java.util.stream.Collectors;
 
 public class MailOtpCredentialService {
 
@@ -49,12 +50,29 @@ public class MailOtpCredentialService {
         context.getUser());
   }
 
+  public List<MailOtpCredentialModel> getAllCredentials(CredentialContext context) {
+    return context.getUser().credentialManager()
+        .getStoredCredentialsByTypeStream(MailOtpCredentialModel.TYPE)
+        .map(MailOtpCredentialModel::createFromCredentialModel)
+        .collect(Collectors.toList());
+  }
+
   public void deleteCredential(CredentialContext context) {
-    var credential = getCredential(context);
-    if (isNull(credential)) {
-      return;
+    var credentials = getAllCredentials(context);
+    for (var credential : credentials) {
+      credentialProvider.deleteCredential(context.getRealm(), context.getUser(),
+          credential.getId());
     }
-    credentialProvider.deleteCredential(context.getRealm(), context.getUser(), credential.getId());
+  }
+
+  public void deleteInactiveCredentials(CredentialContext context) {
+    var credentials = getAllCredentials(context);
+    for (var credential : credentials) {
+      if (!credential.isActive()) {
+        credentialProvider.deleteCredential(context.getRealm(), context.getUser(),
+            credential.getId());
+      }
+    }
   }
 
   public void invalidate(MailOtpCredentialModel credentialModel, CredentialContext context) {
