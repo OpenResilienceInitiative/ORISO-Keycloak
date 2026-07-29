@@ -109,6 +109,12 @@
       <version>4.8.0</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.freemarker</groupId>
+      <artifactId>freemarker</artifactId>
+      <version>2.3.34</version>
+      <scope>test</scope>
+    </dependency>
 
     <dependency>
       <groupId>org.yaml</groupId>
