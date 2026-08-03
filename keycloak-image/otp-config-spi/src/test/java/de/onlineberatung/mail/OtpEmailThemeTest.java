@@ -22,23 +22,48 @@ import org.junit.Test;
 public class OtpEmailThemeTest {
 
   @Test
-  public void rendersReadableSelectableOtpInOrisoEmailDesignWithoutClientSideScript()
-      throws Exception {
+  public void rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript() throws Exception {
     String html = renderHtml("de", "123456", 15);
 
     assertThat(html)
         .contains("<html lang=\"de\">")
-        .contains(">ORISO</td>")
-        .contains("Ihr 2FA-Code")
-        .contains("aria-label=\"Ihr 2FA-Code: 123456\"")
-        .contains(">123456</")
-        .contains("user-select:all")
-        .contains("Zum Kopieren den Code doppelklicken oder gedrückt halten.")
-        .contains("15 Minuten")
-        .doesNotContain("Onlineberatung")
+        .contains("Ihr Einmalcode")
+        .contains("123456")
+        .contains("Geben Sie diesen Code im Anmeldefenster ein.")
         .doesNotContain("data:image")
         .doesNotContain("<script")
         .doesNotContain("onclick=");
+  }
+
+  @Test
+  public void usesTheDesignSystemSkeletonRatherThanItsOwn() throws Exception {
+    String html = renderHtml("de", "123456", 15);
+
+    // The template is generated from the ORISO e-mail design system
+    // (ORISO-Frontend `npm run emails:keycloak`), so it has to carry the design
+    // system's canvas and column and not the skeleton this theme used to build
+    // for itself.
+    assertThat(html)
+        .contains("#f2efef")
+        .contains("width=\"600\"")
+        .contains("Inter")
+        .doesNotContain("#f4f6fa")
+        .doesNotContain("#0f3b8f");
+  }
+
+  @Test
+  public void offersNoButtonBackToTheLoginScreen() throws Exception {
+    // The recipient is already in the window that asked for the code. A link
+    // back to the login screen would compete with the flow they are halfway
+    // through.
+    assertThat(renderHtml("de", "123456", 15)).doesNotContain("Zur Anmeldung");
+  }
+
+  @Test
+  public void carriesNoUnsubscribeLink() throws Exception {
+    // A one-time code is in the security class (ADR-019): nothing switches it
+    // off, so the footer must not pretend otherwise.
+    assertThat(renderHtml("de", "123456", 15)).doesNotContain("abbestellen</a>");
   }
 
   @Test
@@ -47,13 +72,10 @@ public class OtpEmailThemeTest {
 
     assertThat(html)
         .contains("<html lang=\"en\">")
-        .contains("Your 2FA code")
-        .contains("aria-label=\"Your 2FA code: 654321\"")
-        .contains(">654321</")
-        .contains("Double-click or press and hold the code to copy it.")
-        .contains("10 minutes")
-        .doesNotContain("Ihr 2FA-Code")
-        .doesNotContain("Onlineberatung");
+        .contains("Your one-time code")
+        .contains("654321")
+        .contains("Enter this code in the sign-in window.")
+        .doesNotContain("Ihr Einmalcode");
   }
 
   private String renderHtml(String language, String otp, int ttl) throws Exception {
@@ -71,7 +93,15 @@ public class OtpEmailThemeTest {
     configuration.setOutputFormat(HTMLOutputFormat.INSTANCE);
     configuration.setDirectoryForTemplateLoading(emailTheme.resolve("html").toFile());
 
+    Properties themeProperties = new Properties();
+    try (var reader =
+        Files.newBufferedReader(
+            emailTheme.resolve("theme.properties"), StandardCharsets.UTF_8)) {
+      themeProperties.load(reader);
+    }
+
     Map<String, Object> model = new HashMap<>();
+    model.put("properties", themeProperties);
     model.put("otp", otp);
     model.put("ttl", ttl);
     model.put("locale", Locale.forLanguageTag(language));
