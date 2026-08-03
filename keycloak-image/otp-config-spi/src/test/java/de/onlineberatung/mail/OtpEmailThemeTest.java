@@ -67,6 +67,20 @@ public class OtpEmailThemeTest {
   }
 
   @Test
+  public void rendersWithoutThemeProperties() throws Exception {
+    // The Helm chart mounts email/{html,messages,text} and no theme.properties,
+    // so every theme lookup carries its own default. Without that, the button
+    // would render with an empty background-color — that is, no button.
+    String html = renderHtml("de", "123456", 15, false);
+
+    assertThat(html)
+        .contains("<!DOCTYPE html>")
+        .contains("123456")
+        .doesNotContain("background-color:;")
+        .doesNotContain("href=\"\"");
+  }
+
+  @Test
   public void rendersEnglishCopyForEnglishRecipients() throws Exception {
     String html = renderHtml("en", "654321", 10);
 
@@ -79,6 +93,11 @@ public class OtpEmailThemeTest {
   }
 
   private String renderHtml(String language, String otp, int ttl) throws Exception {
+    return renderHtml(language, otp, ttl, true);
+  }
+
+  private String renderHtml(String language, String otp, int ttl, boolean withThemeProperties)
+      throws Exception {
     Path emailTheme = Path.of(System.getProperty("basedir")).resolve("../themes/oriso/email");
     Properties messages = new Properties();
     try (var reader =
@@ -101,7 +120,9 @@ public class OtpEmailThemeTest {
     }
 
     Map<String, Object> model = new HashMap<>();
-    model.put("properties", themeProperties);
+    if (withThemeProperties) {
+      model.put("properties", themeProperties);
+    }
     model.put("otp", otp);
     model.put("ttl", ttl);
     model.put("locale", Locale.forLanguageTag(language));
