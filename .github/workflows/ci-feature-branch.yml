@@ -1,0 +1,22 @@
+name: CI - Feature Branch
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - dev
+      - pre-dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Compile and Package Java application
+        uses: ./.github/actions/maven-build
+        with:
+          java_version: "21"
+          working_directory: keycloak-image/otp-config-spi
