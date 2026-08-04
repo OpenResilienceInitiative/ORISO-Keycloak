@@ -1,42 +1,21 @@
-<!doctype html>
+<#ftl output_format="HTML">
+<!DOCTYPE html>
 <html lang="${locale.language}">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${kcSanitize(msg("emailHeading"))?no_esc}</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>${msg("emailSubject")?no_esc}</title>
+<!--[if mso]><style>body,table,td,a{font-family:Arial,Helvetica,sans-serif !important}</style><![endif]-->
+<style>
+  img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;max-width:100%}table{border-collapse:collapse}a[x-apple-data-detectors]{color:inherit !important;text-decoration:none !important;font-size:inherit !important;font-family:inherit !important;font-weight:inherit !important;line-height:inherit !important}
+  @media only screen and (max-width:620px){.wrap{width:100% !important;max-width:100% !important}.edge{padding:24px 8px 32px 8px !important}.sp{padding-left:24px !important;padding-right:24px !important}.h1{font-size:22px !important;line-height:30px !important}.btn table{width:100% !important}.btn td{width:100% !important}.btn a{display:block !important;padding-left:20px !important;padding-right:20px !important;text-align:center !important}.panel-pad{padding:18px 16px !important}.code{font-size:26px !important;line-height:34px !important;letter-spacing:3px !important}.row-label{display:block !important;width:100% !important;padding:14px 0 2px 0 !important}.row-value{display:block !important;width:100% !important;padding:0 !important}.row-first{padding-top:0 !important}.flinks a{display:inline-block !important;white-space:normal !important;padding:3px 0 !important}}
+</style>
 </head>
-<body style="margin:0; padding:0; background-color:#f4f6fa; color:#1f2937; font-family:Arial, Helvetica, sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%; background-color:#f4f6fa;">
-    <tr>
-      <td align="center" style="padding:32px 16px;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
-          <tr>
-            <td align="center" style="padding:24px 32px; background-color:#0f3b8f; color:#ffffff; font-size:28px; font-weight:700; letter-spacing:0.5px;">ORISO</td>
-          </tr>
-          <tr>
-            <td style="padding:36px 40px 40px;">
-              <h1 style="margin:0 0 16px; color:#111827; font-size:26px; line-height:1.25;">${kcSanitize(msg("emailHeading"))?no_esc}</h1>
-              <p style="margin:0 0 28px; color:#4b5563; font-size:16px; line-height:1.6;">${kcSanitize(msg("emailIntro"))?no_esc}</p>
-
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%; margin:0 0 12px; background-color:#eef3ff; border:1px solid #c7d6fa; border-radius:10px;">
-                <tr>
-                  <td align="center" style="padding:22px 16px;">
-                    <div aria-label="${kcSanitize(msg("emailCodeAriaLabel", otp))?no_esc}" style="display:inline-block; color:#0f3b8f; font-family:'Courier New', Courier, monospace; font-size:36px; font-weight:700; line-height:1; letter-spacing:8px; white-space:nowrap; user-select:all; -webkit-user-select:all;">${kcSanitize(msg("emailCodeBody", otp))?no_esc}</div>
-                  </td>
-                </tr>
-              </table>
-
-              <p style="margin:0 0 24px; color:#6b7280; font-size:13px; line-height:1.5; text-align:center;">${kcSanitize(msg("emailCopyHint"))?no_esc}</p>
-              <p style="margin:0 0 20px; color:#374151; font-size:15px; line-height:1.6;">${kcSanitize(msg("emailExpiryBody", ttl))?no_esc}</p>
-              <p style="margin:0; padding-top:20px; border-top:1px solid #e5e7eb; color:#6b7280; font-size:13px; line-height:1.6;">${kcSanitize(msg("emailSecurityNotice"))?no_esc}</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:20px 32px; background-color:#f9fafb; color:#6b7280; font-size:13px;">${kcSanitize(msg("emailFooter"))?no_esc}</td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+<body style="margin:0;padding:0;width:100%;background-color:#f2efef;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<span style="display:none !important;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#f2efef;"></span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f2efef;"><tr><td class="edge" align="center" style="padding:32px 12px 48px 12px;"><table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;"><tr><td class="sp" style="padding:0px 40px 20px 40px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="36" valign="middle" style="width:36px;padding-right:12px;"><img src="${(properties.orisoLogoUrl)!''}" width="36" height="36" alt="${(properties.orisoPlatformName)!'Online-Beratung'}" style="display:block;width:36px;height:36px;border:0;border-radius:8px;"></td><td valign="middle" style="font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:16px;line-height:24px;font-weight:600;letter-spacing:0.15px;color:#1d1b1b;">${(properties.orisoPlatformName)!'Online-Beratung'}</td></tr></table></td></tr><tr><td style="padding:0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="background-color:#ffffff;border-radius:24px;border:1px solid #e0dada;"><tr><td class="sp" style="padding:36px 40px 0px 40px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="44" style="width:44px;"><tr><td height="4" bgcolor="${(properties.orisoAccentColor)!'#cc1e1c'}" style="height:4px;line-height:4px;font-size:0;border-radius:999px;background-color:${(properties.orisoAccentColor)!'#cc1e1c'};">&nbsp;</td></tr></table></td></tr><tr><td class="sp" style="padding:18px 40px 14px 40px;"><h1 class="h1" style="margin:0;font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:24px;line-height:32px;font-weight:500;color:#1d1b1b;mso-line-height-rule:exactly;">${msg("orisoOtpHeadline")?no_esc}</h1></td></tr><tr><td class="sp" style="padding:0px 40px 28px 40px;font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:16px;line-height:26px;color:#1d1b1b;mso-line-height-rule:exactly;;">${msg("orisoOtpBody1")?no_esc}</td></tr><tr><td class="sp panel" style="padding:0px 40px 8px 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#faf6f6" style="background-color:#faf6f6;border:1px solid #e0dada;border-radius:12px;"><tr><td class="panel-pad" align="center" style="padding:20px 22px;text-align:center;"><div style="font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;line-height:20px;letter-spacing:0.25px;color:#5c5555;padding-bottom:6px;">${msg("orisoOtpCodeLabel")?no_esc}</div><div class="code" style="font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:32px;line-height:40px;font-weight:600;letter-spacing:4px;color:#1d1b1b;word-break:break-word;">${otp}</div></td></tr></table></td></tr><tr><td class="sp" style="padding:24px 40px 0px 40px;font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:14px;line-height:22px;letter-spacing:0.25px;color:#5c5555;">${msg("orisoOtpFootnote")?no_esc}</td></tr><tr><td class="sp" style="padding:28px 40px 0px 40px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="1" bgcolor="#e0dada" style="height:1px;line-height:1px;font-size:0;">&nbsp;</td></tr></table></td></tr><tr><td class="sp" style="padding:16px 40px 32px 40px;font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#5c5555;">${msg("orisoOtpAssurance")?no_esc}</td></tr></table></td></tr><tr><td class="sp" style="padding:28px 40px 0px 40px;font-family:Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif;font-size:12px;line-height:18px;color:#5c5555;word-break:break-word;"><div style="color:#1d1b1b;font-weight:600;font-size:13px;line-height:20px;">${(properties.orisoOrgName)!'ORISO'}</div><div style="padding-top:2px;">${(properties.orisoOrgAddress)!''}</div><div>${(properties.orisoContactLine)!''}</div><div style="padding-top:14px;">${msg("orisoOtpOfferedBy", (properties.orisoPlatformName)!'Online-Beratung', (properties.orisoOrgName)!'ORISO')?no_esc}</div><div class="flinks" style="padding-top:14px;"><a href="${(properties.orisoPrivacyUrl)!'https://app.oriso.org/datenschutz'}" style="color:#5c5555;text-decoration:underline;white-space:nowrap;">${msg("orisoOtpFooterLink1")?no_esc}</a><span style="color:#c4bcbc;">&nbsp; · &nbsp;</span><a href="${(properties.orisoImprintUrl)!'https://app.oriso.org/impressum'}" style="color:#5c5555;text-decoration:underline;white-space:nowrap;">${msg("orisoOtpFooterLink2")?no_esc}</a></div><div style="padding-top:14px;color:#8a8080;">${msg("orisoOtpAutomatedNote")?no_esc}</div></td></tr></table></td></tr></table>
 </body>
 </html>
