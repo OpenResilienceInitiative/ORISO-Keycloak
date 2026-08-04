@@ -1,19 +1,20 @@
 name: Reusable Docker Build and Publish steps
+description: Build the Keycloak container image and optionally publish it to GHCR.
 
 inputs:
   push_to_ghcr:
+    description: Whether to push the built image to GHCR.
     required: true
-    type: boolean
   image_name:
+    description: Container image name to publish under the configured organization.
     required: true
-    type: string
   github_token:
+    description: GitHub token used to authenticate to GHCR when publishing.
     required: true
-    type: string
   context:
+    description: Docker build context path.
     required: false
     default: "."
-    type: string
 
 runs:
   using: "composite"
