@@ -39,7 +39,6 @@ runs:
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
           type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
           type=raw,value=pre-dev,enable=${{ github.ref == 'refs/heads/pre-dev' }}
-          type=raw,value=26.6.3-otp,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/pre-dev' }}
 
     - name: Build and Push Docker image
       id: build
