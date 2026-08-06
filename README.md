@@ -11,6 +11,19 @@ This repository contains the Keycloak authentication and authorization configura
 - JWT token issuance and validation
 - Multi-tenant support
 
+## Custom ORISO Keycloak Image
+
+This repo owns the custom ORISO Keycloak image source. The image bundles the
+OTP configuration SPI and ORISO email OTP theme from `keycloak-image/`.
+
+The GitHub workflow `.github/workflows/keycloak-image.yml` builds and publishes:
+
+- `ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp`
+- branch tags such as `dev` and `pre-dev` on branch pushes
+
+The ORISO Helm chart should reference the published image only; SPI source,
+theme files, and image build workflow live here.
+
 ## 🔑 Current Configuration
 
 ### Access Information
@@ -213,4 +226,3 @@ kubectl logs -n caritas deployment/keycloak
 
 **Part of the ORISO Platform**  
 For more information, see the main ORISO-OVERVIEW.md
-

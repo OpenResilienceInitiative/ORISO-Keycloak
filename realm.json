@@ -147,9 +147,9 @@
         "attributes": {}
       },
       {
-        "id": "c7d3f2a1-5b80-4e26-9d14-3a9f6c1e8b42",
+        "id": "58e130ad-8ba1-4c36-a31e-eeb4c4cea91b",
         "name": "restricted-agency-admin",
-        "description": "Beratungsstellen-Admin (auf zugewiesene Beratungsstellen beschränkt)",
+        "description": "Restricted agency admin role assigned during agency admin creation",
         "composite": false,
         "clientRole": false,
         "containerId": "online-beratung",
@@ -579,9 +579,11 @@
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [
-        "/realms/online-beratung/account/*"
+        "{{ .Values.global.keycloakAuthServerUrl }}/realms/online-beratung/account/*"
       ],
-      "webOrigins": [],
+      "webOrigins": [
+        "https://{{ .Values.global.adminDomainName }}/*"
+      ],
       "notBefore": 0,
       "bearerOnly": false,
       "consentRequired": false,
@@ -617,9 +619,11 @@
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [
-        "/realms/online-beratung/account/*"
+        "{{ .Values.global.keycloakAuthServerUrl }}/realms/online-beratung/account/*"
       ],
-      "webOrigins": [],
+      "webOrigins": [
+        "https://{{ .Values.global.adminDomainName }}/*"
+      ],
       "notBefore": 0,
       "bearerOnly": false,
       "consentRequired": false,
@@ -664,7 +668,9 @@
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [],
-      "webOrigins": [],
+      "webOrigins": [
+        "https://{{ .Values.global.adminDomainName }}/*"
+      ],
       "notBefore": 0,
       "bearerOnly": false,
       "consentRequired": false,
@@ -703,12 +709,11 @@
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [
         "*",
-        "http://91.99.219.182:9000/*",
-        "http://localhost:9000/*"
+        "https://{{ .Values.global.adminDomainName }}/*"
       ],
       "webOrigins": [
-        "*",
-        "http://91.99.219.182:9000/*"
+        "https://{{ .Values.global.adminDomainName }}/*",
+        "*"
       ],
       "notBefore": 0,
       "bearerOnly": false,
@@ -755,7 +760,9 @@
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [],
-      "webOrigins": [],
+      "webOrigins": [
+        "https://{{ .Values.global.adminDomainName }}/*"
+      ],
       "notBefore": 0,
       "bearerOnly": true,
       "consentRequired": false,
@@ -784,7 +791,9 @@
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [],
-      "webOrigins": [],
+      "webOrigins": [
+        "https://{{ .Values.global.adminDomainName }}/*"
+      ],
       "notBefore": 0,
       "bearerOnly": true,
       "consentRequired": false,
@@ -815,9 +824,10 @@
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [
-        "/admin/online-beratung/console/*"
+        "{{ .Values.global.keycloakAuthServerUrl }}/admin/online-beratung/console/*"
       ],
       "webOrigins": [
+        "https://{{ .Values.global.adminDomainName }}/*",
         "+"
       ],
       "notBefore": 0,
@@ -861,6 +871,65 @@
       "optionalClientScopes": [
         "microprofile-jwt"
       ]
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "clientId": "user-service",
+      "name": "user-service",
+      "description": "User Service API Client",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "user-service-secret",
+      "redirectUris": [
+        "*"
+      ],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "backchannel.logout.session.required": "true",
+        "post.logout.redirect.uris": "+",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "display.on.consent.screen": "false",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "protocolMappers": [],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "roles",
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "access": {
+        "view": true,
+        "configure": true,
+        "manage": true
+      }
     }
   ],
   "clientScopes": [
@@ -2130,6 +2199,109 @@
           "userSetupAllowed": false
         }
       ]
+    },
+    {
+      "id": "4dd7eba6-5ac5-4b9d-8ff7-f8c6b50d1cad",
+      "alias": "direct-grant-2fa",
+      "description": "Direct grant with app (TOTP) and email OTP via onlineBeratung otp-config SPI",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-username"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-password"
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 30,
+          "autheticatorFlow": true,
+          "userSetupAllowed": false,
+          "flowAlias": "app-otp-conditional"
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 40,
+          "autheticatorFlow": true,
+          "userSetupAllowed": false,
+          "flowAlias": "email-otp-conditional"
+        }
+      ]
+    },
+    {
+      "id": "85a93626-f201-436a-a6f7-546a78f83ec1",
+      "alias": "app-otp-conditional",
+      "description": "App (TOTP) second factor: challenge via app-authenticator, validate via direct-grant-validate-otp",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-user-configured"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "app-authenticator"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 30,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-otp"
+        }
+      ]
+    },
+    {
+      "id": "11155917-c474-4cd0-85bb-2fc9efd4cb09",
+      "alias": "email-otp-conditional",
+      "description": "Email OTP second factor via email-authenticator",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-user-configured"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "email-authenticator",
+          "authenticatorConfig": "email-otp-config"
+        }
+      ]
     }
   ],
   "authenticatorConfig": [
@@ -2145,6 +2317,16 @@
       "alias": "review profile config",
       "config": {
         "update.profile.on.first.login": "missing"
+      }
+    },
+    {
+      "id": "1c76a5df-2c30-4d5b-a7ea-4d2f65b93f10",
+      "alias": "email-otp-config",
+      "config": {
+        "length": "6",
+        "ttl": "900",
+        "senderId": "Onlineberatung",
+        "simulation": "false"
       }
     }
   ],
@@ -2206,7 +2388,7 @@
   ],
   "browserFlow": "browser",
   "registrationFlow": "registration",
-  "directGrantFlow": "direct grant",
+  "directGrantFlow": "direct-grant-2fa",
   "resetCredentialsFlow": "reset credentials",
   "clientAuthenticationFlow": "clients",
   "dockerAuthenticationFlow": "docker auth",
@@ -2231,5 +2413,65 @@
   },
   "clientPolicies": {
     "policies": []
-  }
+  },
+  "users": [
+    {
+      "id": "8294c392-e1e0-405b-ac2f-ba3043cbad3e",
+      "createdTimestamp": 1609459200000,
+      "username": "technical",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": true,
+      "email": "technical@example.com",
+      "credentials": [
+        {
+          "id": "tech-cred-1",
+          "type": "password",
+          "createdDate": 1609459200000,
+          "secretData": "{\"value\":\"qPbdCHYDbC8uElO7dO43u7nbFhhow5xv0nFUHFlS\",\"salt\":\"\",\"additionalParameters\":{}}",
+          "credentialData": "{\"hashIterations\":27500,\"algorithm\":\"pbkdf2-sha256\",\"additionalParameters\":{}}"
+        }
+      ],
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "default-roles-online-beratung",
+        "technical"
+      ],
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users"
+        ]
+      },
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "7c5df021-536b-4f42-bb3c-37b1e4d9864d",
+      "createdTimestamp": 1609459200000,
+      "username": "realmadmin",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "firstName": "Realm",
+      "lastName": "Admin",
+      "disableableCredentialTypes": [],
+      "requiredActions": [
+        "UPDATE_PASSWORD"
+      ],
+      "realmRoles": [
+        "default-roles-online-beratung"
+      ],
+      "clientRoles": {
+        "realm-management": [
+          "realm-admin"
+        ]
+      },
+      "notBefore": 0,
+      "groups": []
+    }
+  ],
+  "emailTheme": "oriso"
 }

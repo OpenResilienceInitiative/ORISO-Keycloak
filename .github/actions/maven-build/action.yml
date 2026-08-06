@@ -1,14 +1,13 @@
 name: Reusable Maven Build steps
-description: Set up Java and build the Keycloak SPI with Maven.
 
 inputs:
   java_version:
-    description: Java version to install for the Maven build.
     required: true
+    type: string
   working_directory:
-    description: Directory containing the Maven project to build.
     required: false
     default: "."
+    type: string
 
 runs:
   using: "composite"
