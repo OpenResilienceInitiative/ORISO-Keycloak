@@ -1,0 +1,5598 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "367e488df7d5fbc3b6ef684589a10da14d3a2677",
+  "generatedAt": "2026-08-26T02:01:07.000Z",
+  "files": {
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/RealmOtpResourceProvider.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/RealmOtpResourceProvider.java",
+      "contentHash": "a9bb2139119f3484116a6431cb4e80509adcd4191793668f471b8287165528e9",
+      "functions": [
+        {
+          "name": "RealmOtpResourceProvider",
+          "params": [
+            "session",
+            "otpService",
+            "mailSender",
+            "sessionAuthenticator",
+            "appCredentialService",
+            "mailCredentialService"
+          ],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "getOtpSetupInfo",
+          "params": [
+            "username"
+          ],
+          "returnType": "Response",
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "setupOtp",
+          "params": [
+            "username",
+            "dto"
+          ],
+          "returnType": "Response",
+          "exported": true,
+          "lineCount": 36
+        },
+        {
+          "name": "deleteOtp",
+          "params": [
+            "username"
+          ],
+          "returnType": "Response",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "sendVerificationMail",
+          "params": [
+            "username",
+            "mailSetup"
+          ],
+          "returnType": "Response",
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "setupOtpMail",
+          "params": [
+            "username",
+            "mailSetup"
+          ],
+          "returnType": "Response",
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "verifyAuthentication",
+          "params": [],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "getResource",
+          "params": [],
+          "returnType": "Object",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "close",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "verifyAndSendMail",
+          "params": [
+            "context",
+            "otp"
+          ],
+          "returnType": "Response",
+          "exported": false,
+          "lineCount": 27
+        },
+        {
+          "name": "verifyMailSetup",
+          "params": [
+            "initialCode",
+            "context"
+          ],
+          "returnType": "Response",
+          "exported": false,
+          "lineCount": 66
+        },
+        {
+          "name": "severity",
+          "params": [
+            "result"
+          ],
+          "returnType": "int",
+          "exported": false,
+          "lineCount": 9
+        }
+      ],
+      "classes": [
+        {
+          "name": "RealmOtpResourceProvider",
+          "methods": [
+            "RealmOtpResourceProvider",
+            "getOtpSetupInfo",
+            "setupOtp",
+            "deleteOtp",
+            "sendVerificationMail",
+            "setupOtpMail",
+            "verifyAuthentication",
+            "getResource",
+            "close",
+            "verifyAndSendMail",
+            "verifyMailSetup",
+            "severity"
+          ],
+          "properties": [
+            "logger",
+            "MISSING_PARAMETER_ERROR",
+            "INVALID_GRANT_ERROR",
+            "MAIL_OTP_ALREADY_ACTIVE",
+            "APP_OTP_ALREADY_ACTIVE",
+            "MISSING_CREDENTIAL_CONFIG",
+            "MISSING_USERNAME_ERROR_DESCRIPTION",
+            "MISSING_EMAIL_ADDRESS_ERROR_DESCRIPTION",
+            "FAILED_TO_SENT",
+            "session",
+            "sessionAuthenticator",
+            "otpService",
+            "mailSender",
+            "appCredentialService",
+            "mailCredentialService"
+          ],
+          "exported": true,
+          "lineCount": 307
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.authenticator.SessionAuthenticator",
+          "specifiers": [
+            "SessionAuthenticator"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.AppOtpCredentialService",
+          "specifiers": [
+            "AppOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.CredentialContext",
+          "specifiers": [
+            "CredentialContext"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialModel",
+          "specifiers": [
+            "MailOtpCredentialModel"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Error",
+          "specifiers": [
+            "Error"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model",
+          "specifiers": [
+            "*"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.mail.MailSendingException",
+          "specifiers": [
+            "MailSendingException"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpMailSender",
+          "specifiers": [
+            "OtpMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpService",
+          "specifiers": [
+            "OtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.ValidationResult",
+          "specifiers": [
+            "ValidationResult"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.Consumes",
+          "specifiers": [
+            "Consumes"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.DELETE",
+          "specifiers": [
+            "DELETE"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.GET",
+          "specifiers": [
+            "GET"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.POST",
+          "specifiers": [
+            "POST"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.PUT",
+          "specifiers": [
+            "PUT"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.Path",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.PathParam",
+          "specifiers": [
+            "PathParam"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.Produces",
+          "specifiers": [
+            "Produces"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.MediaType",
+          "specifiers": [
+            "MediaType"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response",
+          "specifiers": [
+            "Response"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response.Status",
+          "specifiers": [
+            "Status"
+          ]
+        },
+        {
+          "source": "org.jboss.logging.Logger",
+          "specifiers": [
+            "Logger"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.services.resource.RealmResourceProvider",
+          "specifiers": [
+            "RealmResourceProvider"
+          ]
+        },
+        {
+          "source": "java.util.Objects.isNull",
+          "specifiers": [
+            "isNull"
+          ]
+        }
+      ],
+      "exports": [
+        "RealmOtpResourceProvider",
+        "getOtpSetupInfo",
+        "setupOtp",
+        "deleteOtp",
+        "sendVerificationMail",
+        "setupOtpMail",
+        "getResource",
+        "close",
+        "RealmOtpResourceProvider"
+      ],
+      "totalLines": 341,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/RealmOtpResourceProviderFactory.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/RealmOtpResourceProviderFactory.java",
+      "contentHash": "5e590ce59856991ca9fc920933232241881c5e7a7f8837e45ff8a5781f44ee01",
+      "functions": [
+        {
+          "name": "create",
+          "params": [
+            "keycloakSession"
+          ],
+          "returnType": "RealmResourceProvider",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "init",
+          "params": [
+            "scope"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "postInit",
+          "params": [
+            "keycloakSessionFactory"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "close",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getId",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "RealmOtpResourceProviderFactory",
+          "methods": [
+            "create",
+            "init",
+            "postInit",
+            "close",
+            "getId"
+          ],
+          "properties": [
+            "ID"
+          ],
+          "exported": true,
+          "lineCount": 40
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.authenticator.OtpMailAuthenticatorFactory.OTP_CONFIG_ALIAS",
+          "specifiers": [
+            "OTP_CONFIG_ALIAS"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.authenticator.BearerTokenSessionAuthenticator",
+          "specifiers": [
+            "BearerTokenSessionAuthenticator"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.AppOtpCredentialService",
+          "specifiers": [
+            "AppOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialProviderFactory",
+          "specifiers": [
+            "MailOtpCredentialProviderFactory"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.mail.DefaultMailSender",
+          "specifiers": [
+            "DefaultMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.MemoryOtpService",
+          "specifiers": [
+            "MemoryOtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.RandomDigitsCodeGenerator",
+          "specifiers": [
+            "RandomDigitsCodeGenerator"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "org.keycloak.Config.Scope",
+          "specifiers": [
+            "Scope"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSessionFactory",
+          "specifiers": [
+            "KeycloakSessionFactory"
+          ]
+        },
+        {
+          "source": "org.keycloak.services.resource.RealmResourceProvider",
+          "specifiers": [
+            "RealmResourceProvider"
+          ]
+        },
+        {
+          "source": "org.keycloak.services.resource.RealmResourceProviderFactory",
+          "specifiers": [
+            "RealmResourceProviderFactory"
+          ]
+        }
+      ],
+      "exports": [
+        "ID",
+        "create",
+        "init",
+        "postInit",
+        "close",
+        "getId",
+        "RealmOtpResourceProviderFactory"
+      ],
+      "totalLines": 59,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/BearerTokenSessionAuthenticator.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/BearerTokenSessionAuthenticator.java",
+      "contentHash": "8a25dc1a3d7174e998abf491b7fe117c6d28cf2acb5ca4eac6b20438ed3401a1",
+      "functions": [
+        {
+          "name": "authenticate",
+          "params": [
+            "session"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 12
+        }
+      ],
+      "classes": [
+        {
+          "name": "BearerTokenSessionAuthenticator",
+          "methods": [
+            "authenticate"
+          ],
+          "properties": [
+            "ROLE_REQUIRED"
+          ],
+          "exported": true,
+          "lineCount": 17
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Objects.isNull",
+          "specifiers": [
+            "isNull"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.ForbiddenException",
+          "specifiers": [
+            "ForbiddenException"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.NotAuthorizedException",
+          "specifiers": [
+            "NotAuthorizedException"
+          ]
+        },
+        {
+          "source": "java.util.Objects",
+          "specifiers": [
+            "Objects"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RoleModel",
+          "specifiers": [
+            "RoleModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.services.managers.AppAuthManager.BearerTokenAuthenticator",
+          "specifiers": [
+            "BearerTokenAuthenticator"
+          ]
+        }
+      ],
+      "exports": [
+        "authenticate",
+        "BearerTokenSessionAuthenticator"
+      ],
+      "totalLines": 29,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpAppAuthenticatorFactory.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpAppAuthenticatorFactory.java",
+      "contentHash": "2beb4fdf9544d8abd1626a83b310a20e7acc2cc5535a87e2cda1fb61d27cc226",
+      "functions": [
+        {
+          "name": "getId",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getDisplayType",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getHelpText",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getReferenceCategory",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isConfigurable",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isUserSetupAllowed",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getRequirementChoices",
+          "params": [],
+          "returnType": "Requirement[]",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "getConfigProperties",
+          "params": [],
+          "returnType": "List<ProviderConfigProperty>",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "create",
+          "params": [
+            "session"
+          ],
+          "returnType": "Authenticator",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "init",
+          "params": [
+            "config"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "postInit",
+          "params": [
+            "factory"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "close",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpAppAuthenticatorFactory",
+          "methods": [
+            "getId",
+            "getDisplayType",
+            "getHelpText",
+            "getReferenceCategory",
+            "isConfigurable",
+            "isUserSetupAllowed",
+            "getRequirementChoices",
+            "getConfigProperties",
+            "create",
+            "init",
+            "postInit",
+            "close"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 77
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Arrays.asList",
+          "specifiers": [
+            "asList"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "org.keycloak.Config",
+          "specifiers": [
+            "Config"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.Authenticator",
+          "specifiers": [
+            "Authenticator"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticatorFactory",
+          "specifiers": [
+            "AuthenticatorFactory"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.AuthenticationExecutionModel.Requirement",
+          "specifiers": [
+            "Requirement"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSessionFactory",
+          "specifiers": [
+            "KeycloakSessionFactory"
+          ]
+        },
+        {
+          "source": "org.keycloak.provider.ProviderConfigProperty",
+          "specifiers": [
+            "ProviderConfigProperty"
+          ]
+        }
+      ],
+      "exports": [
+        "getId",
+        "getDisplayType",
+        "getHelpText",
+        "getReferenceCategory",
+        "isConfigurable",
+        "isUserSetupAllowed",
+        "getRequirementChoices",
+        "getConfigProperties",
+        "create",
+        "init",
+        "postInit",
+        "close",
+        "OtpAppAuthenticatorFactory"
+      ],
+      "totalLines": 91,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpMailAuthenticator.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpMailAuthenticator.java",
+      "contentHash": "7242f41051d4d06a25e204f6e8ec032e65529011080488cd80e679274d6ce1bb",
+      "functions": [
+        {
+          "name": "OtpMailAuthenticator",
+          "params": [
+            "otpService",
+            "credentialService",
+            "mailSender"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "configuredFor",
+          "params": [
+            "keycloakSession",
+            "realmModel",
+            "userModel"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "authenticate",
+          "params": [
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "requiresUser",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "setRequiredActions",
+          "params": [
+            "session",
+            "realm",
+            "user"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "sendOtpMail",
+          "params": [
+            "credentialModel",
+            "credContext",
+            "context"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 28
+        },
+        {
+          "name": "validateOtp",
+          "params": [
+            "otpRequest",
+            "credentialModel",
+            "context",
+            "credContext"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 38
+        },
+        {
+          "name": "getDisplayType",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getReferenceCategory",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isConfigurable",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getRequirementChoices",
+          "params": [],
+          "returnType": "Requirement[]",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isUserSetupAllowed",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getHelpText",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getConfigProperties",
+          "params": [],
+          "returnType": "List<ProviderConfigProperty>",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getId",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpMailAuthenticator",
+          "methods": [
+            "OtpMailAuthenticator",
+            "configuredFor",
+            "authenticate",
+            "requiresUser",
+            "setRequiredActions",
+            "sendOtpMail",
+            "validateOtp",
+            "getDisplayType",
+            "getReferenceCategory",
+            "isConfigurable",
+            "getRequirementChoices",
+            "isUserSetupAllowed",
+            "getHelpText",
+            "getConfigProperties",
+            "getId"
+          ],
+          "properties": [
+            "AUTHENTICATOR_ID",
+            "logger",
+            "INVALID_GRANT_ERROR",
+            "INTERNAL_ERROR",
+            "otpService",
+            "credentialService",
+            "mailSender"
+          ],
+          "exported": true,
+          "lineCount": 159
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.authenticator.OtpParameterAuthenticator.extractDecodedOtpParam",
+          "specifiers": [
+            "extractDecodedOtpParam"
+          ]
+        },
+        {
+          "source": "java.util.Objects.isNull",
+          "specifiers": [
+            "isNull"
+          ]
+        },
+        {
+          "source": "java.util.Objects.nonNull",
+          "specifiers": [
+            "nonNull"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.CredentialContext",
+          "specifiers": [
+            "CredentialContext"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialModel",
+          "specifiers": [
+            "MailOtpCredentialModel"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Challenge",
+          "specifiers": [
+            "Challenge"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.mail.MailSendingException",
+          "specifiers": [
+            "MailSendingException"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpMailSender",
+          "specifiers": [
+            "OtpMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpService",
+          "specifiers": [
+            "OtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpType",
+          "specifiers": [
+            "OtpType"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.MediaType",
+          "specifiers": [
+            "MediaType"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response",
+          "specifiers": [
+            "Response"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response.Status",
+          "specifiers": [
+            "Status"
+          ]
+        },
+        {
+          "source": "java.util.Collections",
+          "specifiers": [
+            "Collections"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "org.jboss.logging.Logger",
+          "specifiers": [
+            "Logger"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowContext",
+          "specifiers": [
+            "AuthenticationFlowContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowError",
+          "specifiers": [
+            "AuthenticationFlowError"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.authenticators.directgrant.AbstractDirectGrantAuthenticator",
+          "specifiers": [
+            "AbstractDirectGrantAuthenticator"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.AuthenticationExecutionModel.Requirement",
+          "specifiers": [
+            "Requirement"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.provider.ProviderConfigProperty",
+          "specifiers": [
+            "ProviderConfigProperty"
+          ]
+        }
+      ],
+      "exports": [
+        "AUTHENTICATOR_ID",
+        "OtpMailAuthenticator",
+        "configuredFor",
+        "authenticate",
+        "requiresUser",
+        "setRequiredActions",
+        "getDisplayType",
+        "getReferenceCategory",
+        "isConfigurable",
+        "getRequirementChoices",
+        "isUserSetupAllowed",
+        "getHelpText",
+        "getConfigProperties",
+        "getId",
+        "OtpMailAuthenticator"
+      ],
+      "totalLines": 189,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpMailAuthenticatorFactory.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpMailAuthenticatorFactory.java",
+      "contentHash": "5bccddeafd025c199e312c8f31a02f20b3e720bc064d749a386722182ef4a6e9",
+      "functions": [
+        {
+          "name": "getId",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getDisplayType",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getHelpText",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getReferenceCategory",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isConfigurable",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isUserSetupAllowed",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getRequirementChoices",
+          "params": [],
+          "returnType": "Requirement[]",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "getConfigProperties",
+          "params": [],
+          "returnType": "List<ProviderConfigProperty>",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "create",
+          "params": [
+            "session"
+          ],
+          "returnType": "Authenticator",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "init",
+          "params": [
+            "config"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "postInit",
+          "params": [
+            "factory"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "close",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpMailAuthenticatorFactory",
+          "methods": [
+            "getId",
+            "getDisplayType",
+            "getHelpText",
+            "getReferenceCategory",
+            "isConfigurable",
+            "isUserSetupAllowed",
+            "getRequirementChoices",
+            "getConfigProperties",
+            "create",
+            "init",
+            "postInit",
+            "close"
+          ],
+          "properties": [
+            "OTP_CONFIG_ALIAS"
+          ],
+          "exported": true,
+          "lineCount": 86
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Arrays.asList",
+          "specifiers": [
+            "asList"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialProviderFactory",
+          "specifiers": [
+            "MailOtpCredentialProviderFactory"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.mail.DefaultMailSender",
+          "specifiers": [
+            "DefaultMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.MemoryOtpService",
+          "specifiers": [
+            "MemoryOtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.RandomDigitsCodeGenerator",
+          "specifiers": [
+            "RandomDigitsCodeGenerator"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "org.keycloak.Config",
+          "specifiers": [
+            "Config"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.Authenticator",
+          "specifiers": [
+            "Authenticator"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticatorFactory",
+          "specifiers": [
+            "AuthenticatorFactory"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.AuthenticationExecutionModel.Requirement",
+          "specifiers": [
+            "Requirement"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSessionFactory",
+          "specifiers": [
+            "KeycloakSessionFactory"
+          ]
+        },
+        {
+          "source": "org.keycloak.provider.ProviderConfigProperty",
+          "specifiers": [
+            "ProviderConfigProperty"
+          ]
+        }
+      ],
+      "exports": [
+        "OTP_CONFIG_ALIAS",
+        "getId",
+        "getDisplayType",
+        "getHelpText",
+        "getReferenceCategory",
+        "isConfigurable",
+        "isUserSetupAllowed",
+        "getRequirementChoices",
+        "getConfigProperties",
+        "create",
+        "init",
+        "postInit",
+        "close",
+        "OtpMailAuthenticatorFactory"
+      ],
+      "totalLines": 106,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpParameterAuthenticator.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/OtpParameterAuthenticator.java",
+      "contentHash": "0da0ba1556b7d05204c1e52ef59b5cc5f5a30110a3152d78d208cc08e3dc077f",
+      "functions": [
+        {
+          "name": "getId",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "authenticate",
+          "params": [
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "requiresUser",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "configuredFor",
+          "params": [
+            "keycloakSession",
+            "realmModel",
+            "userModel"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "setRequiredActions",
+          "params": [
+            "keycloakSession",
+            "realmModel",
+            "userModel"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "getDisplayType",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getReferenceCategory",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isConfigurable",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getRequirementChoices",
+          "params": [],
+          "returnType": "Requirement[]",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isUserSetupAllowed",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getHelpText",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getConfigProperties",
+          "params": [],
+          "returnType": "List<ProviderConfigProperty>",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "extractDecodedOtpParam",
+          "params": [
+            "context"
+          ],
+          "returnType": "String",
+          "exported": false,
+          "lineCount": 6
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpParameterAuthenticator",
+          "methods": [
+            "getId",
+            "authenticate",
+            "requiresUser",
+            "configuredFor",
+            "setRequiredActions",
+            "getDisplayType",
+            "getReferenceCategory",
+            "isConfigurable",
+            "getRequirementChoices",
+            "isUserSetupAllowed",
+            "getHelpText",
+            "getConfigProperties",
+            "extractDecodedOtpParam"
+          ],
+          "properties": [
+            "ID",
+            "REQUIREMENT_CHOICES"
+          ],
+          "exported": true,
+          "lineCount": 88
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Objects.isNull",
+          "specifiers": [
+            "isNull"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Challenge",
+          "specifiers": [
+            "Challenge"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpType",
+          "specifiers": [
+            "OtpType"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.MediaType",
+          "specifiers": [
+            "MediaType"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response",
+          "specifiers": [
+            "Response"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response.Status",
+          "specifiers": [
+            "Status"
+          ]
+        },
+        {
+          "source": "java.util.Collections",
+          "specifiers": [
+            "Collections"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowContext",
+          "specifiers": [
+            "AuthenticationFlowContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowError",
+          "specifiers": [
+            "AuthenticationFlowError"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.authenticators.directgrant.AbstractDirectGrantAuthenticator",
+          "specifiers": [
+            "AbstractDirectGrantAuthenticator"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.AuthenticationExecutionModel",
+          "specifiers": [
+            "AuthenticationExecutionModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.AuthenticationExecutionModel.Requirement",
+          "specifiers": [
+            "Requirement"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.credential.OTPCredentialModel",
+          "specifiers": [
+            "OTPCredentialModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.provider.ProviderConfigProperty",
+          "specifiers": [
+            "ProviderConfigProperty"
+          ]
+        }
+      ],
+      "exports": [
+        "ID",
+        "getId",
+        "authenticate",
+        "requiresUser",
+        "configuredFor",
+        "setRequiredActions",
+        "getDisplayType",
+        "getReferenceCategory",
+        "isConfigurable",
+        "getRequirementChoices",
+        "isUserSetupAllowed",
+        "getHelpText",
+        "getConfigProperties",
+        "OtpParameterAuthenticator"
+      ],
+      "totalLines": 111,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/SessionAuthenticator.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/authenticator/SessionAuthenticator.java",
+      "contentHash": "a1a0005ec0b34d81aa1500349fe273799f56e52eb2c9a2bcdbf3e63b124ccbce",
+      "functions": [],
+      "classes": [
+        {
+          "name": "SessionAuthenticator",
+          "methods": [
+            "authenticate"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        }
+      ],
+      "exports": [
+        "SessionAuthenticator"
+      ],
+      "totalLines": 10,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/AppOtpCredentialService.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/AppOtpCredentialService.java",
+      "contentHash": "3469860c2eb806b238ce4bec06f282b6064fef2c55a127a91d1bc43d34d56cd6",
+      "functions": [
+        {
+          "name": "createModel",
+          "params": [
+            "otpSecret",
+            "context"
+          ],
+          "returnType": "OTPCredentialModel",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "createCredential",
+          "params": [
+            "otp",
+            "credentialModel",
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "generateQRCodeBase64",
+          "params": [
+            "otpSecret",
+            "context"
+          ],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "generateSecret",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "is2FAConfigured",
+          "params": [
+            "context"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "validate",
+          "params": [
+            "otp",
+            "credentialModel",
+            "context"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "deleteCredentials",
+          "params": [
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 9
+        }
+      ],
+      "classes": [
+        {
+          "name": "AppOtpCredentialService",
+          "methods": [
+            "createModel",
+            "createCredential",
+            "generateQRCodeBase64",
+            "generateSecret",
+            "is2FAConfigured",
+            "validate",
+            "deleteCredentials"
+          ],
+          "properties": [
+            "KEY_LENGTH"
+          ],
+          "exported": true,
+          "lineCount": 42
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.keycloak.models.credential.OTPCredentialModel",
+          "specifiers": [
+            "OTPCredentialModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.utils.CredentialValidation",
+          "specifiers": [
+            "CredentialValidation"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.utils.HmacOTP",
+          "specifiers": [
+            "HmacOTP"
+          ]
+        },
+        {
+          "source": "org.keycloak.utils.CredentialHelper",
+          "specifiers": [
+            "CredentialHelper"
+          ]
+        },
+        {
+          "source": "org.keycloak.utils.TotpUtils",
+          "specifiers": [
+            "TotpUtils"
+          ]
+        }
+      ],
+      "exports": [
+        "createModel",
+        "createCredential",
+        "generateQRCodeBase64",
+        "generateSecret",
+        "is2FAConfigured",
+        "validate",
+        "deleteCredentials",
+        "AppOtpCredentialService"
+      ],
+      "totalLines": 51,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/CredentialContext.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/CredentialContext.java",
+      "contentHash": "2fde27e1694df75e736acc735d16695ad55121f234234edd8928c6493dd88cd6",
+      "functions": [
+        {
+          "name": "CredentialContext",
+          "params": [
+            "session",
+            "realm",
+            "user"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "fromAuthFlow",
+          "params": [
+            "context"
+          ],
+          "returnType": "CredentialContext",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getSession",
+          "params": [],
+          "returnType": "KeycloakSession",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getRealm",
+          "params": [],
+          "returnType": "RealmModel",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getUser",
+          "params": [],
+          "returnType": "UserModel",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "equals",
+          "params": [
+            "o"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "hashCode",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "CredentialContext",
+          "methods": [
+            "CredentialContext",
+            "fromAuthFlow",
+            "getSession",
+            "getRealm",
+            "getUser",
+            "equals",
+            "hashCode"
+          ],
+          "properties": [
+            "session",
+            "realm",
+            "user"
+          ],
+          "exported": true,
+          "lineCount": 46
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Objects",
+          "specifiers": [
+            "Objects"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowContext",
+          "specifiers": [
+            "AuthenticationFlowContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        }
+      ],
+      "exports": [
+        "CredentialContext",
+        "fromAuthFlow",
+        "getSession",
+        "getRealm",
+        "getUser",
+        "equals",
+        "hashCode",
+        "CredentialContext"
+      ],
+      "totalLines": 55,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialData.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialData.java",
+      "contentHash": "d1c909cabaf40340a8d04d6a028fbe4c3ee7f02169b4d373978173edf3d5e54f",
+      "functions": [
+        {
+          "name": "MailOtpCredentialData",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "MailOtpCredentialData",
+          "params": [
+            "ttlInSeconds",
+            "email",
+            "failedVerifications",
+            "active"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "getTtlInSeconds",
+          "params": [],
+          "returnType": "long",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "setTtlInSeconds",
+          "params": [
+            "ttlInSeconds"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getEmail",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "setEmail",
+          "params": [
+            "email"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getFailedVerifications",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "isActive",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "setActive",
+          "params": [
+            "active"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "setFailedVerifications",
+          "params": [
+            "failedVerifications"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailOtpCredentialData",
+          "methods": [
+            "MailOtpCredentialData",
+            "MailOtpCredentialData",
+            "getTtlInSeconds",
+            "setTtlInSeconds",
+            "getEmail",
+            "setEmail",
+            "getFailedVerifications",
+            "isActive",
+            "setActive",
+            "setFailedVerifications"
+          ],
+          "properties": [
+            "ttlInSeconds",
+            "email",
+            "failedVerifications",
+            "active"
+          ],
+          "exported": true,
+          "lineCount": 51
+        }
+      ],
+      "imports": [],
+      "exports": [
+        "MailOtpCredentialData",
+        "MailOtpCredentialData",
+        "getTtlInSeconds",
+        "setTtlInSeconds",
+        "getEmail",
+        "setEmail",
+        "getFailedVerifications",
+        "isActive",
+        "setActive",
+        "setFailedVerifications",
+        "MailOtpCredentialData"
+      ],
+      "totalLines": 54,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialModel.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialModel.java",
+      "contentHash": "91ffc259e2d9e46532013541551e327d4b1cb49ac6dba6161b2d62677489de25",
+      "functions": [
+        {
+          "name": "createFromCredentialModel",
+          "params": [
+            "credentialModel"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "createOtpModel",
+          "params": [
+            "otp",
+            "clock"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "createOtpModel",
+          "params": [
+            "otp",
+            "clock",
+            "active"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "serialize",
+          "params": [
+            "clock",
+            "credentialModel"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "MailOtpCredentialModel",
+          "params": [
+            "code",
+            "ttlInSeconds",
+            "expiry",
+            "email",
+            "failedVerifications",
+            "active"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "MailOtpCredentialModel",
+          "params": [
+            "credentialData",
+            "secretData"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "getOtp",
+          "params": [],
+          "returnType": "Otp",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "updateFrom",
+          "params": [
+            "otp"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "isActive",
+          "params": [],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "updateFailedVerifications",
+          "params": [
+            "failedVerifications"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "setActive",
+          "params": [],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "invalidateCode",
+          "params": [],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "updateInternalModel",
+          "params": [],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 8
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailOtpCredentialModel",
+          "methods": [
+            "createFromCredentialModel",
+            "createOtpModel",
+            "createOtpModel",
+            "serialize",
+            "MailOtpCredentialModel",
+            "MailOtpCredentialModel",
+            "getOtp",
+            "updateFrom",
+            "isActive",
+            "updateFailedVerifications",
+            "setActive",
+            "invalidateCode",
+            "updateInternalModel"
+          ],
+          "properties": [
+            "TYPE",
+            "INVALIDATED",
+            "credentialData",
+            "secretData"
+          ],
+          "exported": true,
+          "lineCount": 103
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.keycloak.util.JsonSerialization.writeValueAsString",
+          "specifiers": [
+            "writeValueAsString"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "java.io.IOException",
+          "specifiers": [
+            "IOException"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "org.jetbrains.annotations.NotNull",
+          "specifiers": [
+            "NotNull"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialModel",
+          "specifiers": [
+            "CredentialModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.util.JsonSerialization",
+          "specifiers": [
+            "JsonSerialization"
+          ]
+        }
+      ],
+      "exports": [
+        "TYPE",
+        "INVALIDATED",
+        "createFromCredentialModel",
+        "createOtpModel",
+        "createOtpModel",
+        "getOtp",
+        "updateFrom",
+        "isActive",
+        "MailOtpCredentialModel"
+      ],
+      "totalLines": 115,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialProvider.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialProvider.java",
+      "contentHash": "f74fa674ff9249ca0c34c8920073dbb9e4c65820adf86cb999c06a86323456c5",
+      "functions": [
+        {
+          "name": "MailOtpCredentialProvider",
+          "params": [
+            "session",
+            "clock"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getType",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "createCredential",
+          "params": [
+            "realm",
+            "user",
+            "credentialModel"
+          ],
+          "returnType": "CredentialModel",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "deleteCredential",
+          "params": [
+            "realm",
+            "user",
+            "credentialId"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getCredentialFromModel",
+          "params": [
+            "model"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getCredentialTypeMetadata",
+          "params": [
+            "metadataContext"
+          ],
+          "returnType": "CredentialTypeMetadata",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "supportsCredentialType",
+          "params": [
+            "credentialType"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "isConfiguredFor",
+          "params": [
+            "realm",
+            "user",
+            "credentialType"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "isValid",
+          "params": [
+            "realm",
+            "user",
+            "credentialInput"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "updateCredential",
+          "params": [
+            "user",
+            "credentialModel"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailOtpCredentialProvider",
+          "methods": [
+            "MailOtpCredentialProvider",
+            "getType",
+            "createCredential",
+            "deleteCredential",
+            "getCredentialFromModel",
+            "getCredentialTypeMetadata",
+            "supportsCredentialType",
+            "isConfiguredFor",
+            "isValid",
+            "updateCredential"
+          ],
+          "properties": [
+            "logger",
+            "session",
+            "clock"
+          ],
+          "exported": true,
+          "lineCount": 87
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.authenticator.OtpMailAuthenticator",
+          "specifiers": [
+            "OtpMailAuthenticator"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "org.jboss.logging.Logger",
+          "specifiers": [
+            "Logger"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialInput",
+          "specifiers": [
+            "CredentialInput"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialInputValidator",
+          "specifiers": [
+            "CredentialInputValidator"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialModel",
+          "specifiers": [
+            "CredentialModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialProvider",
+          "specifiers": [
+            "CredentialProvider"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialTypeMetadata",
+          "specifiers": [
+            "CredentialTypeMetadata"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialTypeMetadataContext",
+          "specifiers": [
+            "CredentialTypeMetadataContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserCredentialModel",
+          "specifiers": [
+            "UserCredentialModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        }
+      ],
+      "exports": [
+        "MailOtpCredentialProvider",
+        "getType",
+        "createCredential",
+        "deleteCredential",
+        "getCredentialFromModel",
+        "getCredentialTypeMetadata",
+        "supportsCredentialType",
+        "isConfiguredFor",
+        "isValid",
+        "updateCredential",
+        "MailOtpCredentialProvider"
+      ],
+      "totalLines": 104,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialProviderFactory.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialProviderFactory.java",
+      "contentHash": "f97c4e0aa11e7defee7dcbf8f72a6f73d6133215db21bca9bc79d72bd15a1315",
+      "functions": [
+        {
+          "name": "create",
+          "params": [
+            "session"
+          ],
+          "returnType": "MailOtpCredentialProvider",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getId",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailOtpCredentialProviderFactory",
+          "methods": [
+            "create",
+            "getId"
+          ],
+          "properties": [
+            "PROVIDER_ID"
+          ],
+          "exported": true,
+          "lineCount": 15
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "org.keycloak.credential.CredentialProviderFactory",
+          "specifiers": [
+            "CredentialProviderFactory"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        }
+      ],
+      "exports": [
+        "PROVIDER_ID",
+        "create",
+        "getId",
+        "MailOtpCredentialProviderFactory"
+      ],
+      "totalLines": 22,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialService.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpCredentialService.java",
+      "contentHash": "5171985802d5229780420665ed892a505e2cf9d46c72afe508065abcca558102",
+      "functions": [
+        {
+          "name": "MailOtpCredentialService",
+          "params": [
+            "credentialProvider",
+            "clock"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "createCredential",
+          "params": [
+            "otp",
+            "context"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "update",
+          "params": [
+            "credentialModel",
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "incrementFailedAttempts",
+          "params": [
+            "credentialModel",
+            "context",
+            "currentAttempts"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "activate",
+          "params": [
+            "credentialModel",
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "getCredential",
+          "params": [
+            "context"
+          ],
+          "returnType": "MailOtpCredentialModel",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getAllCredentials",
+          "params": [
+            "context"
+          ],
+          "returnType": "List<MailOtpCredentialModel>",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "deleteCredential",
+          "params": [
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "deleteInactiveCredentials",
+          "params": [
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "deleteById",
+          "params": [
+            "context",
+            "credentialId"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "invalidate",
+          "params": [
+            "credentialModel",
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "is2FAConfigured",
+          "params": [
+            "context"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailOtpCredentialService",
+          "methods": [
+            "MailOtpCredentialService",
+            "createCredential",
+            "update",
+            "incrementFailedAttempts",
+            "activate",
+            "getCredential",
+            "getAllCredentials",
+            "deleteCredential",
+            "deleteInactiveCredentials",
+            "deleteById",
+            "invalidate",
+            "is2FAConfigured"
+          ],
+          "properties": [
+            "credentialProvider",
+            "clock"
+          ],
+          "exported": true,
+          "lineCount": 84
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Objects.nonNull",
+          "specifiers": [
+            "nonNull"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "java.util.stream.Collectors",
+          "specifiers": [
+            "Collectors"
+          ]
+        }
+      ],
+      "exports": [
+        "MailOtpCredentialService",
+        "createCredential",
+        "update",
+        "incrementFailedAttempts",
+        "activate",
+        "getCredential",
+        "getAllCredentials",
+        "deleteCredential",
+        "deleteInactiveCredentials",
+        "deleteById",
+        "invalidate",
+        "is2FAConfigured",
+        "MailOtpCredentialService"
+      ],
+      "totalLines": 94,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpSecretData.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/credential/MailOtpSecretData.java",
+      "contentHash": "40e768b0110eecebb57480c5007b55d54058eaae0f1cb443a1363a8df355c637",
+      "functions": [
+        {
+          "name": "MailOtpSecretData",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "MailOtpSecretData",
+          "params": [
+            "code",
+            "expiry"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getCode",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "setCode",
+          "params": [
+            "code"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getExpiry",
+          "params": [],
+          "returnType": "long",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "setExpiry",
+          "params": [
+            "expiry"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailOtpSecretData",
+          "methods": [
+            "MailOtpSecretData",
+            "MailOtpSecretData",
+            "getCode",
+            "setCode",
+            "getExpiry",
+            "setExpiry"
+          ],
+          "properties": [
+            "code",
+            "expiry"
+          ],
+          "exported": true,
+          "lineCount": 31
+        }
+      ],
+      "imports": [],
+      "exports": [
+        "MailOtpSecretData",
+        "MailOtpSecretData",
+        "getCode",
+        "setCode",
+        "getExpiry",
+        "setExpiry",
+        "MailOtpSecretData"
+      ],
+      "totalLines": 34,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/log/LoggingEventListenerProvider.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/log/LoggingEventListenerProvider.java",
+      "contentHash": "e73636933549c6c796f205a8b2836c033025acdc626a0cc451fc1ed0106c23fb",
+      "functions": [
+        {
+          "name": "LoggingEventListenerProvider",
+          "params": [
+            "session",
+            "logger",
+            "successLevel",
+            "errorLevel"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "onEvent",
+          "params": [
+            "event"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "onEvent",
+          "params": [
+            "adminEvent",
+            "includeRepresentation"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "logEvent",
+          "params": [
+            "event"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 41
+        },
+        {
+          "name": "appendDetails",
+          "params": [
+            "event",
+            "sb"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "appendSession",
+          "params": [
+            "sb",
+            "authSession"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "logAdminEvent",
+          "params": [
+            "adminEvent",
+            "includeRepresentation"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 32
+        },
+        {
+          "name": "close",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "setKeycloakContext",
+          "params": [
+            "sb"
+          ],
+          "returnType": "void",
+          "exported": false,
+          "lineCount": 25
+        }
+      ],
+      "classes": [
+        {
+          "name": "LoggingEventListenerProvider",
+          "methods": [
+            "LoggingEventListenerProvider",
+            "onEvent",
+            "onEvent",
+            "logEvent",
+            "appendDetails",
+            "appendSession",
+            "logAdminEvent",
+            "close",
+            "setKeycloakContext"
+          ],
+          "properties": [
+            "session",
+            "logger",
+            "successLevel",
+            "errorLevel",
+            "listenerTransaction"
+          ],
+          "exported": true,
+          "lineCount": 157
+        }
+      ],
+      "imports": [
+        {
+          "source": "jakarta.ws.rs.core.Cookie",
+          "specifiers": [
+            "Cookie"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.HttpHeaders",
+          "specifiers": [
+            "HttpHeaders"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.UriInfo",
+          "specifiers": [
+            "UriInfo"
+          ]
+        },
+        {
+          "source": "java.util.Map",
+          "specifiers": [
+            "Map"
+          ]
+        },
+        {
+          "source": "org.jboss.logging.Logger",
+          "specifiers": [
+            "Logger"
+          ]
+        },
+        {
+          "source": "org.keycloak.common.util.StackUtil",
+          "specifiers": [
+            "StackUtil"
+          ]
+        },
+        {
+          "source": "org.keycloak.events.Event",
+          "specifiers": [
+            "Event"
+          ]
+        },
+        {
+          "source": "org.keycloak.events.EventListenerProvider",
+          "specifiers": [
+            "EventListenerProvider"
+          ]
+        },
+        {
+          "source": "org.keycloak.events.EventListenerTransaction",
+          "specifiers": [
+            "EventListenerTransaction"
+          ]
+        },
+        {
+          "source": "org.keycloak.events.admin.AdminEvent",
+          "specifiers": [
+            "AdminEvent"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakContext",
+          "specifiers": [
+            "KeycloakContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.sessions.AuthenticationSessionModel",
+          "specifiers": [
+            "AuthenticationSessionModel"
+          ]
+        }
+      ],
+      "exports": [
+        "LoggingEventListenerProvider",
+        "onEvent",
+        "onEvent",
+        "close",
+        "LoggingEventListenerProvider"
+      ],
+      "totalLines": 178,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/log/LoggingEventListenerProviderFactory.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/log/LoggingEventListenerProviderFactory.java",
+      "contentHash": "8d49eb7b2311de1fc9f4737c1f755ba0a622f6b906b274fbee25fdefe8d6b107",
+      "functions": [
+        {
+          "name": "create",
+          "params": [
+            "session"
+          ],
+          "returnType": "EventListenerProvider",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "init",
+          "params": [
+            "config"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "postInit",
+          "params": [
+            "factory"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "close",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "getId",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "LoggingEventListenerProviderFactory",
+          "methods": [
+            "create",
+            "init",
+            "postInit",
+            "close",
+            "getId"
+          ],
+          "properties": [
+            "ID",
+            "logger",
+            "successLevel",
+            "errorLevel"
+          ],
+          "exported": true,
+          "lineCount": 35
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.jboss.logging.Logger",
+          "specifiers": [
+            "Logger"
+          ]
+        },
+        {
+          "source": "org.keycloak.Config",
+          "specifiers": [
+            "Config"
+          ]
+        },
+        {
+          "source": "org.keycloak.events.EventListenerProvider",
+          "specifiers": [
+            "EventListenerProvider"
+          ]
+        },
+        {
+          "source": "org.keycloak.events.EventListenerProviderFactory",
+          "specifiers": [
+            "EventListenerProviderFactory"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSessionFactory",
+          "specifiers": [
+            "KeycloakSessionFactory"
+          ]
+        }
+      ],
+      "exports": [
+        "ID",
+        "create",
+        "init",
+        "postInit",
+        "close",
+        "getId",
+        "LoggingEventListenerProviderFactory"
+      ],
+      "totalLines": 45,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/mail/DefaultMailSender.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/mail/DefaultMailSender.java",
+      "contentHash": "2c90cbb3e8ceb980b0b2bbb0dbbae9ac2c2642930fe18be244b2dfc7e221efeb",
+      "functions": [
+        {
+          "name": "sendOtpCode",
+          "params": [
+            "otp",
+            "context"
+          ],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "createMailRecipient",
+          "params": [
+            "otp",
+            "context"
+          ],
+          "returnType": "UserModel",
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "createMailAttributes",
+          "params": [
+            "otp"
+          ],
+          "returnType": "HashMap<String, Object>",
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "createMailTemplateProvider",
+          "params": [
+            "context",
+            "mailRecipient"
+          ],
+          "returnType": "EmailTemplateProvider",
+          "exported": false,
+          "lineCount": 7
+        }
+      ],
+      "classes": [
+        {
+          "name": "DefaultMailSender",
+          "methods": [
+            "sendOtpCode",
+            "createMailRecipient",
+            "createMailAttributes",
+            "createMailTemplateProvider"
+          ],
+          "properties": [
+            "MINUTE_IN_SECONDS",
+            "OTP_MAIL_TEMPLATE",
+            "EMAIL_SUBJECT",
+            "OTP_ATTRIBUTE",
+            "TTL_ATTRIBUTE"
+          ],
+          "exported": true,
+          "lineCount": 48
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.credential.CredentialContext",
+          "specifiers": [
+            "CredentialContext"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpMailSender",
+          "specifiers": [
+            "OtpMailSender"
+          ]
+        },
+        {
+          "source": "org.keycloak.email.EmailTemplateProvider",
+          "specifiers": [
+            "EmailTemplateProvider"
+          ]
+        },
+        {
+          "source": "org.keycloak.email.freemarker.FreeMarkerEmailTemplateProvider",
+          "specifiers": [
+            "FreeMarkerEmailTemplateProvider"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.utils.UserModelDelegate",
+          "specifiers": [
+            "UserModelDelegate"
+          ]
+        },
+        {
+          "source": "java.util.HashMap",
+          "specifiers": [
+            "HashMap"
+          ]
+        },
+        {
+          "source": "java.util.Collections.emptyList",
+          "specifiers": [
+            "emptyList"
+          ]
+        }
+      ],
+      "exports": [
+        "sendOtpCode",
+        "DefaultMailSender"
+      ],
+      "totalLines": 64,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/mail/MailSendingException.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/mail/MailSendingException.java",
+      "contentHash": "caa6824d80ea978a8cdb06ec049cc841b3b21ae598db5826ea62767c4a14fad0",
+      "functions": [
+        {
+          "name": "MailSendingException",
+          "params": [
+            "message",
+            "cause"
+          ],
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailSendingException",
+          "methods": [
+            "MailSendingException"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "imports": [],
+      "exports": [
+        "MailSendingException",
+        "MailSendingException"
+      ],
+      "totalLines": 9,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/MemoryOtpService.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/MemoryOtpService.java",
+      "contentHash": "12af3583c50768d884063213fe6c25003aa4d3f33744a4c40e8afbc4d8a75cba",
+      "functions": [
+        {
+          "name": "MemoryOtpService",
+          "params": [
+            "generator",
+            "clock",
+            "authConfig"
+          ],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "createOtp",
+          "params": [
+            "emailAddress"
+          ],
+          "returnType": "Otp",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "validate",
+          "params": [
+            "currentCode",
+            "storedOtp"
+          ],
+          "returnType": "ValidationResult",
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "isExpired",
+          "params": [
+            "expiry"
+          ],
+          "returnType": "boolean",
+          "exported": false,
+          "lineCount": 3
+        }
+      ],
+      "classes": [
+        {
+          "name": "MemoryOtpService",
+          "methods": [
+            "MemoryOtpService",
+            "createOtp",
+            "validate",
+            "isExpired"
+          ],
+          "properties": [
+            "logger",
+            "DEFAULT_TTL_IN_SECONDS",
+            "DEFAULT_CODE_LENGTH",
+            "MAX_FAILED_VALIDATIONS",
+            "SECOND_IN_MILLIS",
+            "generator",
+            "clock",
+            "codeLength",
+            "ttlInSeconds"
+          ],
+          "exported": true,
+          "lineCount": 69
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Objects.isNull",
+          "specifiers": [
+            "isNull"
+          ]
+        },
+        {
+          "source": "java.util.Objects.nonNull",
+          "specifiers": [
+            "nonNull"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialModel",
+          "specifiers": [
+            "MailOtpCredentialModel"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "javax.annotation.Nullable",
+          "specifiers": [
+            "Nullable"
+          ]
+        },
+        {
+          "source": "org.jboss.logging.Logger",
+          "specifiers": [
+            "Logger"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.AuthenticatorConfigModel",
+          "specifiers": [
+            "AuthenticatorConfigModel"
+          ]
+        }
+      ],
+      "exports": [
+        "MemoryOtpService",
+        "createOtp",
+        "validate",
+        "MemoryOtpService"
+      ],
+      "totalLines": 81,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/Otp.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/Otp.java",
+      "contentHash": "885a2142901fb9a15146ac4fff99bd8a21f3cc47dc1b9089f97f4fca68786e27",
+      "functions": [
+        {
+          "name": "Otp",
+          "params": [
+            "code",
+            "ttlInSeconds",
+            "expiry",
+            "email",
+            "failedVerifications"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "getCode",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getTtlInSeconds",
+          "params": [],
+          "returnType": "long",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getExpiry",
+          "params": [],
+          "returnType": "long",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getEmail",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "getFailedVerifications",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "equals",
+          "params": [
+            "o"
+          ],
+          "returnType": "boolean",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "hashCode",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "toString",
+          "params": [],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 10
+        }
+      ],
+      "classes": [
+        {
+          "name": "Otp",
+          "methods": [
+            "Otp",
+            "getCode",
+            "getTtlInSeconds",
+            "getExpiry",
+            "getEmail",
+            "getFailedVerifications",
+            "equals",
+            "hashCode",
+            "toString"
+          ],
+          "properties": [
+            "code",
+            "ttlInSeconds",
+            "expiry",
+            "email",
+            "failedVerifications"
+          ],
+          "exported": true,
+          "lineCount": 66
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.util.Objects",
+          "specifiers": [
+            "Objects"
+          ]
+        }
+      ],
+      "exports": [
+        "Otp",
+        "getCode",
+        "getTtlInSeconds",
+        "getExpiry",
+        "getEmail",
+        "getFailedVerifications",
+        "equals",
+        "hashCode",
+        "toString",
+        "Otp"
+      ],
+      "totalLines": 71,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/OtpGenerator.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/OtpGenerator.java",
+      "contentHash": "d83f3e9e65c98463d43afdfaf597835fa6e3df9fc7e2a8750a19f9a3abd6dc7e",
+      "functions": [],
+      "classes": [
+        {
+          "name": "OtpGenerator",
+          "methods": [
+            "generate"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 5
+        }
+      ],
+      "imports": [],
+      "exports": [
+        "OtpGenerator"
+      ],
+      "totalLines": 8,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/OtpMailSender.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/OtpMailSender.java",
+      "contentHash": "8694bbf1806693229fdc116abb22fa49ea343ef7c1681cece61c58f63ef86d6f",
+      "functions": [],
+      "classes": [
+        {
+          "name": "OtpMailSender",
+          "methods": [
+            "sendOtpCode"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.credential.CredentialContext",
+          "specifiers": [
+            "CredentialContext"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.mail.MailSendingException",
+          "specifiers": [
+            "MailSendingException"
+          ]
+        }
+      ],
+      "exports": [
+        "OtpMailSender"
+      ],
+      "totalLines": 12,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/OtpService.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/OtpService.java",
+      "contentHash": "d780d33bc6d42749e8d2b2b95c20acdaa172c822b17748a2c5dc2383e6144a16",
+      "functions": [],
+      "classes": [
+        {
+          "name": "OtpService",
+          "methods": [
+            "validate",
+            "createOtp"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "imports": [],
+      "exports": [
+        "OtpService"
+      ],
+      "totalLines": 10,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/RandomDigitsCodeGenerator.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/RandomDigitsCodeGenerator.java",
+      "contentHash": "be5fadf5e2438b389e15fee87bc7ddf46a457a07db7b3b9e0fe748e25f7f4e9b",
+      "functions": [
+        {
+          "name": "generate",
+          "params": [
+            "length"
+          ],
+          "returnType": "String",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "RandomDigitsCodeGenerator",
+          "methods": [
+            "generate"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.keycloak.common.util.SecretGenerator",
+          "specifiers": [
+            "SecretGenerator"
+          ]
+        }
+      ],
+      "exports": [
+        "generate",
+        "RandomDigitsCodeGenerator"
+      ],
+      "totalLines": 13,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/ValidationResult.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/otp/ValidationResult.java",
+      "contentHash": "7f4913b2b79e57d6ad5e7a38dbe7d3075c3a1091ba021a4bd4e739c06ee96a8c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 8,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/RealmOtpResourceProviderParameterizedTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/RealmOtpResourceProviderParameterizedTest.java",
+      "contentHash": "af54f9bc20dc8d9401fef958818f92419b5867a8edbe65a165e1f1db5325bf7f",
+      "functions": [
+        {
+          "name": "data",
+          "params": [],
+          "returnType": "Collection<Object[]>",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "RealmOtpResourceProviderParameterizedTest",
+          "params": [
+            "input",
+            "httpStatusExpected"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "setUp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "setupOtpMail_response_on_validation_result",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 11
+        }
+      ],
+      "classes": [
+        {
+          "name": "RealmOtpResourceProviderParameterizedTest",
+          "methods": [
+            "data",
+            "RealmOtpResourceProviderParameterizedTest",
+            "setUp",
+            "setupOtpMail_response_on_validation_result"
+          ],
+          "properties": [
+            "input",
+            "httpStatusExpected",
+            "otp",
+            "otpService",
+            "resourceProvider"
+          ],
+          "exported": true,
+          "lineCount": 63
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.any",
+          "specifiers": [
+            "any"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.mock",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.when",
+          "specifiers": [
+            "when"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.authenticator.SessionAuthenticator",
+          "specifiers": [
+            "SessionAuthenticator"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.AppOtpCredentialService",
+          "specifiers": [
+            "AppOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialModel",
+          "specifiers": [
+            "MailOtpCredentialModel"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpSetupDTO",
+          "specifiers": [
+            "OtpSetupDTO"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpMailSender",
+          "specifiers": [
+            "OtpMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpService",
+          "specifiers": [
+            "OtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.ValidationResult",
+          "specifiers": [
+            "ValidationResult"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "java.util.Arrays",
+          "specifiers": [
+            "Arrays"
+          ]
+        },
+        {
+          "source": "java.util.Collection",
+          "specifiers": [
+            "Collection"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "org.junit.Before",
+          "specifiers": [
+            "Before"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        },
+        {
+          "source": "org.junit.runner.RunWith",
+          "specifiers": [
+            "RunWith"
+          ]
+        },
+        {
+          "source": "org.junit.runners.Parameterized",
+          "specifiers": [
+            "Parameterized"
+          ]
+        },
+        {
+          "source": "org.junit.runners.Parameterized.Parameters",
+          "specifiers": [
+            "Parameters"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakContext",
+          "specifiers": [
+            "KeycloakContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserProvider",
+          "specifiers": [
+            "UserProvider"
+          ]
+        }
+      ],
+      "exports": [
+        "data",
+        "RealmOtpResourceProviderParameterizedTest",
+        "setUp",
+        "setupOtpMail_response_on_validation_result",
+        "RealmOtpResourceProviderParameterizedTest"
+      ],
+      "totalLines": 95,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/RealmOtpResourceProviderTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/RealmOtpResourceProviderTest.java",
+      "contentHash": "1b94195a2e095ae23864ad7b8b8f5931047b3336519e6c8329ebd8a0b7fe4eaa",
+      "functions": [
+        {
+          "name": "setUp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "sendVerificationMail_should_create_and_send_otp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "sendVerificationMail_should_replace_pending_credentials_when_resent",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "sendVerificationMail_should_be_bad_request_if_user_not_found",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "sendVerificationMail_should_be_bad_request_if_no_email_given",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "sendVerificationMail_should_invalidate_otp_if_sending_fails",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "sendVerification_should_return_conflict_if_credentials_are_already_activated",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "sendVerification_should_be_ok_if_2fa_via_app_is_already_configured",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "setupOtpMail_should_be_bad_request_if_user_not_found",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "setupOtpMail_should_send_email_address_as_response_upon_successful_otp_creation",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "setupOtpMail_should_return_bad_request_if_no_credentials_exist",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "setupOtpMail_should_return_ok_and_delete_app_if_already_configured_for_user",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "setupOtpMail_should_be_created_and_delete_app_if_2fa_via_app_is_already_configured",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "setupOtpMail_should_accept_code_matching_a_second_pending_credential",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "getOtpSetupInfo_should_return_type_app_if_app_2fa_is_configured",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "getOtpSetupInfo_should_return_type_mail_if_mail_2fa_is_configured",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "getOtpSetupInfo_should_return_secret_and_qr_code_for_setting_up_app_otp_if_none_2fa_configured",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "setupOtp_should_be_created_and_delete_mail_otp_if_mail_otp_is_already_configured",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "setupOtp_should_be_ok_if_app_otp_is_already_configured",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "setupOtp_should_create_credentials_after_successful_validation",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "setupOtp_should_be_unauthorized_if_validation_fails",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "deleteOtp_should_delete_all_otps",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "classes": [
+        {
+          "name": "RealmOtpResourceProviderTest",
+          "methods": [
+            "setUp",
+            "sendVerificationMail_should_create_and_send_otp",
+            "sendVerificationMail_should_replace_pending_credentials_when_resent",
+            "sendVerificationMail_should_be_bad_request_if_user_not_found",
+            "sendVerificationMail_should_be_bad_request_if_no_email_given",
+            "sendVerificationMail_should_invalidate_otp_if_sending_fails",
+            "sendVerification_should_return_conflict_if_credentials_are_already_activated",
+            "sendVerification_should_be_ok_if_2fa_via_app_is_already_configured",
+            "setupOtpMail_should_be_bad_request_if_user_not_found",
+            "setupOtpMail_should_send_email_address_as_response_upon_successful_otp_creation",
+            "setupOtpMail_should_return_bad_request_if_no_credentials_exist",
+            "setupOtpMail_should_return_ok_and_delete_app_if_already_configured_for_user",
+            "setupOtpMail_should_be_created_and_delete_app_if_2fa_via_app_is_already_configured",
+            "setupOtpMail_should_accept_code_matching_a_second_pending_credential",
+            "getOtpSetupInfo_should_return_type_app_if_app_2fa_is_configured",
+            "getOtpSetupInfo_should_return_type_mail_if_mail_2fa_is_configured",
+            "getOtpSetupInfo_should_return_secret_and_qr_code_for_setting_up_app_otp_if_none_2fa_configured",
+            "setupOtp_should_be_created_and_delete_mail_otp_if_mail_otp_is_already_configured",
+            "setupOtp_should_be_ok_if_app_otp_is_already_configured",
+            "setupOtp_should_create_credentials_after_successful_validation",
+            "setupOtp_should_be_unauthorized_if_validation_fails",
+            "deleteOtp_should_delete_all_otps"
+          ],
+          "properties": [
+            "otpService",
+            "mailSender",
+            "resourceProvider",
+            "user",
+            "userProvider",
+            "realm",
+            "mailCredentialService",
+            "credentialContext",
+            "appCredentialService"
+          ],
+          "exported": true,
+          "lineCount": 352
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.authenticator.SessionAuthenticator",
+          "specifiers": [
+            "SessionAuthenticator"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.AppOtpCredentialService",
+          "specifiers": [
+            "AppOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.CredentialContext",
+          "specifiers": [
+            "CredentialContext"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialModel",
+          "specifiers": [
+            "MailOtpCredentialModel"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpInfoDTO",
+          "specifiers": [
+            "OtpInfoDTO"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpSetupDTO",
+          "specifiers": [
+            "OtpSetupDTO"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpType",
+          "specifiers": [
+            "OtpType"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.SuccessWithEmail",
+          "specifiers": [
+            "SuccessWithEmail"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.mail.MailSendingException",
+          "specifiers": [
+            "MailSendingException"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpMailSender",
+          "specifiers": [
+            "OtpMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpService",
+          "specifiers": [
+            "OtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.ValidationResult",
+          "specifiers": [
+            "ValidationResult"
+          ]
+        },
+        {
+          "source": "org.junit.Before",
+          "specifiers": [
+            "Before"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        },
+        {
+          "source": "org.keycloak.models",
+          "specifiers": [
+            "*"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.credential.OTPCredentialModel",
+          "specifiers": [
+            "OTPCredentialModel"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito",
+          "specifiers": [
+            "Mockito"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.any",
+          "specifiers": [
+            "any"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.eq",
+          "specifiers": [
+            "eq"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito",
+          "specifiers": [
+            "*"
+          ]
+        }
+      ],
+      "exports": [
+        "setUp",
+        "sendVerificationMail_should_create_and_send_otp",
+        "sendVerificationMail_should_replace_pending_credentials_when_resent",
+        "sendVerificationMail_should_be_bad_request_if_user_not_found",
+        "sendVerificationMail_should_be_bad_request_if_no_email_given",
+        "sendVerificationMail_should_invalidate_otp_if_sending_fails",
+        "sendVerification_should_return_conflict_if_credentials_are_already_activated",
+        "sendVerification_should_be_ok_if_2fa_via_app_is_already_configured",
+        "setupOtpMail_should_be_bad_request_if_user_not_found",
+        "setupOtpMail_should_send_email_address_as_response_upon_successful_otp_creation",
+        "setupOtpMail_should_return_bad_request_if_no_credentials_exist",
+        "setupOtpMail_should_return_ok_and_delete_app_if_already_configured_for_user",
+        "setupOtpMail_should_be_created_and_delete_app_if_2fa_via_app_is_already_configured",
+        "setupOtpMail_should_accept_code_matching_a_second_pending_credential",
+        "getOtpSetupInfo_should_return_type_app_if_app_2fa_is_configured",
+        "getOtpSetupInfo_should_return_type_mail_if_mail_2fa_is_configured",
+        "getOtpSetupInfo_should_return_secret_and_qr_code_for_setting_up_app_otp_if_none_2fa_configured",
+        "setupOtp_should_be_created_and_delete_mail_otp_if_mail_otp_is_already_configured",
+        "setupOtp_should_be_ok_if_app_otp_is_already_configured",
+        "setupOtp_should_create_credentials_after_successful_validation",
+        "setupOtp_should_be_unauthorized_if_validation_fails",
+        "deleteOtp_should_delete_all_otps",
+        "RealmOtpResourceProviderTest"
+      ],
+      "totalLines": 383,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/authenticator/OtpMailAuthenticatorParameterizedTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/authenticator/OtpMailAuthenticatorParameterizedTest.java",
+      "contentHash": "c3241754728f80ddacd397fa19758078a851252fe5c35ae0d211279be370062f",
+      "functions": [
+        {
+          "name": "data",
+          "params": [],
+          "returnType": "Collection<Object[]>",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "OtpMailAuthenticatorParameterizedTest",
+          "params": [
+            "input",
+            "httpStatusExpected",
+            "flowError"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "setUp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "authenticate_otp_validation",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 19
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpMailAuthenticatorParameterizedTest",
+          "methods": [
+            "data",
+            "OtpMailAuthenticatorParameterizedTest",
+            "setUp",
+            "authenticate_otp_validation"
+          ],
+          "properties": [
+            "credentialService",
+            "credentialContext",
+            "input",
+            "httpStatusExpected",
+            "flowError",
+            "authFlow",
+            "otpService",
+            "authenticator"
+          ],
+          "exported": true,
+          "lineCount": 74
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.time.Clock.systemDefaultZone",
+          "specifiers": [
+            "systemDefaultZone"
+          ]
+        },
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.eq",
+          "specifiers": [
+            "eq"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.mock",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.verify",
+          "specifiers": [
+            "verify"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.when",
+          "specifiers": [
+            "when"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.CredentialContext",
+          "specifiers": [
+            "CredentialContext"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialModel",
+          "specifiers": [
+            "MailOtpCredentialModel"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpMailSender",
+          "specifiers": [
+            "OtpMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpService",
+          "specifiers": [
+            "OtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.ValidationResult",
+          "specifiers": [
+            "ValidationResult"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.MultivaluedHashMap",
+          "specifiers": [
+            "MultivaluedHashMap"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response",
+          "specifiers": [
+            "Response"
+          ]
+        },
+        {
+          "source": "java.util.Arrays",
+          "specifiers": [
+            "Arrays"
+          ]
+        },
+        {
+          "source": "java.util.Collection",
+          "specifiers": [
+            "Collection"
+          ]
+        },
+        {
+          "source": "java.util.Collections",
+          "specifiers": [
+            "Collections"
+          ]
+        },
+        {
+          "source": "org.junit.Before",
+          "specifiers": [
+            "Before"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        },
+        {
+          "source": "org.junit.runner.RunWith",
+          "specifiers": [
+            "RunWith"
+          ]
+        },
+        {
+          "source": "org.junit.runners.Parameterized",
+          "specifiers": [
+            "Parameterized"
+          ]
+        },
+        {
+          "source": "org.junit.runners.Parameterized.Parameters",
+          "specifiers": [
+            "Parameters"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowContext",
+          "specifiers": [
+            "AuthenticationFlowContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowError",
+          "specifiers": [
+            "AuthenticationFlowError"
+          ]
+        },
+        {
+          "source": "org.keycloak.http.HttpRequest",
+          "specifiers": [
+            "HttpRequest"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentCaptor",
+          "specifiers": [
+            "ArgumentCaptor"
+          ]
+        }
+      ],
+      "exports": [
+        "data",
+        "OtpMailAuthenticatorParameterizedTest",
+        "setUp",
+        "authenticate_otp_validation",
+        "OtpMailAuthenticatorParameterizedTest"
+      ],
+      "totalLines": 109,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/authenticator/OtpMailAuthenticatorTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/authenticator/OtpMailAuthenticatorTest.java",
+      "contentHash": "9d5f9925cf321d623bad4be63762c0410dccf12a509f69e5a44c696ed8a07abe",
+      "functions": [
+        {
+          "name": "setUp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "isConfigured_should_be_true_if_credential_is_active",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "isConfigured_should_be_false_if_credential_is_inactive",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "isConfigured_should_be_false_if_credentials_are_not_set",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "authenticate_should_send_mail_if_otp_param_is_missing",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "authenticate_should_use_email_address_from_stored_credentials_if_user_has_none",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "authenticate_should_invalidate_otp_if_mail_sending_fails",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "authenticate_should_increase_number_of_failed_attempts_if_otp_is_invalid",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpMailAuthenticatorTest",
+          "methods": [
+            "setUp",
+            "isConfigured_should_be_true_if_credential_is_active",
+            "isConfigured_should_be_false_if_credential_is_inactive",
+            "isConfigured_should_be_false_if_credentials_are_not_set",
+            "authenticate_should_send_mail_if_otp_param_is_missing",
+            "authenticate_should_use_email_address_from_stored_credentials_if_user_has_none",
+            "authenticate_should_invalidate_otp_if_mail_sending_fails",
+            "authenticate_should_increase_number_of_failed_attempts_if_otp_is_invalid"
+          ],
+          "properties": [
+            "authFlow",
+            "mailSender",
+            "otpService",
+            "session",
+            "realm",
+            "credentialService",
+            "credentialContext",
+            "user",
+            "decodedFormParams",
+            "authenticator"
+          ],
+          "exported": true,
+          "lineCount": 135
+        }
+      ],
+      "imports": [
+        {
+          "source": "java.time.Clock.systemDefaultZone",
+          "specifiers": [
+            "systemDefaultZone"
+          ]
+        },
+        {
+          "source": "java.util.Collections.singletonList",
+          "specifiers": [
+            "singletonList"
+          ]
+        },
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.any",
+          "specifiers": [
+            "any"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.eq",
+          "specifiers": [
+            "eq"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.mock",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.verify",
+          "specifiers": [
+            "verify"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.when",
+          "specifiers": [
+            "when"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.CredentialContext",
+          "specifiers": [
+            "CredentialContext"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialService",
+          "specifiers": [
+            "MailOtpCredentialService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Challenge",
+          "specifiers": [
+            "Challenge"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.mail.MailSendingException",
+          "specifiers": [
+            "MailSendingException"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpMailSender",
+          "specifiers": [
+            "OtpMailSender"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.OtpService",
+          "specifiers": [
+            "OtpService"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.ValidationResult",
+          "specifiers": [
+            "ValidationResult"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.credential.MailOtpCredentialModel",
+          "specifiers": [
+            "MailOtpCredentialModel"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpType",
+          "specifiers": [
+            "OtpType"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.MultivaluedHashMap",
+          "specifiers": [
+            "MultivaluedHashMap"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response",
+          "specifiers": [
+            "Response"
+          ]
+        },
+        {
+          "source": "org.junit.Before",
+          "specifiers": [
+            "Before"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowContext",
+          "specifiers": [
+            "AuthenticationFlowContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowError",
+          "specifiers": [
+            "AuthenticationFlowError"
+          ]
+        },
+        {
+          "source": "org.keycloak.http.HttpRequest",
+          "specifiers": [
+            "HttpRequest"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentCaptor",
+          "specifiers": [
+            "ArgumentCaptor"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito",
+          "specifiers": [
+            "Mockito"
+          ]
+        }
+      ],
+      "exports": [
+        "setUp",
+        "isConfigured_should_be_true_if_credential_is_active",
+        "isConfigured_should_be_false_if_credential_is_inactive",
+        "isConfigured_should_be_false_if_credentials_are_not_set",
+        "authenticate_should_send_mail_if_otp_param_is_missing",
+        "authenticate_should_use_email_address_from_stored_credentials_if_user_has_none",
+        "authenticate_should_invalidate_otp_if_mail_sending_fails",
+        "authenticate_should_increase_number_of_failed_attempts_if_otp_is_invalid",
+        "OtpMailAuthenticatorTest"
+      ],
+      "totalLines": 170,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/authenticator/OtpParameterAuthenticatorTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/authenticator/OtpParameterAuthenticatorTest.java",
+      "contentHash": "2ae4390c47ce29d9a9c67fd2a13bac957e5f23eac1dd90911d7bd5c4d6464fe8",
+      "functions": [
+        {
+          "name": "setUp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "isConfigured_should_be_true_if_otp_auth_is_configured_for_user",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "isConfigured_should_be_false_if_otp_auth_is_not_configured_for_user",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "should_fail_if_request_contains_no_form_params",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "should_be_successful_if_form_params_contain_otp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "should_fail_with_challenge_if_otp_param_is_blank",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpParameterAuthenticatorTest",
+          "methods": [
+            "setUp",
+            "isConfigured_should_be_true_if_otp_auth_is_configured_for_user",
+            "isConfigured_should_be_false_if_otp_auth_is_not_configured_for_user",
+            "should_fail_if_request_contains_no_form_params",
+            "should_be_successful_if_form_params_contain_otp",
+            "should_fail_with_challenge_if_otp_param_is_blank"
+          ],
+          "properties": [
+            "authenticator",
+            "authFlow",
+            "user",
+            "realm",
+            "credentialManager",
+            "httpRequest",
+            "decodedFormParams",
+            "session"
+          ],
+          "exported": true,
+          "lineCount": 84
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.eq",
+          "specifiers": [
+            "eq"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.mock",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.verify",
+          "specifiers": [
+            "verify"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.when",
+          "specifiers": [
+            "when"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Challenge",
+          "specifiers": [
+            "Challenge"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpType",
+          "specifiers": [
+            "OtpType"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.MultivaluedHashMap",
+          "specifiers": [
+            "MultivaluedHashMap"
+          ]
+        },
+        {
+          "source": "jakarta.ws.rs.core.Response",
+          "specifiers": [
+            "Response"
+          ]
+        },
+        {
+          "source": "java.util.Collections",
+          "specifiers": [
+            "Collections"
+          ]
+        },
+        {
+          "source": "org.junit.Before",
+          "specifiers": [
+            "Before"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowContext",
+          "specifiers": [
+            "AuthenticationFlowContext"
+          ]
+        },
+        {
+          "source": "org.keycloak.authentication.AuthenticationFlowError",
+          "specifiers": [
+            "AuthenticationFlowError"
+          ]
+        },
+        {
+          "source": "org.keycloak.http.HttpRequest",
+          "specifiers": [
+            "HttpRequest"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.SubjectCredentialManager",
+          "specifiers": [
+            "SubjectCredentialManager"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.credential.OTPCredentialModel",
+          "specifiers": [
+            "OTPCredentialModel"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentCaptor",
+          "specifiers": [
+            "ArgumentCaptor"
+          ]
+        }
+      ],
+      "exports": [
+        "setUp",
+        "isConfigured_should_be_true_if_otp_auth_is_configured_for_user",
+        "isConfigured_should_be_false_if_otp_auth_is_not_configured_for_user",
+        "should_fail_if_request_contains_no_form_params",
+        "should_be_successful_if_form_params_contain_otp",
+        "should_fail_with_challenge_if_otp_param_is_blank",
+        "OtpParameterAuthenticatorTest"
+      ],
+      "totalLines": 111,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/credential/MailOtpCredentialServiceTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/credential/MailOtpCredentialServiceTest.java",
+      "contentHash": "3752d653cf738e365576957481865a7c9ea0fb9b6e557e16fb4ad75d9c71fb93",
+      "functions": [
+        {
+          "name": "setUp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "activate_should_activate_and_reset_failed_verifications",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "invalidate_should_invalidate_code_and_reset_failed_verifications",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "incrementFailedAttempts_should_increment_failed_attempts",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 11
+        }
+      ],
+      "classes": [
+        {
+          "name": "MailOtpCredentialServiceTest",
+          "methods": [
+            "setUp",
+            "activate_should_activate_and_reset_failed_verifications",
+            "invalidate_should_invalidate_code_and_reset_failed_verifications",
+            "incrementFailedAttempts_should_increment_failed_attempts"
+          ],
+          "properties": [
+            "credentialService",
+            "user",
+            "credentialContext",
+            "credentialProvider"
+          ],
+          "exported": true,
+          "lineCount": 62
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.any",
+          "specifiers": [
+            "any"
+          ]
+        },
+        {
+          "source": "org.mockito.ArgumentMatchers.eq",
+          "specifiers": [
+            "eq"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.mock",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.verify",
+          "specifiers": [
+            "verify"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.when",
+          "specifiers": [
+            "when"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.Otp",
+          "specifiers": [
+            "Otp"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes",
+          "specifiers": [
+            "AssertionsForClassTypes"
+          ]
+        },
+        {
+          "source": "org.junit.Before",
+          "specifiers": [
+            "Before"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.KeycloakSession",
+          "specifiers": [
+            "KeycloakSession"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.RealmModel",
+          "specifiers": [
+            "RealmModel"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.UserModel",
+          "specifiers": [
+            "UserModel"
+          ]
+        },
+        {
+          "source": "org.mockito.stubbing.Answer",
+          "specifiers": [
+            "Answer"
+          ]
+        }
+      ],
+      "exports": [
+        "setUp",
+        "activate_should_activate_and_reset_failed_verifications",
+        "invalidate_should_invalidate_code_and_reset_failed_verifications",
+        "incrementFailedAttempts_should_increment_failed_attempts",
+        "MailOtpCredentialServiceTest"
+      ],
+      "totalLines": 82,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/mail/OtpEmailThemeTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/mail/OtpEmailThemeTest.java",
+      "contentHash": "8bb7c885edd2d85da69e52dae4fdbaba9eb7dfcf3189531de7014e7db9250845",
+      "functions": [
+        {
+          "name": "rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "usesTheDesignSystemSkeletonRatherThanItsOwn",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "offersNoButtonBackToTheLoginScreen",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "carriesNoUnsubscribeLink",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "rendersWithoutThemeProperties",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "rendersEnglishCopyForEnglishRecipients",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "renderHtml",
+          "params": [
+            "language",
+            "otp",
+            "ttl"
+          ],
+          "returnType": "String",
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "renderHtml",
+          "params": [
+            "language",
+            "otp",
+            "ttl",
+            "withThemeProperties"
+          ],
+          "returnType": "String",
+          "exported": false,
+          "lineCount": 37
+        },
+        {
+          "name": "messageLookup",
+          "params": [
+            "messages"
+          ],
+          "returnType": "TemplateMethodModelEx",
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "passthroughSanitizer",
+          "params": [],
+          "returnType": "TemplateMethodModelEx",
+          "exported": false,
+          "lineCount": 5
+        }
+      ],
+      "classes": [
+        {
+          "name": "OtpEmailThemeTest",
+          "methods": [
+            "rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript",
+            "usesTheDesignSystemSkeletonRatherThanItsOwn",
+            "offersNoButtonBackToTheLoginScreen",
+            "carriesNoUnsubscribeLink",
+            "rendersWithoutThemeProperties",
+            "rendersEnglishCopyForEnglishRecipients",
+            "renderHtml",
+            "renderHtml",
+            "messageLookup",
+            "passthroughSanitizer"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 134
+        }
+      ],
+      "imports": [
+        {
+          "source": "org.assertj.core.api.Assertions.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "freemarker.core.HTMLOutputFormat",
+          "specifiers": [
+            "HTMLOutputFormat"
+          ]
+        },
+        {
+          "source": "freemarker.template.Configuration",
+          "specifiers": [
+            "Configuration"
+          ]
+        },
+        {
+          "source": "freemarker.template.SimpleScalar",
+          "specifiers": [
+            "SimpleScalar"
+          ]
+        },
+        {
+          "source": "freemarker.template.TemplateMethodModelEx",
+          "specifiers": [
+            "TemplateMethodModelEx"
+          ]
+        },
+        {
+          "source": "freemarker.template.TemplateModelException",
+          "specifiers": [
+            "TemplateModelException"
+          ]
+        },
+        {
+          "source": "java.io.StringWriter",
+          "specifiers": [
+            "StringWriter"
+          ]
+        },
+        {
+          "source": "java.nio.charset.StandardCharsets",
+          "specifiers": [
+            "StandardCharsets"
+          ]
+        },
+        {
+          "source": "java.nio.file.Files",
+          "specifiers": [
+            "Files"
+          ]
+        },
+        {
+          "source": "java.nio.file.Path",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "java.text.MessageFormat",
+          "specifiers": [
+            "MessageFormat"
+          ]
+        },
+        {
+          "source": "java.util.HashMap",
+          "specifiers": [
+            "HashMap"
+          ]
+        },
+        {
+          "source": "java.util.List",
+          "specifiers": [
+            "List"
+          ]
+        },
+        {
+          "source": "java.util.Locale",
+          "specifiers": [
+            "Locale"
+          ]
+        },
+        {
+          "source": "java.util.Map",
+          "specifiers": [
+            "Map"
+          ]
+        },
+        {
+          "source": "java.util.Properties",
+          "specifiers": [
+            "Properties"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        }
+      ],
+      "exports": [
+        "rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript",
+        "usesTheDesignSystemSkeletonRatherThanItsOwn",
+        "offersNoButtonBackToTheLoginScreen",
+        "carriesNoUnsubscribeLink",
+        "rendersWithoutThemeProperties",
+        "rendersEnglishCopyForEnglishRecipients",
+        "OtpEmailThemeTest"
+      ],
+      "totalLines": 156,
+      "hasStructuralAnalysis": true
+    },
+    "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/otp/MemoryOtpServiceTest.java": {
+      "filePath": "keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/otp/MemoryOtpServiceTest.java",
+      "contentHash": "7d0c71c811a368ba019de5ed2765234b0fdb9e576e6b9a88cdb90975095f07f9",
+      "functions": [
+        {
+          "name": "setUp",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "should_create_otp_with_default_ttl_and_expiry",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "should_use_auth_config_if_given",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "validate_should_be_valid_if_otp_equals_current_and_is_not_expired",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "validate_should_be_not_present_if_otp_was_invalidated",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "validate_should_return_expired_if_otp_is_expired",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "validate_should_be_invalid_if_stored_otp_code_does_not_equal_current",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "validate_should_be_invalid_on_empty_or_null_current_code",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "validate_should_not_be_valid_if_otp_has_too_many_failed_attempts",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "validate_should_not_be_valid_if_too_may_attempts_were_made_even_if_code_is_valid",
+          "params": [],
+          "returnType": "void",
+          "exported": true,
+          "lineCount": 8
+        }
+      ],
+      "classes": [
+        {
+          "name": "MemoryOtpServiceTest",
+          "methods": [
+            "setUp",
+            "should_create_otp_with_default_ttl_and_expiry",
+            "should_use_auth_config_if_given",
+            "validate_should_be_valid_if_otp_equals_current_and_is_not_expired",
+            "validate_should_be_not_present_if_otp_was_invalidated",
+            "validate_should_return_expired_if_otp_is_expired",
+            "validate_should_be_invalid_if_stored_otp_code_does_not_equal_current",
+            "validate_should_be_invalid_on_empty_or_null_current_code",
+            "validate_should_not_be_valid_if_otp_has_too_many_failed_attempts",
+            "validate_should_not_be_valid_if_too_may_attempts_were_made_even_if_code_is_valid"
+          ],
+          "properties": [
+            "otpGenerator",
+            "fixed",
+            "memoryOtpService"
+          ],
+          "exported": true,
+          "lineCount": 102
+        }
+      ],
+      "imports": [
+        {
+          "source": "de.onlineberatung.otp.ValidationResult.INVALID",
+          "specifiers": [
+            "INVALID"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.ValidationResult.NOT_PRESENT",
+          "specifiers": [
+            "NOT_PRESENT"
+          ]
+        },
+        {
+          "source": "de.onlineberatung.otp.ValidationResult.TOO_MANY_FAILED_ATTEMPTS",
+          "specifiers": [
+            "TOO_MANY_FAILED_ATTEMPTS"
+          ]
+        },
+        {
+          "source": "org.assertj.core.api.AssertionsForClassTypes.assertThat",
+          "specifiers": [
+            "assertThat"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.mock",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.verify",
+          "specifiers": [
+            "verify"
+          ]
+        },
+        {
+          "source": "org.mockito.Mockito.when",
+          "specifiers": [
+            "when"
+          ]
+        },
+        {
+          "source": "java.time.Clock",
+          "specifiers": [
+            "Clock"
+          ]
+        },
+        {
+          "source": "java.time.LocalDateTime",
+          "specifiers": [
+            "LocalDateTime"
+          ]
+        },
+        {
+          "source": "java.time.ZoneId",
+          "specifiers": [
+            "ZoneId"
+          ]
+        },
+        {
+          "source": "java.time.ZoneOffset",
+          "specifiers": [
+            "ZoneOffset"
+          ]
+        },
+        {
+          "source": "java.util.HashMap",
+          "specifiers": [
+            "HashMap"
+          ]
+        },
+        {
+          "source": "org.junit.Before",
+          "specifiers": [
+            "Before"
+          ]
+        },
+        {
+          "source": "org.junit.Test",
+          "specifiers": [
+            "Test"
+          ]
+        },
+        {
+          "source": "org.keycloak.models.AuthenticatorConfigModel",
+          "specifiers": [
+            "AuthenticatorConfigModel"
+          ]
+        }
+      ],
+      "exports": [
+        "setUp",
+        "should_create_otp_with_default_ttl_and_expiry",
+        "should_use_auth_config_if_given",
+        "validate_should_be_valid_if_otp_equals_current_and_is_not_expired",
+        "validate_should_be_not_present_if_otp_was_invalidated",
+        "validate_should_return_expired_if_otp_is_expired",
+        "validate_should_be_invalid_if_stored_otp_code_does_not_equal_current",
+        "validate_should_be_invalid_on_empty_or_null_current_code",
+        "validate_should_not_be_valid_if_otp_has_too_many_failed_attempts",
+        "validate_should_not_be_valid_if_too_may_attempts_were_made_even_if_code_is_valid",
+        "MemoryOtpServiceTest"
+      ],
+      "totalLines": 122,
+      "hasStructuralAnalysis": true
+    }
+  }
+}
