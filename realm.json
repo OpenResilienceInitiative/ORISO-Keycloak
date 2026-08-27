@@ -156,6 +156,15 @@
         "attributes": {}
       },
       {
+        "id": "9f2c4b6d-71a3-4c58-8e0f-2d6b5a4c1937",
+        "name": "global-support-admin",
+        "description": "Global Support Admin (ADR-018): the only role of a support identity. Grants no tenant, agency, consultant or user-admin privileges; usable solely for the live support handshake.",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "online-beratung",
+        "attributes": {}
+      },
+      {
         "id": "02b23701-9fc0-43c4-8b87-d804787cc7f2",
         "name": "tenant-admin",
         "description": "",
