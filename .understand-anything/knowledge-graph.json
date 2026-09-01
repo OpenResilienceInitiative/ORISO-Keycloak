@@ -12,8 +12,8 @@
     ],
     "frameworks": [],
     "description": "",
-    "analyzedAt": "2026-08-26T02:01:06.874Z",
-    "gitCommitHash": "367e488df7d5fbc3b6ef684589a10da14d3a2677"
+    "analyzedAt": "2026-08-27T12:31:01.336Z",
+    "gitCommitHash": "494b9a68d84ffcb1ce7ee544ffcd5c98fac534c9"
   },
   "nodes": [
     {
@@ -350,11 +350,77 @@
       "type": "config",
       "name": "keycloakextension.yaml",
       "filePath": "keycloak-image/otp-config-spi/api/keycloakextension.yaml",
-      "summary": "config file with 4 sections (270 lines).",
+      "summary": "OpenAPI specification: 5 endpoints (270 lines).",
       "tags": [
-        "config",
+        "openapi",
+        "api",
         "keycloak-image"
       ],
+      "complexity": "moderate"
+    },
+    {
+      "id": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:GET /otp-config/fetch-otp-setup-info/{username}",
+      "type": "endpoint",
+      "name": "GET /otp-config/fetch-otp-setup-info/{username}",
+      "filePath": "keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "lineRange": [
+        8,
+        8
+      ],
+      "summary": "Endpoint: GET /otp-config/fetch-otp-setup-info/{username}",
+      "tags": [],
+      "complexity": "moderate"
+    },
+    {
+      "id": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/setup-otp/{username}",
+      "type": "endpoint",
+      "name": "PUT /otp-config/setup-otp/{username}",
+      "filePath": "keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "lineRange": [
+        33,
+        33
+      ],
+      "summary": "Endpoint: PUT /otp-config/setup-otp/{username}",
+      "tags": [],
+      "complexity": "moderate"
+    },
+    {
+      "id": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:DELETE /otp-config/delete-otp/{username}",
+      "type": "endpoint",
+      "name": "DELETE /otp-config/delete-otp/{username}",
+      "filePath": "keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "lineRange": [
+        82,
+        82
+      ],
+      "summary": "Endpoint: DELETE /otp-config/delete-otp/{username}",
+      "tags": [],
+      "complexity": "moderate"
+    },
+    {
+      "id": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/send-verification-mail/{username}",
+      "type": "endpoint",
+      "name": "PUT /otp-config/send-verification-mail/{username}",
+      "filePath": "keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "lineRange": [
+        107,
+        107
+      ],
+      "summary": "Endpoint: PUT /otp-config/send-verification-mail/{username}",
+      "tags": [],
+      "complexity": "moderate"
+    },
+    {
+      "id": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:POST /otp-config/setup-otp-mail/{username}",
+      "type": "endpoint",
+      "name": "POST /otp-config/setup-otp-mail/{username}",
+      "filePath": "keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "lineRange": [
+        150,
+        150
+      ],
+      "summary": "Endpoint: POST /otp-config/setup-otp-mail/{username}",
+      "tags": [],
       "complexity": "moderate"
     },
     {
@@ -4572,6 +4638,41 @@
       "weight": 1
     },
     {
+      "source": "config:keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "target": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:GET /otp-config/fetch-otp-setup-info/{username}",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "config:keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "target": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/setup-otp/{username}",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "config:keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "target": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:DELETE /otp-config/delete-otp/{username}",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "config:keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "target": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/send-verification-mail/{username}",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
+      "source": "config:keycloak-image/otp-config-spi/api/keycloakextension.yaml",
+      "target": "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:POST /otp-config/setup-otp-mail/{username}",
+      "type": "contains",
+      "direction": "forward",
+      "weight": 1
+    },
+    {
       "source": "file:keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/RealmOtpResourceProvider.java",
       "target": "function:keycloak-image/otp-config-spi/src/main/java/de/onlineberatung/RealmOtpResourceProvider.java:RealmOtpResourceProvider",
       "type": "contains",
@@ -6583,6 +6684,31 @@
   ],
   "layers": [
     {
+      "id": "layer:domain-concepts",
+      "name": "Domain Concepts",
+      "description": "High-level domain concepts and flows (coarse enrichment pass).",
+      "nodeIds": [
+        "concept:realm-management",
+        "concept:k8s-deployment",
+        "concept:http-access-mode",
+        "concept:realm-backup",
+        "flow:deploy-and-configure",
+        "flow:backup-restore"
+      ]
+    },
+    {
+      "id": "layer:api-endpoints",
+      "name": "API Endpoints",
+      "description": "REST operations extracted from the OpenAPI specification (method + route).",
+      "nodeIds": [
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:GET /otp-config/fetch-otp-setup-info/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/setup-otp/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:DELETE /otp-config/delete-otp/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/send-verification-mail/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:POST /otp-config/setup-otp-mail/{username}"
+      ]
+    },
+    {
       "id": "layer:core",
       "name": "Core",
       "description": "Core application files",
@@ -6633,19 +6759,6 @@
         "file:keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/credential/MailOtpCredentialServiceTest.java",
         "file:keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/mail/OtpEmailThemeTest.java",
         "file:keycloak-image/otp-config-spi/src/test/java/de/onlineberatung/otp/MemoryOtpServiceTest.java"
-      ]
-    },
-    {
-      "id": "layer:domain-concepts",
-      "name": "Domain Concepts",
-      "description": "High-level domain concepts and flows (coarse enrichment pass).",
-      "nodeIds": [
-        "concept:realm-management",
-        "concept:k8s-deployment",
-        "concept:http-access-mode",
-        "concept:realm-backup",
-        "flow:deploy-and-configure",
-        "flow:backup-restore"
       ]
     }
   ],
@@ -6705,6 +6818,18 @@
     },
     {
       "order": 3,
+      "title": "API Endpoints",
+      "description": "REST operations extracted from the OpenAPI specification (method + route).. Key files: GET /otp-config/fetch-otp-setup-info/{username}, PUT /otp-config/setup-otp/{username}, DELETE /otp-config/delete-otp/{username}, PUT /otp-config/send-verification-mail/{username}, POST /otp-config/setup-otp-mail/{username}.",
+      "nodeIds": [
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:GET /otp-config/fetch-otp-setup-info/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/setup-otp/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:DELETE /otp-config/delete-otp/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:PUT /otp-config/send-verification-mail/{username}",
+        "endpoint:keycloak-image/otp-config-spi/api/keycloakextension.yaml:POST /otp-config/setup-otp-mail/{username}"
+      ]
+    },
+    {
+      "order": 4,
       "title": "Supporting Components",
       "description": "Additional supporting files: DEPLOYMENT.md, README.md, STATUS.md, ingress.yaml, keycloak-deployment.yaml, Dockerfile, README.md, README.md, keycloakextension.yaml, keycloak-service.yaml, realm.json, spi-build, builder, keycloak, FROM maven:3.9-eclipse-temurin-21 AS spi-build, WORKDIR /build, COPY otp-config-spi/pom.xml ., COPY otp-config-spi/api ./api, RUN mvn -q -B dependency:go-offline || true, COPY otp-config-spi/src ./src, RUN mvn -q -B package -DskipTests, FROM quay.io/keycloak/keycloak:26.6.3 AS builder, COPY --from=spi-build /build/target/keycloak-otp-config-spi-*-key, COPY themes/ /opt/keycloak/themes/, RUN /opt/keycloak/bin/kc.sh build, FROM quay.io/keycloak/keycloak:26.6.3, COPY --from=builder /opt/keycloak/ /opt/keycloak/, ENTRYPOINT [\"/opt/keycloak/bin/kc.sh\"], RealmOtpResourceProvider, getOtpSetupInfo, setupOtp, deleteOtp, sendVerificationMail, setupOtpMail, verifyAuthentication, getResource, close, verifyAndSendMail, verifyMailSetup, severity, RealmOtpResourceProvider, create, init, postInit, close, getId, RealmOtpResourceProviderFactory, authenticate, BearerTokenSessionAuthenticator, getId, getDisplayType, getHelpText, getReferenceCategory, isConfigurable, isUserSetupAllowed, getRequirementChoices, getConfigProperties, create, init, postInit, close, OtpAppAuthenticatorFactory, OtpMailAuthenticator, configuredFor, authenticate, requiresUser, setRequiredActions, sendOtpMail, validateOtp, getDisplayType, getReferenceCategory, isConfigurable, getRequirementChoices, isUserSetupAllowed, getHelpText, getConfigProperties, getId, OtpMailAuthenticator, getId, getDisplayType, getHelpText, getReferenceCategory, isConfigurable, isUserSetupAllowed, getRequirementChoices, getConfigProperties, create, init, postInit, close, OtpMailAuthenticatorFactory, getId, authenticate, requiresUser, configuredFor, setRequiredActions, getDisplayType, getReferenceCategory, isConfigurable, getRequirementChoices, isUserSetupAllowed, getHelpText, getConfigProperties, extractDecodedOtpParam, OtpParameterAuthenticator, SessionAuthenticator, createModel, createCredential, generateQRCodeBase64, generateSecret, is2FAConfigured, validate, deleteCredentials, AppOtpCredentialService, CredentialContext, fromAuthFlow, getSession, getRealm, getUser, equals, hashCode, CredentialContext, MailOtpCredentialData, getTtlInSeconds, setTtlInSeconds, getEmail, setEmail, getFailedVerifications, isActive, setActive, setFailedVerifications, MailOtpCredentialData, createFromCredentialModel, createOtpModel, serialize, MailOtpCredentialModel, getOtp, updateFrom, isActive, updateFailedVerifications, setActive, invalidateCode, updateInternalModel, MailOtpCredentialModel, MailOtpCredentialProvider, getType, createCredential, deleteCredential, getCredentialFromModel, getCredentialTypeMetadata, supportsCredentialType, isConfiguredFor, isValid, updateCredential, MailOtpCredentialProvider, create, getId, MailOtpCredentialProviderFactory, MailOtpCredentialService, createCredential, update, incrementFailedAttempts, activate, getCredential, getAllCredentials, deleteCredential, deleteInactiveCredentials, deleteById, invalidate, is2FAConfigured, MailOtpCredentialService, MailOtpSecretData, getCode, setCode, getExpiry, setExpiry, MailOtpSecretData, LoggingEventListenerProvider, onEvent, logEvent, appendDetails, appendSession, logAdminEvent, close, setKeycloakContext, LoggingEventListenerProvider, create, init, postInit, close, getId, LoggingEventListenerProviderFactory, sendOtpCode, createMailRecipient, createMailAttributes, createMailTemplateProvider, DefaultMailSender, MailSendingException, MailSendingException, MemoryOtpService, createOtp, validate, isExpired, MemoryOtpService, Otp, getCode, getTtlInSeconds, getExpiry, getEmail, getFailedVerifications, equals, hashCode, toString, Otp, OtpGenerator, OtpMailSender, OtpService, generate, RandomDigitsCodeGenerator, data, RealmOtpResourceProviderParameterizedTest, setUp, setupOtpMail_response_on_validation_result, RealmOtpResourceProviderParameterizedTest, setUp, sendVerificationMail_should_create_and_send_otp, sendVerificationMail_should_replace_pending_credentials_when_resent, sendVerificationMail_should_be_bad_request_if_user_not_found, sendVerificationMail_should_be_bad_request_if_no_email_given, sendVerificationMail_should_invalidate_otp_if_sending_fails, sendVerification_should_return_conflict_if_credentials_are_already_activated, sendVerification_should_be_ok_if_2fa_via_app_is_already_configured, setupOtpMail_should_be_bad_request_if_user_not_found, setupOtpMail_should_send_email_address_as_response_upon_successful_otp_creation, setupOtpMail_should_return_bad_request_if_no_credentials_exist, setupOtpMail_should_return_ok_and_delete_app_if_already_configured_for_user, setupOtpMail_should_be_created_and_delete_app_if_2fa_via_app_is_already_configured, setupOtpMail_should_accept_code_matching_a_second_pending_credential, getOtpSetupInfo_should_return_type_app_if_app_2fa_is_configured, getOtpSetupInfo_should_return_type_mail_if_mail_2fa_is_configured, getOtpSetupInfo_should_return_secret_and_qr_code_for_setting_up_app_otp_if_none_2fa_configured, setupOtp_should_be_created_and_delete_mail_otp_if_mail_otp_is_already_configured, setupOtp_should_be_ok_if_app_otp_is_already_configured, setupOtp_should_create_credentials_after_successful_validation, setupOtp_should_be_unauthorized_if_validation_fails, deleteOtp_should_delete_all_otps, RealmOtpResourceProviderTest, data, OtpMailAuthenticatorParameterizedTest, setUp, authenticate_otp_validation, OtpMailAuthenticatorParameterizedTest, setUp, isConfigured_should_be_true_if_credential_is_active, isConfigured_should_be_false_if_credential_is_inactive, isConfigured_should_be_false_if_credentials_are_not_set, authenticate_should_send_mail_if_otp_param_is_missing, authenticate_should_use_email_address_from_stored_credentials_if_user_has_none, authenticate_should_invalidate_otp_if_mail_sending_fails, authenticate_should_increase_number_of_failed_attempts_if_otp_is_invalid, OtpMailAuthenticatorTest, setUp, isConfigured_should_be_true_if_otp_auth_is_configured_for_user, isConfigured_should_be_false_if_otp_auth_is_not_configured_for_user, should_fail_if_request_contains_no_form_params, should_be_successful_if_form_params_contain_otp, should_fail_with_challenge_if_otp_param_is_blank, OtpParameterAuthenticatorTest, setUp, activate_should_activate_and_reset_failed_verifications, invalidate_should_invalidate_code_and_reset_failed_verifications, incrementFailedAttempts_should_increment_failed_attempts, MailOtpCredentialServiceTest, rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript, usesTheDesignSystemSkeletonRatherThanItsOwn, offersNoButtonBackToTheLoginScreen, carriesNoUnsubscribeLink, rendersWithoutThemeProperties, rendersEnglishCopyForEnglishRecipients, renderHtml, messageLookup, passthroughSanitizer, OtpEmailThemeTest, setUp, should_create_otp_with_default_ttl_and_expiry, should_use_auth_config_if_given, validate_should_be_valid_if_otp_equals_current_and_is_not_expired, validate_should_be_not_present_if_otp_was_invalidated, validate_should_return_expired_if_otp_is_expired, validate_should_be_invalid_if_stored_otp_code_does_not_equal_current, validate_should_be_invalid_on_empty_or_null_current_code, validate_should_not_be_valid_if_otp_has_too_many_failed_attempts, validate_should_not_be_valid_if_too_may_attempts_were_made_even_if_code_is_valid, MemoryOtpServiceTest.",
       "nodeIds": [
