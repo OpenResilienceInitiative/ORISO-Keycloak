@@ -22,6 +22,24 @@ import org.junit.Test;
 public class OtpEmailThemeTest {
 
   @Test
+  public void omitsTheWholeLogoCellWhenNoImageIsConfigured() throws Exception {
+    assertThat(renderHtml("de", "123456", 15)).doesNotContain("<img").doesNotContain("padding-right:12px");
+  }
+
+  @Test
+  public void onlyRendersLogoImagesHostedByTheApplication() throws Exception {
+    Map<String, String> env = Map.of(
+        "env.ORISO_APP_URL", "https://predev.oriso.org",
+        "env.ORISO_LOGO_URL", "https://predev.oriso.org/service/tenant/public/branding/0/logo");
+    assertThat(renderHtml("de", "123456", 15, true, env))
+        .contains("src=\"https://predev.oriso.org/service/tenant/public/branding/0/logo\"");
+    assertThat(renderHtml("de", "123456", 15, true, Map.of(
+        "env.ORISO_APP_URL", "https://predev.oriso.org",
+        "env.ORISO_LOGO_URL", "https://predev.oriso.org.evil.example/logo.png")))
+        .doesNotContain("<img");
+  }
+
+  @Test
   public void rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript() throws Exception {
     String html = renderHtml("de", "123456", 15);
 
@@ -98,6 +116,11 @@ public class OtpEmailThemeTest {
 
   private String renderHtml(String language, String otp, int ttl, boolean withThemeProperties)
       throws Exception {
+    return renderHtml(language, otp, ttl, withThemeProperties, Map.of());
+  }
+
+  private String renderHtml(String language, String otp, int ttl, boolean withThemeProperties,
+      Map<String, String> environment) throws Exception {
     Path emailTheme = Path.of(System.getProperty("basedir")).resolve("../themes/oriso/email");
     Properties messages = new Properties();
     try (var reader =
@@ -118,6 +141,10 @@ public class OtpEmailThemeTest {
             emailTheme.resolve("theme.properties"), StandardCharsets.UTF_8)) {
       themeProperties.load(reader);
     }
+
+    themeProperties.replaceAll((key, value) ->
+        org.keycloak.common.util.StringPropertyReplacer.replaceProperties(
+            value.toString(), environment::get));
 
     Map<String, Object> model = new HashMap<>();
     if (withThemeProperties) {
