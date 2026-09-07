@@ -47,7 +47,7 @@ public class OtpEmailThemeTest {
         .contains("<html lang=\"de\">")
         .contains("Ihr Einmalcode")
         .contains("123456")
-        .contains("Geben Sie diesen Code im Anmeldefenster ein.")
+        .contains("Geben Sie diesen Code in Online-Beratung ein.")
         .doesNotContain("data:image")
         .doesNotContain("<script")
         .doesNotContain("onclick=");
@@ -106,7 +106,7 @@ public class OtpEmailThemeTest {
         .contains("<html lang=\"en\">")
         .contains("Your one-time code")
         .contains("654321")
-        .contains("Enter this code in the sign-in window.")
+        .contains("Enter this code in Online-Beratung.")
         .doesNotContain("Ihr Einmalcode");
   }
 
