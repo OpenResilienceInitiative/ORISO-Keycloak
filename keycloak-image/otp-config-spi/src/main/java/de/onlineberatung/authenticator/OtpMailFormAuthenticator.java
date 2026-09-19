@@ -86,13 +86,26 @@ public class OtpMailFormAuthenticator implements Authenticator {
     }
 
     var credentialModel = credentialService.getCredential(credContext);
+    if (isNull(credentialModel) || !credentialModel.isActive()) {
+      // MemoryOtpService.validate() checks the code, the invalidation marker, the
+      // attempt count and the expiry — never the active flag. A credential
+      // deactivated between authenticate() and action() would otherwise return
+      // VALID and open the account. A missing one has nothing to check against at
+      // all, and re-showing the form would loop: every further submission meets
+      // the same absent credential.
+      context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
+          context.form().setError(Messages.INVALID_TOTP).createLoginTotp());
+      return;
+    }
 
     switch (verifier.verify(submittedCode, credentialModel, credContext)) {
       case VALID:
         context.success();
         break;
       case EXPIRED:
-        challengeAgain(context, Messages.EXPIRED_CODE);
+        // Re-showing the form alone is a dead end: the stored code stays expired,
+        // so every further submission fails for the same reason. Issue a fresh one.
+        sendCodeAndShowForm(credentialModel, credContext, context, Messages.EXPIRED_CODE);
         break;
       case TOO_MANY_FAILED_ATTEMPTS:
         // Past the limit the credential is spent. Re-showing the form would invite
@@ -111,6 +124,11 @@ public class OtpMailFormAuthenticator implements Authenticator {
 
   private void sendCodeAndShowForm(MailOtpCredentialModel credentialModel,
       CredentialContext credContext, AuthenticationFlowContext context) {
+    sendCodeAndShowForm(credentialModel, credContext, context, null);
+  }
+
+  private void sendCodeAndShowForm(MailOtpCredentialModel credentialModel,
+      CredentialContext credContext, AuthenticationFlowContext context, String errorKey) {
     var emailAddress = credContext.getUser().getEmail();
     if (isNull(emailAddress) || emailAddress.isBlank()) {
       logger.warn("keycloak user with id " + credContext.getUser().getId()
@@ -123,7 +141,11 @@ public class OtpMailFormAuthenticator implements Authenticator {
 
     try {
       mailSender.sendOtpCode(otp, credContext);
-      context.challenge(context.form().createLoginTotp());
+      var form = context.form();
+      if (nonNull(errorKey)) {
+        form = form.setError(errorKey);
+      }
+      context.challenge(form.createLoginTotp());
     } catch (MailSendingException e) {
       // The stored code was already rotated to one nobody received; leaving it live
       // would make the next attempt fail against a code that exists only here.

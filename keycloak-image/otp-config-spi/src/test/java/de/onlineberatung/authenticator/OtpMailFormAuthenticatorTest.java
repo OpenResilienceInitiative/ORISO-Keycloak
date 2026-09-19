@@ -192,6 +192,54 @@ public class OtpMailFormAuthenticatorTest {
   }
 
   @Test
+  public void action_should_refuse_a_credential_that_is_no_longer_active() {
+    // MemoryOtpService.validate() checks the code, the invalidation marker, the
+    // attempt count and the expiry — never the active flag. A credential
+    // deactivated between authenticate() and action() would otherwise return
+    // VALID and open the account.
+    var inactive = MailOtpCredentialModel.createOtpModel(
+        new Otp("1234", 300, 1000L, "counsellor@example.org", 0),
+        Clock.systemDefaultZone(), false);
+    when(credentialService.getCredential(any(CredentialContext.class))).thenReturn(inactive);
+    decodedFormParams.putSingle("otp", "1234");
+    when(otpService.validate(eq("1234"), any(Otp.class))).thenReturn(ValidationResult.VALID);
+
+    authenticator.action(authFlow);
+
+    verify(authFlow, never()).success();
+    verify(authFlow).failure(eq(AuthenticationFlowError.INVALID_CREDENTIALS), any(Response.class));
+  }
+
+  @Test
+  public void action_should_end_the_flow_when_the_credential_vanished() {
+    // Nothing left to check against. Re-showing the form would loop forever,
+    // because every further submission meets the same absent credential.
+    when(credentialService.getCredential(any(CredentialContext.class))).thenReturn(null);
+    decodedFormParams.putSingle("otp", "1234");
+
+    authenticator.action(authFlow);
+
+    verify(authFlow, never()).success();
+    verify(authFlow, never()).challenge(any(Response.class));
+    verify(authFlow).failure(eq(AuthenticationFlowError.INVALID_CREDENTIALS), any(Response.class));
+  }
+
+  @Test
+  public void action_should_mail_a_replacement_when_the_stored_code_expired() throws Exception {
+    // Without a fresh code the form is a dead end: the stored code stays expired,
+    // so every further submission fails for the same reason.
+    decodedFormParams.putSingle("otp", "1234");
+    when(otpService.validate(eq("1234"), any(Otp.class))).thenReturn(ValidationResult.EXPIRED);
+
+    authenticator.action(authFlow);
+
+    verify(mailSender).sendOtpCode(any(Otp.class), any(CredentialContext.class));
+    verify(form).setError(anyString());
+    verify(authFlow).challenge(formResponse);
+    verify(authFlow, never()).success();
+  }
+
+  @Test
   public void isConfigured_should_follow_the_active_credential() {
     var session = mock(KeycloakSession.class);
     var realm = mock(RealmModel.class);
