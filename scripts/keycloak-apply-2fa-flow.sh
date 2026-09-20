@@ -9,6 +9,13 @@
 #
 # Requires admin credentials; export KC_ADMIN_USER / KC_ADMIN_PASSWORD first or
 # log kcadm in beforehand. Realm defaults to online-beratung (override: REALM).
+#
+# To see WHETHER a realm has drifted before changing anything, run the read-only
+# check instead — it ships inside the image and names each failing expectation:
+#
+#   kubectl -n <ns> exec deploy/keycloak -- /opt/keycloak/bin/oriso-verify-2fa-flow.sh
+#
+# (source: keycloak-image/scripts/keycloak-verify-2fa-flow.sh)
 set -euo pipefail
 
 KC=/opt/keycloak/bin/kcadm.sh
@@ -130,6 +137,69 @@ else
     echo "       kcadm delete authentication/config/{id} and rerun this script." >&2
     exit 1
   fi
+fi
+
+# Browser flow: the built-in `forms` flow only carries auth-otp-form, which knows
+# the app credential alone. For an e-mail-only user its conditional-user-configured
+# sees nothing configured, so the whole subflow is skipped and the user reaches the
+# app on a password alone. Add the browser-capable e-mail authenticator beside it.
+#
+# Reconciled on EVERY run rather than skipped when the subflow exists. If a previous
+# run created the parent and then failed before its executions, an "already present"
+# check would take the skip branch forever and the flow would stay half-built while
+# the script reported success.
+BROWSER_SUBFLOW=browser-email-otp-conditional
+
+subflow_rows() {
+  $KC get "authentication/flows/$BROWSER_SUBFLOW/executions" -r "$REALM" 2>/dev/null \
+    | tr -d ' \n'
+}
+
+if ! subflow_rows >/dev/null 2>&1 || [ -z "$(subflow_rows)" ]; then
+  if $KC create "authentication/flows/forms/executions/flow" -r "$REALM" \
+      -s alias="$BROWSER_SUBFLOW" -s type=basic-flow 2>/dev/null; then
+    echo "created browser subflow $BROWSER_SUBFLOW"
+  else
+    echo "WARN: could not create $BROWSER_SUBFLOW; browser logins keep app-only 2FA" >&2
+  fi
+fi
+
+if [ -n "$(subflow_rows)" ]; then
+  # Each child is added only when absent, so a rerun repairs a partial subflow
+  # instead of duplicating a complete one.
+  for provider in conditional-user-configured email-form-authenticator; do
+    if subflow_rows | grep -q "\"providerId\":\"$provider\""; then
+      echo "$BROWSER_SUBFLOW already has $provider"
+    else
+      $KC create "authentication/flows/$BROWSER_SUBFLOW/executions/execution" -r "$REALM" \
+        -s provider="$provider" \
+        && echo "added $provider to $BROWSER_SUBFLOW"
+    fi
+  done
+
+  # Requirements are re-applied every run too: a row created but left DISABLED is
+  # invisible to a provider-id comparison and does nothing at login time.
+  $KC get "authentication/flows/forms/executions" -r "$REALM" > /tmp/2fa-forms-execs.json
+  FORMS_ROW=$(tr -d ' \n' < /tmp/2fa-forms-execs.json \
+    | grep -o "{[^{}]*\"displayName\":\"$BROWSER_SUBFLOW\"[^{}]*}" || true)
+  if [ -n "$FORMS_ROW" ]; then
+    echo "$FORMS_ROW" | sed 's/"requirement":"[A-Z]*"/"requirement":"CONDITIONAL"/' \
+      > /tmp/2fa-forms-one.json
+    $KC update "authentication/flows/forms/executions" -r "$REALM" -f /tmp/2fa-forms-one.json
+  else
+    echo "WARN: $BROWSER_SUBFLOW is not attached to the forms flow" >&2
+  fi
+
+  subflow_rows > /tmp/2fa-sub-execs.json
+  for sub_id in $(grep -o '"id":"[^"]*"' /tmp/2fa-sub-execs.json \
+      | sed 's/"id":"\([^"]*\)"/\1/'); do
+    sub_row=$(grep -o "{[^{}]*\"id\":\"$sub_id\"[^{}]*}" /tmp/2fa-sub-execs.json)
+    echo "$sub_row" | sed 's/"requirement":"[A-Z]*"/"requirement":"REQUIRED"/' \
+      > /tmp/2fa-sub-one.json
+    $KC update "authentication/flows/$BROWSER_SUBFLOW/executions" -r "$REALM" \
+      -f /tmp/2fa-sub-one.json
+  done
+  echo "reconciled $BROWSER_SUBFLOW"
 fi
 
 # grant the technical role (SPI endpoints require it) and bind the flow

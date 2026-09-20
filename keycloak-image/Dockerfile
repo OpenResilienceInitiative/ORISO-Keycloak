@@ -20,4 +20,8 @@ RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:26.6.3
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
+# The realm contract check travels with the image so the deploy-time job and the
+# operator run the same file. A copy in the chart would drift from this one the
+# same way a live realm drifts from realm.json.
+COPY --chmod=0755 scripts/keycloak-verify-2fa-flow.sh /opt/keycloak/bin/oriso-verify-2fa-flow.sh
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
