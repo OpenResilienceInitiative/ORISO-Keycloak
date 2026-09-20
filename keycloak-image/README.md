@@ -45,3 +45,20 @@ role `technical` (the UserService's technical user). The direct-grant flow
 `direct-grant-2fa` must be bound as the realm's Direct Grant Flow — both are
 included in `charts/keycloak/keycloak-resources/realm.json` for fresh imports;
 for existing realms run `scripts/keycloak-apply-2fa-flow.sh`.
+
+### Email branding for each environment
+
+The `oriso` email theme reads `ORISO_PLATFORM_NAME`, `ORISO_ORG_NAME`,
+`ORISO_ORG_ADDRESS`, `ORISO_CONTACT_LINE`, `ORISO_PRIMARY_COLOR` and
+`ORISO_ACCENT_COLOR` from environment variables, retaining its generated defaults.
+Set `ORISO_APP_URL` to the public application origin without a trailing slash.
+`ORISO_LOGO_URL` must be an HTTPS image beneath that same origin; other origins
+and empty values render a text wordmark without a broken image or empty spacer.
+For a stored tenant image use `/service/tenant/public/branding/{actualTenantId}/logo`
+under that origin, after verifying anonymous image retrieval.
+
+Set `ORISO_PRIVACY_URL`, `ORISO_IMPRINT_URL`, `ORISO_SETTINGS_URL`,
+`ORISO_UNSUBSCRIBE_URL` and `ORISO_LOGIN_URL` for the same deployment too.
+The variables are expanded by Keycloak's theme property resolver, not the shell.
+The source remains Frontend `src/emails/scripts/buildKeycloakTheme.mts`; regenerate
+and sync instead of editing generated FreeMarker files.
