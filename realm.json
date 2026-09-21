@@ -2436,7 +2436,8 @@
       "requiredActions": [],
       "realmRoles": [
         "default-roles-online-beratung",
-        "technical"
+        "technical",
+        "tenant-admin"
       ],
       "clientRoles": {
         "realm-management": [
