@@ -22,6 +22,33 @@ import org.junit.Test;
 public class OtpEmailThemeTest {
 
   @Test
+  public void omitsTheWholeLogoCellWhenNoImageIsConfigured() throws Exception {
+    assertThat(renderHtml("de", "123456", 15)).doesNotContain("<img").doesNotContain("padding-right:12px");
+  }
+
+  @Test
+  public void omitsTheWholeLogoCellInThePasswordResetMailWhenNoImageIsConfigured()
+      throws Exception {
+    assertThat(render("password-reset.ftl", "de", "123456", 15, true, Map.of()))
+        .contains("https://app.oriso.org/reset")
+        .doesNotContain("<img")
+        .doesNotContain("padding-right:12px");
+  }
+
+  @Test
+  public void onlyRendersLogoImagesHostedByTheApplication() throws Exception {
+    Map<String, String> overrides = Map.of(
+        "orisoAppUrl", "https://predev.oriso.org",
+        "orisoLogoUrl", "https://predev.oriso.org/service/tenant/public/branding/0/logo");
+    assertThat(render("otp-email.ftl", "de", "123456", 15, true, overrides))
+        .contains("src=\"https://predev.oriso.org/service/tenant/public/branding/0/logo\"");
+    assertThat(render("otp-email.ftl", "de", "123456", 15, true, Map.of(
+        "orisoAppUrl", "https://predev.oriso.org",
+        "orisoLogoUrl", "https://predev.oriso.org.evil.example/logo.png")))
+        .doesNotContain("<img");
+  }
+
+  @Test
   public void rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript() throws Exception {
     String html = renderHtml("de", "123456", 15);
 
@@ -98,6 +125,11 @@ public class OtpEmailThemeTest {
 
   private String renderHtml(String language, String otp, int ttl, boolean withThemeProperties)
       throws Exception {
+    return render("otp-email.ftl", language, otp, ttl, withThemeProperties, Map.of());
+  }
+
+  private String render(String template, String language, String otp, int ttl,
+      boolean withThemeProperties, Map<String, String> propertyOverrides) throws Exception {
     Path emailTheme = Path.of(System.getProperty("basedir")).resolve("../themes/oriso/email");
     Properties messages = new Properties();
     try (var reader =
@@ -118,6 +150,7 @@ public class OtpEmailThemeTest {
             emailTheme.resolve("theme.properties"), StandardCharsets.UTF_8)) {
       themeProperties.load(reader);
     }
+    themeProperties.putAll(propertyOverrides);
 
     Map<String, Object> model = new HashMap<>();
     if (withThemeProperties) {
@@ -128,9 +161,13 @@ public class OtpEmailThemeTest {
     model.put("locale", Locale.forLanguageTag(language));
     model.put("msg", messageLookup(messages));
     model.put("kcSanitize", passthroughSanitizer());
+    model.put("link", "https://app.oriso.org/reset");
+    model.put("linkExpiration", 5);
+    model.put("linkExpirationFormatter", (TemplateMethodModelEx) arguments -> new SimpleScalar(
+        arguments.isEmpty() ? "" : arguments.get(0) + " minutes"));
 
     StringWriter output = new StringWriter();
-    configuration.getTemplate("otp-email.ftl").process(model, output);
+    configuration.getTemplate(template).process(model, output);
     return output.toString();
   }
 
