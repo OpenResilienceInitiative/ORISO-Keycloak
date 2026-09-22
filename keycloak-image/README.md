@@ -45,3 +45,9 @@ role `technical` (the UserService's technical user). The direct-grant flow
 `direct-grant-2fa` must be bound as the realm's Direct Grant Flow — both are
 included in `charts/keycloak/keycloak-resources/realm.json` for fresh imports;
 for existing realms run `scripts/keycloak-apply-2fa-flow.sh`.
+
+The technical user additionally needs the realm role `tenant-admin`: the
+public tenant-admin onboarding reads the operator DPA and creates the new
+tenant server-to-server as that user, and TenantService only serves those
+endpoints to `tenant-admin`. `realm.json` grants it on fresh imports; for
+existing realms run `scripts/keycloak-grant-technical-tenant-admin.sh`.
