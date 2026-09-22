@@ -14,8 +14,10 @@ public final class AppBaseUrl {
 
   public static final String ENV_NAME = "ORISO_APP_BASE_URL";
 
-  // Placeholders from the Helm values template; a real deployment never uses them.
-  private static final List<String> PLACEHOLDERS = List.of("your-domain", "example.com");
+  // Same placeholder set as UserService/Helm: RFC 2606/6761 documentation and invalid domains
+  // (the host or any subdomain) plus the Helm values template's `your-domain`.
+  private static final List<String> RESERVED_DOMAINS =
+      List.of("example.com", "example.org", "example.net", "example.test", "invalid");
 
   private AppBaseUrl() {}
 
@@ -54,7 +56,11 @@ public final class AppBaseUrl {
   }
 
   private static boolean isPlaceholder(String value) {
-    String lower = value.toLowerCase(Locale.ROOT);
-    return PLACEHOLDERS.stream().anyMatch(lower::contains);
+    if (value.toLowerCase(Locale.ROOT).contains("your-domain")) {
+      return true;
+    }
+    String host = URI.create(value).getHost().toLowerCase(Locale.ROOT);
+    return RESERVED_DOMAINS.stream()
+        .anyMatch(domain -> host.equals(domain) || host.endsWith("." + domain));
   }
 }

@@ -42,7 +42,7 @@ CI builds and pushes on changes under `keycloak-image/**` (see
 
 | Variable             | Example                   | Why                                                                                           |
 | -------------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
-| `ORISO_APP_BASE_URL` | `https://app.example.org` | App origin the `oriso` email theme builds every mail link from (privacy, imprint, settings…). |
+| `ORISO_APP_BASE_URL` | `https://app.oriso-test.internal` | App origin the `oriso` email theme builds every mail link from (privacy, imprint, settings…). |
 
 `themes/oriso/email/theme.properties` reads it as `${env.ORISO_APP_BASE_URL}`;
 Keycloak substitutes `${env.X}` in theme properties when it loads a theme
@@ -50,7 +50,10 @@ Keycloak substitutes `${env.X}` in theme properties when it loads a theme
 An unset variable would stay as literal text in every link, so the SPI's
 `RealmOtpResourceProviderFactory#init` refuses to start the server when the
 value is missing, blank, not an absolute `http(s)://host[:port]` origin (no path,
-no trailing slash) or a chart placeholder (`your-domain`, `example.com`). The
+no trailing slash) or a placeholder: `your-domain`, or a host under
+`example.com`, `example.org`, `example.net`, `example.test` or `.invalid` (same
+set as UserService and Helm). Tests use `app.oriso-test.internal` as a valid
+value: `.internal` is reserved for private use and is not a placeholder. The
 check lives in the SPI, not in the Docker `ENTRYPOINT`, because the Helm chart
 overrides the container command.
 

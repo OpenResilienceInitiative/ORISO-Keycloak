@@ -8,11 +8,17 @@ import de.onlineberatung.RealmOtpResourceProviderFactory;
 import java.util.Map;
 import org.junit.Test;
 
+/**
+ * Valid values use app.oriso-test.internal: `.internal` is reserved for private use (ICANN,
+ * 2024) and is not one of the documentation placeholders the check rejects.
+ */
 public class AppBaseUrlTest {
+
+  private static final String VALID = "https://app.oriso-test.internal";
 
   @Test
   public void acceptsAnAbsoluteHttpsOrigin() {
-    assertThat(AppBaseUrl.require("https://app.example.org")).isEqualTo("https://app.example.org");
+    assertThat(AppBaseUrl.require(VALID)).isEqualTo(VALID);
   }
 
   @Test
@@ -32,28 +38,46 @@ public class AppBaseUrlTest {
 
   @Test
   public void rejectsARelativeValue() {
-    assertRejected("app.example.org");
+    assertRejected("app.oriso-test.internal");
     assertRejected("/login");
   }
 
   @Test
   public void rejectsNonHttpSchemes() {
-    assertRejected("ftp://app.example.org");
+    assertRejected("ftp://app.oriso-test.internal");
     assertRejected("javascript:alert(1)");
   }
 
   @Test
   public void rejectsAPathOrTrailingSlash() {
     // The theme appends /datenschutz etc.; a path or slash would double up.
-    assertRejected("https://app.example.org/");
-    assertRejected("https://app.example.org/app");
-    assertRejected("https://app.example.org?x=1");
+    assertRejected(VALID + "/");
+    assertRejected(VALID + "/app");
+    assertRejected(VALID + "?x=1");
   }
 
   @Test
   public void rejectsChartPlaceholders() {
     assertRejected("https://your-domain.example.com");
-    assertRejected("https://app.example.com");
+    assertRejected("https://your-domain.oriso-test.internal");
+  }
+
+  @Test
+  public void rejectsReservedDocumentationDomainsLikeUserServiceAndHelm() {
+    for (String domain : new String[] {"example.com", "example.org", "example.net", "example.test"}) {
+      assertRejected("https://" + domain);
+      assertRejected("https://app." + domain);
+      assertRejected("https://APP." + domain.toUpperCase(java.util.Locale.ROOT) + ":8443");
+    }
+    assertRejected("https://app.invalid");
+    assertRejected("https://invalid");
+  }
+
+  @Test
+  public void acceptsHostsThatOnlyResembleAReservedDomain() {
+    assertThat(AppBaseUrl.require("https://myexample.org")).isEqualTo("https://myexample.org");
+    assertThat(AppBaseUrl.require("https://example.org.oriso-test.internal"))
+        .isEqualTo("https://example.org.oriso-test.internal");
   }
 
   @Test
@@ -63,8 +87,8 @@ public class AppBaseUrlTest {
 
   @Test
   public void readsTheValueFromTheNamedVariable() {
-    Map<String, String> env = Map.of("ORISO_APP_BASE_URL", "https://dev.example.org");
-    assertThat(AppBaseUrl.requireFromEnvironment(env::get)).isEqualTo("https://dev.example.org");
+    Map<String, String> env = Map.of("ORISO_APP_BASE_URL", VALID);
+    assertThat(AppBaseUrl.requireFromEnvironment(env::get)).isEqualTo(VALID);
   }
 
   @Test

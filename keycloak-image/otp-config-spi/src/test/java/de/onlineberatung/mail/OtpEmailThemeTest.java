@@ -25,7 +25,7 @@ import org.keycloak.common.util.StringPropertyReplacer;
 
 public class OtpEmailThemeTest {
 
-  private static final String APP_ORIGIN = "https://dev.example.org";
+  private static final String APP_ORIGIN = "https://app.oriso-test.internal";
 
   @Test
   public void rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript() throws Exception {
@@ -97,7 +97,7 @@ public class OtpEmailThemeTest {
   @Test
   public void passwordResetFooterLinksPointAtTheConfiguredAppOrigin() throws Exception {
     Map<String, Object> model = new HashMap<>();
-    model.put("link", "https://auth.example.org/reset?key=abc");
+    model.put("link", "https://auth.oriso-test.internal/reset?key=abc");
     model.put("linkExpiration", 5);
     model.put("linkExpirationFormatter", (TemplateMethodModelEx) args -> "5 Minuten");
     String html = render("html", "password-reset.ftl", "de", model, true);
