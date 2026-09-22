@@ -22,11 +22,11 @@ public class BearerTokenSessionAuthenticatorTest {
   }
 
   @Test
-  public void the_legacy_technical_role_is_still_accepted_during_the_migration() {
+  public void the_service_identity_role_technical_is_no_longer_accepted() {
     var caller = userWithDirectRoles("default-roles-online-beratung", "technical");
 
-    assertThatCode(() -> BearerTokenSessionAuthenticator.requireAllowedRole(caller))
-        .doesNotThrowAnyException();
+    assertThatThrownBy(() -> BearerTokenSessionAuthenticator.requireAllowedRole(caller))
+        .isInstanceOf(ForbiddenException.class);
   }
 
   @Test
