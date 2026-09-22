@@ -73,6 +73,15 @@
         "attributes": {}
       },
       {
+        "id": "2ef136cc-fca5-4ff6-b746-ae84aebd4fa1",
+        "name": "otp-config-admin",
+        "description": "May call the otp-config endpoints of the ORISO Keycloak SPI (backend Keycloak admin identity only)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "online-beratung",
+        "attributes": {}
+      },
+      {
         "id": "c95aff4a-c6a9-4d12-8584-d0ec1f163839",
         "name": "technical",
         "description": "",
@@ -2444,6 +2453,30 @@
           "manage-users",
           "view-users",
           "query-users"
+        ]
+      },
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "2ede87a6-89ce-4883-9778-7a33d30797ac",
+      "createdTimestamp": 1609459200000,
+      "username": "svc-keycloak-admin",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "default-roles-online-beratung",
+        "otp-config-admin"
+      ],
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users",
+          "view-realm"
         ]
       },
       "notBefore": 0,
