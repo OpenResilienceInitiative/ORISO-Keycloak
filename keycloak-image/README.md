@@ -57,6 +57,28 @@ value: `.internal` is reserved for private use and is not a placeholder. The
 check lives in the SPI, not in the Docker `ENTRYPOINT`, because the Helm chart
 overrides the container command.
 
+## Mail logo
+
+The header of the OTP and password-reset mails shows, in this order:
+
+1. the recipient's Träger logo — Admin → Appearance → Logo, the detailed
+   variant, not the favicon — when the user carries a positive `tenantId`
+   attribute: `${ORISO_APP_BASE_URL}/service/tenant/public/branding/<tenantId>/logo`
+   (TenantService, public, no cookie needed);
+2. otherwise the platform logo from the optional `ORISO_LOGO_URL`
+   (theme.properties: `orisoLogoUrl=${env.ORISO_LOGO_URL:}`), only when it is
+   an address beneath the HTTPS `ORISO_APP_BASE_URL`;
+3. otherwise no image, just the text wordmark.
+
+Mail clients block `data:` images, so the logo is always an absolute URL on the
+app's own origin; a foreign host would learn who opened the mail and when. If
+the image does not load, its alt text (the platform name, styled like the
+wordmark in the brand colour) takes its place instead of a broken-image box.
+
+| Variable         | Example                                                          | Why                                                   |
+| ---------------- | ---------------------------------------------------------------- | ----------------------------------------------------- |
+| `ORISO_LOGO_URL` | `https://app.oriso-test.internal/service/tenant/public/branding/logo` | Optional. Platform logo for users without a Träger. Unset = text wordmark. |
+
 Local run:
 
 ```sh
