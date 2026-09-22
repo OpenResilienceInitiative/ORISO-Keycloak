@@ -38,6 +38,33 @@ docker build -t ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp keycl
 CI builds and pushes on changes under `keycloak-image/**` (see
 `.github/workflows/keycloak-image.yml`).
 
+## Required environment
+
+| Variable             | Example                   | Why                                                                                           |
+| -------------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| `ORISO_APP_BASE_URL` | `https://app.example.org` | App origin the `oriso` email theme builds every mail link from (privacy, imprint, settings…). |
+
+`themes/oriso/email/theme.properties` reads it as `${env.ORISO_APP_BASE_URL}`;
+Keycloak substitutes `${env.X}` in theme properties when it loads a theme
+(`DefaultThemeManager.ExtendingTheme#substituteProperties`, Keycloak 26.6.3).
+An unset variable would stay as literal text in every link, so the SPI's
+`RealmOtpResourceProviderFactory#init` refuses to start the server when the
+value is missing, blank, not an absolute `http(s)://host[:port]` origin (no path,
+no trailing slash) or a chart placeholder (`your-domain`, `example.com`). The
+check lives in the SPI, not in the Docker `ENTRYPOINT`, because the Helm chart
+overrides the container command.
+
+Local run:
+
+```sh
+docker run -e ORISO_APP_BASE_URL=http://localhost:9001 -p 8080:8080 \
+  ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp start-dev
+```
+
+The theme is generated in ORISO-Frontend (`npm run emails:keycloak`) and
+copied here with `scripts/sync-email-theme.sh`; ORISO-Frontend is the source of
+truth, never edit the theme files by hand.
+
 ## Realm requirements
 
 The SPI's REST endpoints require a bearer token of a user holding the realm
