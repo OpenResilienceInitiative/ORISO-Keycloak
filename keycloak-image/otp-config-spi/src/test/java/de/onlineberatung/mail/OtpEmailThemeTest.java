@@ -46,42 +46,41 @@ public class OtpEmailThemeTest {
       assertThat(logoImage(html))
           .as(template)
           .contains("src=\"" + TENANT_LOGO + "\"")
-          .contains("width=\"56\"")
-          .contains("height=\"56\"")
-          .contains("alt=\"Online-Beratung\"");
+          .contains("width=\"36\"")
+          .contains("height=\"36\"")
+          .contains("border:0");
     }
   }
 
   @Test
-  public void stylesTheAltTextLikeTheWordmarkSoABrokenImageLooksIntended() throws Exception {
+  public void showsTheBrandNameBesideTheLogo() throws Exception {
+    // Frank, 2026-09-23: logo AND name, as before the logo-only iteration.
+    for (String template : List.of("otp-email.ftl", "password-reset.ftl")) {
+      String html = renderHtmlFor(template, Map.of(), Map.of("tenantId", "7"));
+
+      assertThat(html).as(template).contains(">Online-Beratung</td>");
+      assertThat(html.indexOf("<img")).as(template).isLessThan(html.indexOf(">Online-Beratung</td>"));
+    }
+  }
+
+  @Test
+  public void marksTheLogoDecorativeSoAFailedImageDoesNotRepeatTheName() throws Exception {
+    // The name already stands beside the logo: alt="" and no styled alt text.
     String image = logoImage(renderHtmlFor("otp-email.ftl", Map.of(), Map.of("tenantId", "7")));
 
-    assertThat(image)
-        .contains("font-family:Inter")
-        .contains("font-size:16px")
-        .contains("font-weight:600")
-        .contains("color:#a5000a");
+    assertThat(image).contains(" alt=\"\"").doesNotContain("Online-Beratung");
+    assertThat(image).doesNotContain("font-family");
   }
 
   @Test
-  public void coversTheBrokenImageIconWithTheBrandName() throws Exception {
-    // Chrome and Firefox draw ::after only on an image that failed to load; the
-    // overlay hides the grey broken-image box and shows the alt text instead.
+  public void hidesAFailedLogoInsteadOfShowingABrokenImage() throws Exception {
+    // Chromium draws ::after only on an image that failed to load; the overlay in
+    // the canvas colour hides the broken-image icon and adds no text.
     String html = renderHtmlFor("otp-email.ftl", Map.of(), Map.of("tenantId", "7"));
 
-    assertThat(logoImage(html)).contains("class=\"oriso-logo\"");
     assertThat(html)
-        .contains("img.oriso-logo::after{content:attr(alt);")
-        .contains("color:#a5000a");
-  }
-
-  @Test
-  public void theLogoReplacesTheTextWordmarkSoTheNameIsNotShownTwice() throws Exception {
-    String withLogo = renderHtmlFor("otp-email.ftl", Map.of(), Map.of("tenantId", "7"));
-    String withoutLogo = renderHtmlFor("otp-email.ftl", Map.of(), Map.of());
-
-    assertThat(withLogo).doesNotContain(">Online-Beratung</td>");
-    assertThat(withoutLogo).contains(">Online-Beratung</td>");
+        .contains("img[alt=\"\"]::after{content:\"\";")
+        .doesNotContain("content:attr(alt)");
   }
 
   @Test
