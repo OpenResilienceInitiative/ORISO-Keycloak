@@ -46,6 +46,8 @@ public final class AppBaseUrl {
       return ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
           && uri.getHost() != null
           && !uri.getHost().isBlank()
+          // URI hands back an out-of-range port (65536, 0) instead of refusing it.
+          && (uri.getPort() == -1 || (uri.getPort() >= 1 && uri.getPort() <= 65535))
           && uri.getUserInfo() == null
           && (uri.getRawPath() == null || uri.getRawPath().isEmpty())
           && uri.getRawQuery() == null
@@ -55,11 +57,17 @@ public final class AppBaseUrl {
     }
   }
 
+  /** Lower case and without the terminal DNS dot, which getHost() keeps. */
+  private static String canonicalHost(String host) {
+    String lower = host.toLowerCase(Locale.ROOT);
+    return lower.endsWith(".") ? lower.substring(0, lower.length() - 1) : lower;
+  }
+
   private static boolean isPlaceholder(String value) {
     if (value.toLowerCase(Locale.ROOT).contains("your-domain")) {
       return true;
     }
-    String host = URI.create(value).getHost().toLowerCase(Locale.ROOT);
+    String host = canonicalHost(URI.create(value).getHost());
     return RESERVED_DOMAINS.stream()
         .anyMatch(domain -> host.equals(domain) || host.endsWith("." + domain));
   }
