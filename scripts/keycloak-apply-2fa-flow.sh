@@ -21,9 +21,13 @@ set -euo pipefail
 KC=/opt/keycloak/bin/kcadm.sh
 REALM="${REALM:-online-beratung}"
 FLOW=direct-grant-2fa
+# The admin API lives under KC_HTTP_RELATIVE_PATH when one is set (the chart
+# sets /auth), so a bare http://localhost:8080 answers 404 and the login fails.
+# Override with KC_SERVER when Keycloak answers elsewhere.
+KC_SERVER="${KC_SERVER:-http://localhost:8080${KC_HTTP_RELATIVE_PATH:-}}"
 
 if [ -n "${KC_ADMIN_USER:-}" ]; then
-  $KC config credentials --server http://localhost:8080 --realm master \
+  $KC config credentials --server "$KC_SERVER" --realm master \
     --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD"
 fi
 
@@ -94,6 +98,17 @@ EMAIL_AUTH_ROW=$($KC get "authentication/flows/email-otp-conditional/executions"
   | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' || true)
 EMAIL_AUTH_ID=$(echo "$EMAIL_AUTH_ROW" | grep -o '"id":"[^"]*"' | head -1 \
   | sed 's/"id":"\([^"]*\)"/\1/' || true)
+
+# Deleting the flow takes its authenticatorConfig rows with it, so the id
+# captured before the delete is usually already gone. Reusing it blindly makes
+# the update answer 404 and `set -e` aborts the run BEFORE the flow is bound
+# back to direct-grant-2fa, which leaves the realm on the stock flow with no
+# second factor at all. Only reuse an id the realm still has.
+if [ -n "$EXISTING_CONFIG_ID" ] \
+    && ! $KC get "authentication/config/$EXISTING_CONFIG_ID" -r "$REALM" >/dev/null 2>&1; then
+  echo "previous email-otp-config ($EXISTING_CONFIG_ID) is gone; creating a fresh one"
+  EXISTING_CONFIG_ID=""
+fi
 
 if [ -z "$EMAIL_AUTH_ID" ]; then
   echo "WARN: email-authenticator execution not found; email-otp-config not attached"

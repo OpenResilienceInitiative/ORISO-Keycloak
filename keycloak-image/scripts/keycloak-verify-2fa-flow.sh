@@ -63,11 +63,20 @@ executions_of() {
 
 # "provider:REQUIREMENT" per execution, in order. Subflow rows carry a
 # displayName instead of a providerId, so they appear under their alias.
+#
+# Only the rows of the flow itself: the executions endpoint returns the whole
+# tree, so a conditional subflow's children arrive inline right after it, at
+# level 1. Comparing that flattened list against the expected top-level entries
+# reports every correctly nested realm as drifted — the children are checked on
+# their own subflow below.
 entries_of() {
   local rows="$1"
   echo "$rows" \
     | grep -o '{[^{}]*}' \
     | while read -r row; do
+        level=$(echo "$row" | grep -o '"level":[0-9]*' \
+          | sed 's/"level"://')
+        [ "${level:-0}" = "0" ] || continue
         name=$(echo "$row" | grep -o '"providerId":"[^"]*"' \
           | sed 's/"providerId":"\([^"]*\)"/\1/')
         if [ -z "$name" ]; then
