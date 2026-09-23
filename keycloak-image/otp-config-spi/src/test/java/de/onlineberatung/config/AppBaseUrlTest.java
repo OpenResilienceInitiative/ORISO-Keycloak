@@ -57,6 +57,32 @@ public class AppBaseUrlTest {
   }
 
   @Test
+  public void rejectsPortsOutsideTheValidRange() {
+    // java.net.URI hands back 65536 or 99999 as a port instead of refusing them.
+    assertRejected("https://app.oriso-test.internal:65536");
+    assertRejected("https://app.oriso-test.internal:99999");
+    assertRejected("https://app.oriso-test.internal:0");
+    assertThat(AppBaseUrl.require(VALID + ":65535")).isEqualTo(VALID + ":65535");
+  }
+
+  @Test
+  public void rejectsAReservedDomainWithATerminalDnsDot() {
+    // getHost() keeps the root dot, so "example.com." would otherwise pass.
+    assertRejected("https://example.com.");
+    assertRejected("https://app.example.com.");
+  }
+
+  @Test
+  public void rejectsUserInfo() {
+    assertRejected("https://user@app.oriso-test.internal");
+  }
+
+  @Test
+  public void rejectsAFragment() {
+    assertRejected(VALID + "#footer");
+  }
+
+  @Test
   public void rejectsChartPlaceholders() {
     assertRejected("https://your-domain.example.com");
     assertRejected("https://your-domain.oriso-test.internal");
