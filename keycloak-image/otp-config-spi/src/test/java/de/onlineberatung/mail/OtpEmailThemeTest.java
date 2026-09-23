@@ -1,8 +1,11 @@
 package de.onlineberatung.mail;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import freemarker.core.HTMLOutputFormat;
+import freemarker.core.InvalidReferenceException;
+import freemarker.core.PlainTextOutputFormat;
 import freemarker.template.Configuration;
 import freemarker.template.SimpleScalar;
 import freemarker.template.TemplateMethodModelEx;
@@ -18,8 +21,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import org.junit.Test;
+import org.keycloak.common.util.StringPropertyReplacer;
 
 public class OtpEmailThemeTest {
+
+  private static final String APP_ORIGIN = "https://app.oriso-test.internal";
 
   @Test
   public void rendersTheOtpInTheOrisoEmailDesignWithoutClientSideScript() throws Exception {
@@ -67,17 +73,45 @@ public class OtpEmailThemeTest {
   }
 
   @Test
-  public void rendersWithoutThemeProperties() throws Exception {
-    // The Helm chart mounts email/{html,messages,text} and no theme.properties,
-    // so every theme lookup carries its own default. Without that, the button
-    // would render with an empty background-color — that is, no button.
-    String html = renderHtml("de", "123456", 15, false);
+  public void refusesToRenderWithoutThemeProperties() {
+    // Links carry no default any more: without the theme's properties the render
+    // fails instead of silently pointing at some other environment.
+    assertThatThrownBy(() -> renderHtml("de", "123456", 15, false))
+        .isInstanceOf(InvalidReferenceException.class);
+  }
 
-    assertThat(html)
-        .contains("<!DOCTYPE html>")
-        .contains("123456")
-        .doesNotContain("background-color:;")
-        .doesNotContain("href=\"\"");
+  @Test
+  public void otpFooterLinksPointAtTheConfiguredAppOrigin() throws Exception {
+    String html = renderHtml("de", "123456", 15);
+    String text = render("text", "otp-email.ftl", "de", otpModel("123456", 15), true);
+
+    for (String mail : List.of(html, text)) {
+      assertThat(mail)
+          .contains(APP_ORIGIN + "/datenschutz")
+          .contains(APP_ORIGIN + "/impressum")
+          .doesNotContain("${env.")
+          .doesNotContain("oriso.org");
+    }
+  }
+
+  @Test
+  public void passwordResetFooterLinksPointAtTheConfiguredAppOrigin() throws Exception {
+    Map<String, Object> model = new HashMap<>();
+    model.put("link", "https://auth.oriso-test.internal/reset?key=abc");
+    model.put("linkExpiration", 5);
+    model.put("linkExpirationFormatter", (TemplateMethodModelEx) args -> "5 Minuten");
+    String html = render("html", "password-reset.ftl", "de", model, true);
+    String text = render("text", "password-reset.ftl", "de", model, true);
+
+    for (String mail : List.of(html, text)) {
+      assertThat(mail)
+          .contains(APP_ORIGIN + "/profile/settings")
+          .contains(APP_ORIGIN + "/datenschutz")
+          .contains(APP_ORIGIN + "/impressum")
+          .contains(APP_ORIGIN + "/profile/settings/notifications")
+          .doesNotContain("${env.")
+          .doesNotContain("oriso.org");
+    }
   }
 
   @Test
@@ -98,6 +132,23 @@ public class OtpEmailThemeTest {
 
   private String renderHtml(String language, String otp, int ttl, boolean withThemeProperties)
       throws Exception {
+    return render("html", "otp-email.ftl", language, otpModel(otp, ttl), withThemeProperties);
+  }
+
+  private static Map<String, Object> otpModel(String otp, int ttl) {
+    Map<String, Object> model = new HashMap<>();
+    model.put("otp", otp);
+    model.put("ttl", ttl);
+    return model;
+  }
+
+  private String render(
+      String format,
+      String template,
+      String language,
+      Map<String, Object> templateModel,
+      boolean withThemeProperties)
+      throws Exception {
     Path emailTheme = Path.of(System.getProperty("basedir")).resolve("../themes/oriso/email");
     Properties messages = new Properties();
     try (var reader =
@@ -109,29 +160,42 @@ public class OtpEmailThemeTest {
 
     Configuration configuration = new Configuration(Configuration.VERSION_2_3_32);
     configuration.setDefaultEncoding(StandardCharsets.UTF_8.name());
-    configuration.setOutputFormat(HTMLOutputFormat.INSTANCE);
-    configuration.setDirectoryForTemplateLoading(emailTheme.resolve("html").toFile());
+    configuration.setOutputFormat(
+        "html".equals(format) ? HTMLOutputFormat.INSTANCE : PlainTextOutputFormat.INSTANCE);
+    configuration.setDirectoryForTemplateLoading(emailTheme.resolve(format).toFile());
 
-    Properties themeProperties = new Properties();
-    try (var reader =
-        Files.newBufferedReader(
-            emailTheme.resolve("theme.properties"), StandardCharsets.UTF_8)) {
-      themeProperties.load(reader);
-    }
-
-    Map<String, Object> model = new HashMap<>();
+    Map<String, Object> model = new HashMap<>(templateModel);
     if (withThemeProperties) {
-      model.put("properties", themeProperties);
+      model.put("properties", themePropertiesAsKeycloakResolvesThem(emailTheme));
     }
-    model.put("otp", otp);
-    model.put("ttl", ttl);
     model.put("locale", Locale.forLanguageTag(language));
     model.put("msg", messageLookup(messages));
     model.put("kcSanitize", passthroughSanitizer());
 
     StringWriter output = new StringWriter();
-    configuration.getTemplate("otp-email.ftl").process(model, output);
+    configuration.getTemplate(template).process(model, output);
     return output.toString();
+  }
+
+  /**
+   * Keycloak's theme manager runs every theme.properties value through StringPropertyReplacer
+   * with the environment as resolver (DefaultThemeManager.ExtendingTheme#substituteProperties),
+   * so `${env.ORISO_APP_BASE_URL}` becomes the container's value. Same replacer here.
+   */
+  private static Properties themePropertiesAsKeycloakResolvesThem(Path emailTheme)
+      throws Exception {
+    Properties themeProperties = new Properties();
+    try (var reader =
+        Files.newBufferedReader(emailTheme.resolve("theme.properties"), StandardCharsets.UTF_8)) {
+      themeProperties.load(reader);
+    }
+    Map<String, String> env = Map.of("env.ORISO_APP_BASE_URL", APP_ORIGIN);
+    for (String key : themeProperties.stringPropertyNames()) {
+      themeProperties.setProperty(
+          key,
+          StringPropertyReplacer.replaceProperties(themeProperties.getProperty(key), env::get));
+    }
+    return themeProperties;
   }
 
   private TemplateMethodModelEx messageLookup(Properties messages) {
