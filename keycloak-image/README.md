@@ -38,6 +38,60 @@ docker build -t ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp keycl
 CI builds and pushes on changes under `keycloak-image/**` (see
 `.github/workflows/keycloak-image.yml`).
 
+## Required environment
+
+| Variable             | Example                   | Why                                                                                           |
+| -------------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| `ORISO_APP_BASE_URL` | `https://app.oriso-test.internal` | App origin the `oriso` email theme builds every mail link from (privacy, imprint, settings…). |
+
+`themes/oriso/email/theme.properties` reads it as `${env.ORISO_APP_BASE_URL}`;
+Keycloak substitutes `${env.X}` in theme properties when it loads a theme
+(`DefaultThemeManager.ExtendingTheme#substituteProperties`, Keycloak 26.6.3).
+An unset variable would stay as literal text in every link, so the SPI's
+`RealmOtpResourceProviderFactory#init` refuses to start the server when the
+value is missing, blank, not an absolute `http(s)://host[:port]` origin (no path,
+no trailing slash) or a placeholder: `your-domain`, or a host under
+`example.com`, `example.org`, `example.net`, `example.test` or `.invalid` (same
+set as UserService and Helm). Tests use `app.oriso-test.internal` as a valid
+value: `.internal` is reserved for private use and is not a placeholder. The
+check lives in the SPI, not in the Docker `ENTRYPOINT`, because the Helm chart
+overrides the container command.
+
+## Mail logo
+
+The header of the OTP and password-reset mails shows the platform name, and
+beside it a logo, chosen in this order:
+
+1. the recipient's Träger logo — Admin → Appearance → Logo, the detailed
+   variant, not the favicon — when the user carries a positive `tenantId`
+   attribute: `${ORISO_APP_BASE_URL}/service/tenant/public/branding/<tenantId>/logo`
+   (TenantService, public, no cookie needed);
+2. otherwise the platform logo from the optional `ORISO_LOGO_URL`
+   (theme.properties: `orisoLogoUrl=${env.ORISO_LOGO_URL:}`), only when it is
+   an address beneath the HTTPS `ORISO_APP_BASE_URL`;
+3. otherwise no image, just the name.
+
+Mail clients block `data:` images, so the logo is always an absolute URL on the
+app's own origin; a foreign host would learn who opened the mail and when. The
+name is already beside the logo, so the logo is decorative (`alt=""`): if it
+does not load, nothing replaces it. A head rule hides Chromium's broken-image
+icon; other clients may still draw an empty frame (Outlook desktop a box).
+
+| Variable         | Example                                                          | Why                                                   |
+| ---------------- | ---------------------------------------------------------------- | ----------------------------------------------------- |
+| `ORISO_LOGO_URL` | `https://app.oriso-test.internal/service/tenant/public/branding/logo` | Optional. Platform logo for users without a Träger. Unset = name only. |
+
+Local run:
+
+```sh
+docker run -e ORISO_APP_BASE_URL=http://localhost:9001 -p 8080:8080 \
+  ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp start-dev
+```
+
+The theme is generated in ORISO-Frontend (`npm run emails:keycloak`) and
+copied here with `scripts/sync-email-theme.sh`; ORISO-Frontend is the source of
+truth, never edit the theme files by hand.
+
 ## Realm requirements
 
 The SPI's REST endpoints require a bearer token of a user holding the realm
@@ -45,3 +99,9 @@ role `technical` (the UserService's technical user). The direct-grant flow
 `direct-grant-2fa` must be bound as the realm's Direct Grant Flow — both are
 included in `charts/keycloak/keycloak-resources/realm.json` for fresh imports;
 for existing realms run `scripts/keycloak-apply-2fa-flow.sh`.
+
+The technical user additionally needs the realm role `tenant-admin`: the
+public tenant-admin onboarding reads the operator DPA and creates the new
+tenant server-to-server as that user, and TenantService only serves those
+endpoints to `tenant-admin`. `realm.json` grants it on fresh imports; for
+existing realms run `scripts/keycloak-grant-technical-tenant-admin.sh`.
