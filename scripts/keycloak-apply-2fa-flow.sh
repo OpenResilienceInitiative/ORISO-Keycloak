@@ -217,8 +217,22 @@ if [ -n "$(subflow_rows)" ]; then
   echo "reconciled $BROWSER_SUBFLOW"
 fi
 
-# grant the technical role (SPI endpoints require it) and bind the flow
-$KC add-roles -r "$REALM" --uusername technical --rolename technical || true
+# The otp-config SPI endpoints accept only callers with the realm role
+# otp-config-admin, held by the backend Keycloak admin identity (ORISO-Helm#367;
+# override the username with SERVICE_ADMIN_USER). The Helm hook
+# keycloak-reconcile-service-identities creates that identity; without Helm,
+# create the user first, then re-run this script.
+SERVICE_ADMIN_USER="${SERVICE_ADMIN_USER:-svc-keycloak-admin}"
+if ! $KC get roles/otp-config-admin -r "$REALM" >/dev/null 2>&1; then
+  $KC create roles -r "$REALM" -s name=otp-config-admin \
+    -s "description=May call the otp-config endpoints of the ORISO Keycloak SPI (backend Keycloak admin identity only)"
+fi
+if [ -n "$($KC get users -r "$REALM" -q exact=true -q "username=$SERVICE_ADMIN_USER" --fields id --format csv --noquotes)" ]; then
+  $KC add-roles -r "$REALM" --uusername "$SERVICE_ADMIN_USER" --rolename otp-config-admin
+else
+  echo "WARN: user $SERVICE_ADMIN_USER does not exist; 2FA setup through the UserService fails until it" >&2
+  echo "      exists with the realm role otp-config-admin (see ORISO-Helm#367)." >&2
+fi
 $KC update "realms/$REALM" -s "directGrantFlow=$FLOW"
 
 # email OTP needs the `oriso` email theme (ships the otp-email.ftl template the

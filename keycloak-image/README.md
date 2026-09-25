@@ -96,15 +96,14 @@ truth, never edit the theme files by hand.
 
 The SPI's REST endpoints require a bearer token of a user holding the realm
 role `otp-config-admin` as a direct mapping: the backend Keycloak admin
-identity `svc-keycloak-admin` (ORISO-Helm#367). The legacy role `technical`
-is still accepted until every environment calls with that identity; it is
-dropped in the follow-up stage. The direct-grant flow
+identity `svc-keycloak-admin` (ORISO-Helm#367). The service identity
+`technical` is not accepted. The direct-grant flow
 `direct-grant-2fa` must be bound as the realm's Direct Grant Flow — both are
 included in `charts/keycloak/keycloak-resources/realm.json` for fresh imports;
 for existing realms run `scripts/keycloak-apply-2fa-flow.sh`.
 
-The technical user additionally needs the realm role `tenant-admin`: the
-public tenant-admin onboarding reads the operator DPA and creates the new
-tenant server-to-server as that user, and TenantService only serves those
-endpoints to `tenant-admin`. `realm.json` grants it on fresh imports; for
-existing realms run `scripts/keycloak-grant-technical-tenant-admin.sh`.
+The technical user is a pure service identity: realm roles
+`default-roles-online-beratung` and `technical` only, no `tenant-admin` and no
+`realm-management` roles. The services grant it narrow authorities of their
+own (ORISO-Helm#367). The Helm hook `keycloak-reconcile-service-identities`
+converges existing realms to these role sets on every install and upgrade.
