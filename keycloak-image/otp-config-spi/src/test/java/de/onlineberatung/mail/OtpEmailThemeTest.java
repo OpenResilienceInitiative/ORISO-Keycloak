@@ -39,6 +39,39 @@ public class OtpEmailThemeTest {
       APP_ORIGIN + "/service/tenant/public/branding/logo";
 
   @Test
+  public void rendersOtpAndResetInEveryAppLanguage() throws Exception {
+    Path emailTheme = Path.of(System.getProperty("basedir")).resolve("../themes/oriso/email");
+    Properties theme = new Properties();
+    try (var reader = Files.newBufferedReader(emailTheme.resolve("theme.properties"), StandardCharsets.UTF_8)) {
+      theme.load(reader);
+    }
+    assertThat(theme.getProperty("locales")).isEqualTo("de,en,fr,ru,ti,tr");
+
+    for (String language : List.of("de", "en", "fr", "ru", "ti", "tr")) {
+      Properties messages = new Properties();
+      try (var reader = Files.newBufferedReader(
+          emailTheme.resolve("messages/messages_" + language + ".properties"), StandardCharsets.UTF_8)) {
+        messages.load(reader);
+      }
+      Map<String, Object> reset = new HashMap<>();
+      reset.put("link", APP_ORIGIN + "/reset?key=abc");
+      reset.put("linkExpiration", 5);
+      reset.put("linkExpirationFormatter", (TemplateMethodModelEx) args -> "5 minutes");
+
+      for (String format : List.of("html", "text")) {
+        String otp = render(format, "otp-email.ftl", language, otpModel("123456", 15), true);
+        String passwordReset = render(format, "password-reset.ftl", language, reset, true);
+        assertThat(otp).as(language + " OTP " + format)
+            .contains(messages.getProperty("orisoOtpHeadline"), "123456", APP_ORIGIN + "/datenschutz")
+            .doesNotContain("${env.");
+        assertThat(passwordReset).as(language + " reset " + format)
+            .contains(messages.getProperty("orisoResetHeadline"), APP_ORIGIN + "/reset?key=abc")
+            .doesNotContain("${env.");
+      }
+    }
+  }
+
+  @Test
   public void showsTheLogoOfTheRecipientsTraegerInBothMails() throws Exception {
     for (String template : List.of("otp-email.ftl", "password-reset.ftl")) {
       String html = renderHtmlFor(template, Map.of(), Map.of("tenantId", "7"));
