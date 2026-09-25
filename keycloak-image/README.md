@@ -95,7 +95,10 @@ truth, never edit the theme files by hand.
 ## Realm requirements
 
 The SPI's REST endpoints require a bearer token of a user holding the realm
-role `technical` (the UserService's technical user). The direct-grant flow
+role `otp-config-admin` as a direct mapping: the backend Keycloak admin
+identity `svc-keycloak-admin` (ORISO-Helm#367). The legacy role `technical`
+is still accepted until every environment calls with that identity; it is
+dropped in the follow-up stage. The direct-grant flow
 `direct-grant-2fa` must be bound as the realm's Direct Grant Flow — both are
 included in `charts/keycloak/keycloak-resources/realm.json` for fresh imports;
 for existing realms run `scripts/keycloak-apply-2fa-flow.sh`.
