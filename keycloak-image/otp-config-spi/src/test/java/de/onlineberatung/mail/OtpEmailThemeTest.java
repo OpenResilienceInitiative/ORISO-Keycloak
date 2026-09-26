@@ -39,6 +39,21 @@ public class OtpEmailThemeTest {
       APP_ORIGIN + "/service/tenant/public/branding/logo";
 
   @Test
+  public void generatedFooterLinksUseActiveProfileRoutes() throws Exception {
+    Path themeFile =
+        Path.of(System.getProperty("basedir"))
+            .resolve("../themes/oriso/email/theme.properties");
+    Properties theme = new Properties();
+    try (var reader = Files.newBufferedReader(themeFile, StandardCharsets.UTF_8)) {
+      theme.load(reader);
+    }
+    assertThat(theme.getProperty("orisoSettingsUrl"))
+        .isEqualTo("${env.ORISO_APP_BASE_URL}/profile/einstellungen");
+    assertThat(theme.getProperty("orisoUnsubscribeUrl"))
+        .isEqualTo("${env.ORISO_APP_BASE_URL}/profile/einstellungen/email");
+  }
+
+  @Test
   public void rendersOtpAndResetInEveryAppLanguage() throws Exception {
     Path emailTheme = Path.of(System.getProperty("basedir")).resolve("../themes/oriso/email");
     Properties theme = new Properties();
@@ -244,8 +259,8 @@ public class OtpEmailThemeTest {
       assertThat(mail)
           .contains(APP_ORIGIN + "/datenschutz")
           .contains(APP_ORIGIN + "/impressum")
-          .doesNotContain(APP_ORIGIN + "/profile/settings")
-          .doesNotContain(APP_ORIGIN + "/profile/settings/notifications")
+          .doesNotContain(APP_ORIGIN + "/profile/einstellungen")
+          .doesNotContain(APP_ORIGIN + "/profile/einstellungen/email")
           .doesNotContain("${env.")
           .doesNotContain("oriso.org");
     }
