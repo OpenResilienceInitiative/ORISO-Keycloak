@@ -232,7 +232,7 @@ public class OtpEmailThemeTest {
   }
 
   @Test
-  public void passwordResetFooterLinksPointAtTheConfiguredAppOrigin() throws Exception {
+  public void passwordResetFooterHasLegalLinksButNoUnsubscribeControls() throws Exception {
     Map<String, Object> model = new HashMap<>();
     model.put("link", "https://auth.oriso-test.internal/reset?key=abc");
     model.put("linkExpiration", 5);
@@ -242,10 +242,10 @@ public class OtpEmailThemeTest {
 
     for (String mail : List.of(html, text)) {
       assertThat(mail)
-          .contains(APP_ORIGIN + "/profile/settings")
           .contains(APP_ORIGIN + "/datenschutz")
           .contains(APP_ORIGIN + "/impressum")
-          .contains(APP_ORIGIN + "/profile/settings/notifications")
+          .doesNotContain(APP_ORIGIN + "/profile/settings")
+          .doesNotContain(APP_ORIGIN + "/profile/settings/notifications")
           .doesNotContain("${env.")
           .doesNotContain("oriso.org");
     }
