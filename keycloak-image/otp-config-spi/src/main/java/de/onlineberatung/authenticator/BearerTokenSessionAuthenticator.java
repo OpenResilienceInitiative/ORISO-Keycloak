@@ -12,17 +12,10 @@ import org.keycloak.services.managers.AppAuthManager.BearerTokenAuthenticator;
 
 public class BearerTokenSessionAuthenticator implements SessionAuthenticator {
 
-  /** Dedicated role for the backend Keycloak admin identity (ORISO-Helm#367). */
+  /** Held only by the backend Keycloak admin identity (ORISO-Helm#367). */
   static final String OTP_CONFIG_ADMIN_ROLE = "otp-config-admin";
 
-  /**
-   * Legacy: accepted until every environment calls with the dedicated identity. Removed in the
-   * follow-up stage of ORISO-Helm#367.
-   */
-  static final String LEGACY_TECHNICAL_ROLE = "technical";
-
-  private static final Set<String> ALLOWED_ROLES =
-      Set.of(OTP_CONFIG_ADMIN_ROLE, LEGACY_TECHNICAL_ROLE);
+  private static final Set<String> ALLOWED_ROLES = Set.of(OTP_CONFIG_ADMIN_ROLE);
 
   @Override
   public void authenticate(KeycloakSession session) {

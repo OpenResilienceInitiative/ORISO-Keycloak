@@ -49,6 +49,33 @@ public class RealmServiceIdentitiesTest {
     assertThat(user(SERVICE_ADMIN).path("credentials")).isEmpty();
   }
 
+  @Test
+  public void technical_is_a_pure_service_identity() {
+    var user = user("technical");
+
+    assertThat(names(user.path("realmRoles")))
+        .containsExactlyInAnyOrder("default-roles-online-beratung", "technical");
+    assertThat(user.path("clientRoles").size()).isZero();
+  }
+
+  @Test
+  public void the_unused_technical_default_role_is_gone() {
+    assertThat(realmRoleNames()).doesNotContain("TECHNICAL_DEFAULT");
+  }
+
+  @Test
+  public void no_service_identity_holds_an_admin_role() {
+    for (String username : new String[] {"technical", SERVICE_ADMIN}) {
+      var user = user(username);
+      assertThat(names(user.path("realmRoles")))
+          .as(username)
+          .doesNotContain("tenant-admin", "single-tenant-admin", "user-admin", "agency-admin");
+      assertThat(names(user.path("clientRoles").path("realm-management")))
+          .as(username)
+          .doesNotContain("realm-admin", "manage-realm", "manage-clients", "impersonation");
+    }
+  }
+
   static JsonNode user(String username) {
     for (JsonNode user : realm.path("users")) {
       if (username.equals(user.path("username").asText())) {

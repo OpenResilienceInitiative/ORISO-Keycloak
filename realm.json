@@ -138,15 +138,6 @@
         "attributes": {}
       },
       {
-        "id": "02f5415c-091a-402b-952b-93603b36d341",
-        "name": "TECHNICAL_DEFAULT",
-        "description": "Technical default authority",
-        "composite": false,
-        "clientRole": false,
-        "containerId": "online-beratung",
-        "attributes": {}
-      },
-      {
         "id": "af9a3ea4-f589-4a55-a562-60da95989dd1",
         "name": "agency-admin",
         "description": "",
@@ -2445,16 +2436,8 @@
       "requiredActions": [],
       "realmRoles": [
         "default-roles-online-beratung",
-        "technical",
-        "tenant-admin"
+        "technical"
       ],
-      "clientRoles": {
-        "realm-management": [
-          "manage-users",
-          "view-users",
-          "query-users"
-        ]
-      },
       "notBefore": 0,
       "groups": []
     },
