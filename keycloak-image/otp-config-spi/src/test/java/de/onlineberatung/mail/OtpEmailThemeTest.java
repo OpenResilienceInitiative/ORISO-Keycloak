@@ -26,6 +26,8 @@ import org.keycloak.common.util.StringPropertyReplacer;
 public class OtpEmailThemeTest {
 
   private static final String APP_ORIGIN = "https://app.oriso-test.internal";
+  private static final String PRODUCT_NAME = "Care Portal";
+  private static final String LEGAL_ORGANISATION = "Example Foundation e.V.";
 
   // --- Logo -------------------------------------------------------------------
   //
@@ -51,6 +53,9 @@ public class OtpEmailThemeTest {
         .isEqualTo("${env.ORISO_APP_BASE_URL}/profile/einstellungen");
     assertThat(theme.getProperty("orisoUnsubscribeUrl"))
         .isEqualTo("${env.ORISO_APP_BASE_URL}/profile/einstellungen/email");
+    assertThat(theme.getProperty("orisoPlatformName")).isEqualTo("${env.EMAIL_BRANDING_NAME}");
+    assertThat(theme.getProperty("orisoOrgName"))
+        .isEqualTo("${env.EMAIL_LEGAL_ORGANISATION_NAME}");
   }
 
   @Test
@@ -106,8 +111,8 @@ public class OtpEmailThemeTest {
     for (String template : List.of("otp-email.ftl", "password-reset.ftl")) {
       String html = renderHtmlFor(template, Map.of(), Map.of("tenantId", "7"));
 
-      assertThat(html).as(template).contains(">Online-Beratung</td>");
-      assertThat(html.indexOf("<img")).as(template).isLessThan(html.indexOf(">Online-Beratung</td>"));
+      assertThat(html).as(template).contains(">" + PRODUCT_NAME + "</td>");
+      assertThat(html.indexOf("<img")).as(template).isLessThan(html.indexOf(">" + PRODUCT_NAME + "</td>"));
     }
   }
 
@@ -116,7 +121,7 @@ public class OtpEmailThemeTest {
     // The name already stands beside the logo: alt="" and no styled alt text.
     String image = logoImage(renderHtmlFor("otp-email.ftl", Map.of(), Map.of("tenantId", "7")));
 
-    assertThat(image).contains(" alt=\"\"").doesNotContain("Online-Beratung");
+    assertThat(image).contains(" alt=\"\"").doesNotContain(PRODUCT_NAME);
     assertThat(image).doesNotContain("font-family");
   }
 
@@ -151,7 +156,7 @@ public class OtpEmailThemeTest {
           .as(template)
           .doesNotContain("<img")
           .doesNotContain("padding-right:12px")
-          .contains(">Online-Beratung</td>");
+          .contains(">" + PRODUCT_NAME + "</td>");
     }
   }
 
@@ -278,6 +283,22 @@ public class OtpEmailThemeTest {
         .doesNotContain("Ihr Einmalcode");
   }
 
+  @Test
+  public void escapesConfiguredIdentityInRenderedHtmlButPreservesPlainText() throws Exception {
+    String product = "Care <Portal> & Friends";
+    String legal = "Example <Foundation> & Co";
+    Map<String, String> names = Map.of(
+        "env.EMAIL_BRANDING_NAME", product,
+        "env.EMAIL_LEGAL_ORGANISATION_NAME", legal);
+    String html = render("html", "otp-email.ftl", "de", otpModel("123456", 15), true, names);
+    String text = render("text", "otp-email.ftl", "de", otpModel("123456", 15), true, names);
+
+    assertThat(html).contains("Care &lt;Portal&gt; &amp; Friends")
+        .contains("Example &lt;Foundation&gt; &amp; Co")
+        .doesNotContain(product, legal);
+    assertThat(text).contains(product, legal);
+  }
+
   private String renderHtmlFor(
       String template, Map<String, String> env, Map<String, String> userAttributes)
       throws Exception {
@@ -373,6 +394,8 @@ public class OtpEmailThemeTest {
     }
     Map<String, String> env = new HashMap<>(extraEnv);
     env.put("env.ORISO_APP_BASE_URL", APP_ORIGIN);
+    env.putIfAbsent("env.EMAIL_BRANDING_NAME", PRODUCT_NAME);
+    env.putIfAbsent("env.EMAIL_LEGAL_ORGANISATION_NAME", LEGAL_ORGANISATION);
     for (String key : themeProperties.stringPropertyNames()) {
       themeProperties.setProperty(
           key,
