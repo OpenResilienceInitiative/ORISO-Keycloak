@@ -26,6 +26,8 @@ import org.keycloak.common.util.StringPropertyReplacer;
 public class OtpEmailThemeTest {
 
   private static final String APP_ORIGIN = "https://app.oriso-test.internal";
+  private static final String PRODUCT_NAME = "Care Portal";
+  private static final String LEGAL_ORGANISATION = "Example Foundation e.V.";
 
   // --- Logo -------------------------------------------------------------------
   //
@@ -37,6 +39,57 @@ public class OtpEmailThemeTest {
       APP_ORIGIN + "/service/tenant/public/branding/7/logo";
   private static final String PLATFORM_LOGO =
       APP_ORIGIN + "/service/tenant/public/branding/logo";
+
+  @Test
+  public void generatedFooterLinksUseActiveProfileRoutes() throws Exception {
+    Path themeFile =
+        Path.of(System.getProperty("basedir"))
+            .resolve("../themes/oriso/email/theme.properties");
+    Properties theme = new Properties();
+    try (var reader = Files.newBufferedReader(themeFile, StandardCharsets.UTF_8)) {
+      theme.load(reader);
+    }
+    assertThat(theme.getProperty("orisoSettingsUrl"))
+        .isEqualTo("${env.ORISO_APP_BASE_URL}/profile/einstellungen");
+    assertThat(theme.getProperty("orisoUnsubscribeUrl"))
+        .isEqualTo("${env.ORISO_APP_BASE_URL}/profile/einstellungen/email");
+    assertThat(theme.getProperty("orisoPlatformName")).isEqualTo("${env.EMAIL_BRANDING_NAME}");
+    assertThat(theme.getProperty("orisoOrgName"))
+        .isEqualTo("${env.EMAIL_LEGAL_ORGANISATION_NAME}");
+  }
+
+  @Test
+  public void rendersOtpAndResetInEveryAppLanguage() throws Exception {
+    Path emailTheme = Path.of(System.getProperty("basedir")).resolve("../themes/oriso/email");
+    Properties theme = new Properties();
+    try (var reader = Files.newBufferedReader(emailTheme.resolve("theme.properties"), StandardCharsets.UTF_8)) {
+      theme.load(reader);
+    }
+    assertThat(theme.getProperty("locales")).isEqualTo("de,en,fr,ru,ti,tr");
+
+    for (String language : List.of("de", "en", "fr", "ru", "ti", "tr")) {
+      Properties messages = new Properties();
+      try (var reader = Files.newBufferedReader(
+          emailTheme.resolve("messages/messages_" + language + ".properties"), StandardCharsets.UTF_8)) {
+        messages.load(reader);
+      }
+      Map<String, Object> reset = new HashMap<>();
+      reset.put("link", APP_ORIGIN + "/reset?key=abc");
+      reset.put("linkExpiration", 5);
+      reset.put("linkExpirationFormatter", (TemplateMethodModelEx) args -> "5 minutes");
+
+      for (String format : List.of("html", "text")) {
+        String otp = render(format, "otp-email.ftl", language, otpModel("123456", 15), true);
+        String passwordReset = render(format, "password-reset.ftl", language, reset, true);
+        assertThat(otp).as(language + " OTP " + format)
+            .contains(messages.getProperty("orisoOtpHeadline"), "123456", APP_ORIGIN + "/datenschutz")
+            .doesNotContain("${env.");
+        assertThat(passwordReset).as(language + " reset " + format)
+            .contains(messages.getProperty("orisoResetHeadline"), APP_ORIGIN + "/reset?key=abc")
+            .doesNotContain("${env.");
+      }
+    }
+  }
 
   @Test
   public void showsTheLogoOfTheRecipientsTraegerInBothMails() throws Exception {
@@ -58,8 +111,8 @@ public class OtpEmailThemeTest {
     for (String template : List.of("otp-email.ftl", "password-reset.ftl")) {
       String html = renderHtmlFor(template, Map.of(), Map.of("tenantId", "7"));
 
-      assertThat(html).as(template).contains(">Online-Beratung</td>");
-      assertThat(html.indexOf("<img")).as(template).isLessThan(html.indexOf(">Online-Beratung</td>"));
+      assertThat(html).as(template).contains(">" + PRODUCT_NAME + "</td>");
+      assertThat(html.indexOf("<img")).as(template).isLessThan(html.indexOf(">" + PRODUCT_NAME + "</td>"));
     }
   }
 
@@ -68,7 +121,7 @@ public class OtpEmailThemeTest {
     // The name already stands beside the logo: alt="" and no styled alt text.
     String image = logoImage(renderHtmlFor("otp-email.ftl", Map.of(), Map.of("tenantId", "7")));
 
-    assertThat(image).contains(" alt=\"\"").doesNotContain("Online-Beratung");
+    assertThat(image).contains(" alt=\"\"").doesNotContain(PRODUCT_NAME);
     assertThat(image).doesNotContain("font-family");
   }
 
@@ -103,7 +156,7 @@ public class OtpEmailThemeTest {
           .as(template)
           .doesNotContain("<img")
           .doesNotContain("padding-right:12px")
-          .contains(">Online-Beratung</td>");
+          .contains(">" + PRODUCT_NAME + "</td>");
     }
   }
 
@@ -199,7 +252,7 @@ public class OtpEmailThemeTest {
   }
 
   @Test
-  public void passwordResetFooterLinksPointAtTheConfiguredAppOrigin() throws Exception {
+  public void passwordResetFooterHasLegalLinksButNoUnsubscribeControls() throws Exception {
     Map<String, Object> model = new HashMap<>();
     model.put("link", "https://auth.oriso-test.internal/reset?key=abc");
     model.put("linkExpiration", 5);
@@ -209,10 +262,10 @@ public class OtpEmailThemeTest {
 
     for (String mail : List.of(html, text)) {
       assertThat(mail)
-          .contains(APP_ORIGIN + "/profile/settings")
           .contains(APP_ORIGIN + "/datenschutz")
           .contains(APP_ORIGIN + "/impressum")
-          .contains(APP_ORIGIN + "/profile/settings/notifications")
+          .doesNotContain(APP_ORIGIN + "/profile/einstellungen")
+          .doesNotContain(APP_ORIGIN + "/profile/einstellungen/email")
           .doesNotContain("${env.")
           .doesNotContain("oriso.org");
     }
@@ -228,6 +281,22 @@ public class OtpEmailThemeTest {
         .contains("654321")
         .contains("Enter this code in the sign-in window.")
         .doesNotContain("Ihr Einmalcode");
+  }
+
+  @Test
+  public void escapesConfiguredIdentityInRenderedHtmlButPreservesPlainText() throws Exception {
+    String product = "Care <Portal> & Friends";
+    String legal = "Example <Foundation> & Co";
+    Map<String, String> names = Map.of(
+        "env.EMAIL_BRANDING_NAME", product,
+        "env.EMAIL_LEGAL_ORGANISATION_NAME", legal);
+    String html = render("html", "otp-email.ftl", "de", otpModel("123456", 15), true, names);
+    String text = render("text", "otp-email.ftl", "de", otpModel("123456", 15), true, names);
+
+    assertThat(html).contains("Care &lt;Portal&gt; &amp; Friends")
+        .contains("Example &lt;Foundation&gt; &amp; Co")
+        .doesNotContain(product, legal);
+    assertThat(text).contains(product, legal);
   }
 
   private String renderHtmlFor(
@@ -325,6 +394,8 @@ public class OtpEmailThemeTest {
     }
     Map<String, String> env = new HashMap<>(extraEnv);
     env.put("env.ORISO_APP_BASE_URL", APP_ORIGIN);
+    env.putIfAbsent("env.EMAIL_BRANDING_NAME", PRODUCT_NAME);
+    env.putIfAbsent("env.EMAIL_LEGAL_ORGANISATION_NAME", LEGAL_ORGANISATION);
     for (String key : themeProperties.stringPropertyNames()) {
       themeProperties.setProperty(
           key,
