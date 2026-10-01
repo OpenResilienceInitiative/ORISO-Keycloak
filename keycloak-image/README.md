@@ -43,6 +43,8 @@ CI builds and pushes on changes under `keycloak-image/**` (see
 | Variable             | Example                   | Why                                                                                           |
 | -------------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
 | `ORISO_APP_BASE_URL` | `https://app.oriso-test.internal` | App origin the `oriso` email theme builds every mail link from (privacy, imprint, settings…). |
+| `EMAIL_BRANDING_NAME` | `Care Portal` | Required product name shared with UserService; no built-in name. |
+| `EMAIL_LEGAL_ORGANISATION_NAME` | `Example Foundation e.V.` | Required separate legal organisation shown in the mail footer. |
 
 `themes/oriso/email/theme.properties` reads it as `${env.ORISO_APP_BASE_URL}`;
 Keycloak substitutes `${env.X}` in theme properties when it loads a theme
@@ -54,7 +56,12 @@ no trailing slash) or a placeholder: `your-domain`, or a host under
 `example.com`, `example.org`, `example.net`, `example.test` or `.invalid` (same
 set as UserService and Helm). Tests use `app.oriso-test.internal` as a valid
 value: `.internal` is reserved for private use and is not a placeholder. The
-check lives in the SPI, not in the Docker `ENTRYPOINT`, because the Helm chart
+SPI also refuses to start when either name is missing, blank or an unresolved
+environment placeholder. The legal name never falls back to the product name.
+The operator should keep it consistent with the platform tenant (ID 0) legal
+identity used by UserService's tenant-aware mail footer; this environment
+variable does not replace that resolver.
+These checks live in the SPI, not in the Docker `ENTRYPOINT`, because Helm
 overrides the container command.
 
 ## Mail logo
@@ -84,7 +91,9 @@ icon; other clients may still draw an empty frame (Outlook desktop a box).
 Local run:
 
 ```sh
-docker run -e ORISO_APP_BASE_URL=http://localhost:9001 -p 8080:8080 \
+docker run -e ORISO_APP_BASE_URL=http://localhost:9001 \
+  -e EMAIL_BRANDING_NAME='Care Portal' \
+  -e EMAIL_LEGAL_ORGANISATION_NAME='Example Foundation e.V.' -p 8080:8080 \
   ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp start-dev
 ```
 

@@ -4,6 +4,7 @@ import static de.onlineberatung.authenticator.OtpMailAuthenticatorFactory.OTP_CO
 
 import de.onlineberatung.authenticator.BearerTokenSessionAuthenticator;
 import de.onlineberatung.config.AppBaseUrl;
+import de.onlineberatung.config.EmailIdentity;
 import de.onlineberatung.credential.AppOtpCredentialService;
 import de.onlineberatung.credential.MailOtpCredentialProviderFactory;
 import de.onlineberatung.credential.MailOtpCredentialService;
@@ -42,6 +43,7 @@ public class RealmOtpResourceProviderFactory implements RealmResourceProviderFac
     // Factory init runs at server start, so a missing mail-link origin stops Keycloak here
     // instead of sending mails with broken links. Not the Docker ENTRYPOINT: Helm overrides it.
     AppBaseUrl.requireFromEnvironment(System::getenv);
+    EmailIdentity.requireFromEnvironment(System::getenv);
   }
 
   @Override
