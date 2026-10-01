@@ -1,2 +1,3 @@
 de.onlineberatung.authenticator.OtpMailAuthenticatorFactory
 de.onlineberatung.authenticator.OtpAppAuthenticatorFactory
+de.onlineberatung.authenticator.OtpMailFormAuthenticatorFactory

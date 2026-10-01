@@ -38,12 +38,14 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
   private final OtpService otpService;
   private final MailOtpCredentialService credentialService;
   private final OtpMailSender mailSender;
+  private final MailOtpVerifier verifier;
 
   public OtpMailAuthenticator(OtpService otpService, MailOtpCredentialService credentialService,
       OtpMailSender mailSender) {
     this.otpService = otpService;
     this.credentialService = credentialService;
     this.mailSender = mailSender;
+    this.verifier = new MailOtpVerifier(otpService, credentialService);
   }
 
   @Override
@@ -110,9 +112,10 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
   private void validateOtp(String otpRequest, MailOtpCredentialModel credentialModel,
       AuthenticationFlowContext context, CredentialContext credContext) {
 
-    var otp = credentialModel.getOtp();
-
-    switch (otpService.validate(otpRequest, otp)) {
+    // The verdict and its bookkeeping are shared with the browser-flow authenticator
+    // (MailOtpVerifier); only the shape of the answer differs. What is left here is
+    // the direct-grant answer: a JSON body a token client can read.
+    switch (verifier.verify(otpRequest, credentialModel, credContext)) {
       case NOT_PRESENT:
         context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
             errorResponse(Status.UNAUTHORIZED.getStatusCode(),
@@ -124,8 +127,6 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
                 INVALID_GRANT_ERROR, "Code expired"));
         break;
       case INVALID:
-        credentialService.incrementFailedAttempts(credentialModel, credContext,
-            otp.getFailedVerifications());
         context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
             errorResponse(Status.UNAUTHORIZED.getStatusCode(),
                 INVALID_GRANT_ERROR, "Invalid code"));
@@ -136,7 +137,6 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
                 INVALID_GRANT_ERROR, "Maximal number of failed attempts reached"));
         break;
       case VALID:
-        credentialService.invalidate(credentialModel, credContext);
         context.success();
         break;
       default:
