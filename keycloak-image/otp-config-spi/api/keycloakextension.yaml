@@ -244,6 +244,15 @@ components:
           type: string
         otpType:
           $ref: "#/components/schemas/OtpType"
+        resendAvailableInSeconds:
+          type: integer
+          format: int32
+          description: >-
+            Seconds the client must wait before asking for another code. Optional, so clients
+            built before ORISO-UserService#1338 keep working. Present on the 400 challenge that
+            answers a login without a code, and on the 429 that answers a user who has used up
+            the per-window ceiling.
+          example: 30
 
     Success:
       type: object

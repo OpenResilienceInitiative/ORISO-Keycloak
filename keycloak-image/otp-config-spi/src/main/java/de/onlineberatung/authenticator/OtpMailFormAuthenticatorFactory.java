@@ -5,6 +5,7 @@ import static java.util.Arrays.asList;
 import de.onlineberatung.credential.MailOtpCredentialProviderFactory;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.mail.DefaultMailSender;
+import de.onlineberatung.otp.MailOtpSendPolicy;
 import de.onlineberatung.otp.MemoryOtpService;
 import de.onlineberatung.otp.RandomDigitsCodeGenerator;
 import java.time.Clock;
@@ -77,7 +78,21 @@ public class OtpMailFormAuthenticatorFactory implements AuthenticatorFactory {
             ProviderConfigProperty.STRING_TYPE, "Keycloak"),
         new ProviderConfigProperty("simulation", "Simulation mode",
             "In simulation mode, the EMAIL won't be sent, but printed to the server logs",
-            ProviderConfigProperty.BOOLEAN_TYPE, true)
+            ProviderConfigProperty.BOOLEAN_TYPE, true),
+        // #1338: the brake on code mails. Settings rather than constants so the thresholds can be
+        // corrected in the admin console without cutting a new image.
+        new ProviderConfigProperty(MailOtpSendPolicy.COOLDOWN_CONFIG_KEY, "Resend cooldown",
+            "Seconds after a code mail in which no further mail is sent. The code already sent "
+                + "stays valid.", ProviderConfigProperty.STRING_TYPE,
+            String.valueOf(MailOtpSendPolicy.DEFAULT_COOLDOWN_SECONDS)),
+        new ProviderConfigProperty(MailOtpSendPolicy.MAX_SENDS_CONFIG_KEY, "Max code mails",
+            "Maximum number of code mails per user within the send window. Further requests are "
+                + "answered with 429 and send nothing.", ProviderConfigProperty.STRING_TYPE,
+            String.valueOf(MailOtpSendPolicy.DEFAULT_MAX_SENDS_PER_WINDOW)),
+        new ProviderConfigProperty(MailOtpSendPolicy.WINDOW_CONFIG_KEY, "Send window",
+            "Length of the rolling window for the maximum above, in seconds.",
+            ProviderConfigProperty.STRING_TYPE,
+            String.valueOf(MailOtpSendPolicy.DEFAULT_WINDOW_SECONDS))
     );
   }
 
@@ -91,7 +106,8 @@ public class OtpMailFormAuthenticatorFactory implements AuthenticatorFactory {
     var credentialService = new MailOtpCredentialService(mailOtpCredentialProvider, systemClock);
     var otpService = new MemoryOtpService(generator, systemClock, authConfig);
     var mailSender = new DefaultMailSender();
-    return new OtpMailFormAuthenticator(otpService, credentialService, mailSender);
+    var sendPolicy = new MailOtpSendPolicy(systemClock, authConfig);
+    return new OtpMailFormAuthenticator(otpService, credentialService, mailSender, sendPolicy);
   }
 
   @Override

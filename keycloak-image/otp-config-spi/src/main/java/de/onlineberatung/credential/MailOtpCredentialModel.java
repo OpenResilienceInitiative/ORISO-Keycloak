@@ -75,6 +75,13 @@ public class MailOtpCredentialModel extends CredentialModel {
     );
   }
 
+  /**
+   * Replaces the stored code with a freshly created one. The failure counter belongs to the code it
+   * counted against, so a new code starts at zero: three mistyped digits must not lock a person out
+   * of every later code as well. What bounds an attacker is not this counter but the ceiling on how
+   * many codes can be requested at all — see {@code MailOtpSendPolicy} (#1338). The send
+   * bookkeeping is deliberately untouched here; only {@link #applySendBookkeeping} writes it.
+   */
   public MailOtpCredentialModel updateFrom(Otp otp) {
     credentialData.setEmail(otp.getEmail());
     credentialData.setFailedVerifications(otp.getFailedVerifications());
@@ -89,6 +96,31 @@ public class MailOtpCredentialModel extends CredentialModel {
 
   public boolean isActive() {
     return credentialData.isActive();
+  }
+
+  public long getLastMailSentAt() {
+    return credentialData.getLastMailSentAt();
+  }
+
+  public long getSendWindowStartedAt() {
+    return credentialData.getSendWindowStartedAt();
+  }
+
+  public int getMailsSentInWindow() {
+    return credentialData.getMailsSentInWindow();
+  }
+
+  /**
+   * Records that a code mail went out. Written by {@code MailOtpSendPolicy} on the same model that
+   * is about to be stored, so the new code and the counters that limit it land in one update.
+   */
+  public MailOtpCredentialModel applySendBookkeeping(long lastMailSentAt, long sendWindowStartedAt,
+      int mailsSentInWindow) {
+    credentialData.setLastMailSentAt(lastMailSentAt);
+    credentialData.setSendWindowStartedAt(sendWindowStartedAt);
+    credentialData.setMailsSentInWindow(mailsSentInWindow);
+    updateInternalModel();
+    return this;
   }
 
   void updateFailedVerifications(int failedVerifications) {

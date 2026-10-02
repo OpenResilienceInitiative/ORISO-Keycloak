@@ -8,6 +8,7 @@ import de.onlineberatung.credential.CredentialContext;
 import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.mail.MailSendingException;
+import de.onlineberatung.otp.MailOtpSendPolicy;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpService;
 import jakarta.ws.rs.core.Response;
@@ -50,12 +51,15 @@ public class OtpMailFormAuthenticator implements Authenticator {
   private final MailOtpCredentialService credentialService;
   private final OtpMailSender mailSender;
   private final MailOtpVerifier verifier;
+  private final MailOtpSendPolicy sendPolicy;
 
   public OtpMailFormAuthenticator(OtpService otpService,
-      MailOtpCredentialService credentialService, OtpMailSender mailSender) {
+      MailOtpCredentialService credentialService, OtpMailSender mailSender,
+      MailOtpSendPolicy sendPolicy) {
     this.otpService = otpService;
     this.credentialService = credentialService;
     this.mailSender = mailSender;
+    this.sendPolicy = sendPolicy;
     this.verifier = new MailOtpVerifier(otpService, credentialService);
   }
 
@@ -129,6 +133,28 @@ public class OtpMailFormAuthenticator implements Authenticator {
 
   private void sendCodeAndShowForm(MailOtpCredentialModel credentialModel,
       CredentialContext credContext, AuthenticationFlowContext context, String errorKey) {
+    var decision = sendPolicy.decide(credentialModel);
+    if (decision.verdict() == MailOtpSendPolicy.Verdict.CAPPED) {
+      // Same answer the attempt limit already gives, and the same message key, which every login
+      // theme already translates: come back later.
+      logger.warnf("otp mail ceiling reached for keycloak user %s; refusing for %d seconds",
+          credContext.getUser().getId(), decision.retryAfterSeconds());
+      context.failure(AuthenticationFlowError.ACCESS_DENIED,
+          context.form().setError(Messages.ACCOUNT_TEMPORARILY_DISABLED_TOTP).createLoginTotp());
+      return;
+    }
+    if (decision.verdict() == MailOtpSendPolicy.Verdict.COOLDOWN) {
+      // A login restarted within the cooldown: the code from the previous mail is still live, so
+      // show the form and let the user type it. Minting a new one here is what used to invalidate
+      // the mail the user was already reading.
+      var form = context.form();
+      if (nonNull(errorKey)) {
+        form = form.setError(errorKey);
+      }
+      context.challenge(form.createLoginTotp());
+      return;
+    }
+
     var emailAddress = credContext.getUser().getEmail();
     if (isNull(emailAddress) || emailAddress.isBlank()) {
       logger.warn("keycloak user with id " + credContext.getUser().getId()
@@ -137,7 +163,10 @@ public class OtpMailFormAuthenticator implements Authenticator {
     }
 
     var otp = otpService.createOtp(emailAddress);
-    credentialService.update(credentialModel.updateFrom(otp), credContext);
+    // One update for the new code and its send record; see OtpMailAuthenticator for why.
+    credentialModel.updateFrom(otp);
+    sendPolicy.recordSent(credentialModel);
+    credentialService.update(credentialModel, credContext);
 
     try {
       mailSender.sendOtpCode(otp, credContext);
