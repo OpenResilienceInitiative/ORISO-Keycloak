@@ -83,7 +83,8 @@ public class OtpMailAuthenticatorParameterizedTest {
     credentialService = mock(MailOtpCredentialService.class);
     credentialContext = new CredentialContext(session, realm, user);
     authenticator = new OtpMailAuthenticator(otpService, credentialService,
-        mock(OtpMailSender.class));
+        mock(OtpMailSender.class),
+        new de.onlineberatung.otp.MailOtpSendPolicy(java.time.Clock.systemDefaultZone(), null));
   }
 
   @Test

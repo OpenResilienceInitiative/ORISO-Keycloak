@@ -2326,7 +2326,10 @@
         "length": "6",
         "ttl": "900",
         "senderId": "Onlineberatung",
-        "simulation": "false"
+        "simulation": "false",
+        "resendCooldownSeconds": "30",
+        "maxSendsPerWindow": "5",
+        "sendWindowSeconds": "900"
       }
     }
   ],

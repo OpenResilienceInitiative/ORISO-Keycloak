@@ -9,6 +9,7 @@ import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Challenge;
 import de.onlineberatung.mail.MailSendingException;
+import de.onlineberatung.otp.MailOtpSendPolicy;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpService;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.OtpType;
@@ -39,12 +40,14 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
   private final MailOtpCredentialService credentialService;
   private final OtpMailSender mailSender;
   private final MailOtpVerifier verifier;
+  private final MailOtpSendPolicy sendPolicy;
 
   public OtpMailAuthenticator(OtpService otpService, MailOtpCredentialService credentialService,
-      OtpMailSender mailSender) {
+      OtpMailSender mailSender, MailOtpSendPolicy sendPolicy) {
     this.otpService = otpService;
     this.credentialService = credentialService;
     this.mailSender = mailSender;
+    this.sendPolicy = sendPolicy;
     this.verifier = new MailOtpVerifier(otpService, credentialService);
   }
 
@@ -80,8 +83,34 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
     // unused
   }
 
+  /**
+   * Answers a token request that carried no code: normally by mailing a fresh one, but #1338 put two
+   * brakes in front of that. A click inside the cooldown must NOT mint a new code — the one in the
+   * user's inbox is the one they are about to type, and rotating it is how "I entered the code from
+   * the mail and it said invalid" used to happen. The answer stays the same 400 challenge either
+   * way, so a client that does not know {@code resendAvailableInSeconds} keeps behaving as before.
+   */
   private void sendOtpMail(MailOtpCredentialModel credentialModel, CredentialContext credContext,
       AuthenticationFlowContext context) {
+
+    var decision = sendPolicy.decide(credentialModel);
+    if (decision.verdict() == MailOtpSendPolicy.Verdict.CAPPED) {
+      logger.warnf("otp mail ceiling reached for keycloak user %s; refusing for %d seconds",
+          credContext.getUser().getId(), decision.retryAfterSeconds());
+      context.failure(AuthenticationFlowError.ACCESS_DENIED,
+          Response.status(Status.TOO_MANY_REQUESTS)
+              .entity(challenge(decision.retryAfterSeconds())
+                  .errorDescription("Too many codes requested"))
+              .type(MediaType.APPLICATION_JSON_TYPE).build());
+      return;
+    }
+    if (decision.verdict() == MailOtpSendPolicy.Verdict.COOLDOWN) {
+      context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
+          Response.status(Status.BAD_REQUEST)
+              .entity(challenge(decision.retryAfterSeconds()).errorDescription("Missing totp"))
+              .type(MediaType.APPLICATION_JSON_TYPE).build());
+      return;
+    }
 
     var emailAddress = credContext.getUser().getEmail();
     if (isNull(emailAddress) || emailAddress.isBlank()) {
@@ -91,14 +120,17 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
     }
 
     var otp = otpService.createOtp(emailAddress);
-    credentialService.update(credentialModel.updateFrom(otp), credContext);
+    // One update carries both: the new code and the record that it was sent. Counting the send in a
+    // second write would let a failure between the two leave a limit that silently does not apply.
+    credentialModel.updateFrom(otp);
+    sendPolicy.recordSent(credentialModel);
+    credentialService.update(credentialModel, credContext);
 
     try {
       mailSender.sendOtpCode(otp, credContext);
-      var challengeResponse = new Challenge().error(INVALID_GRANT_ERROR)
-          .errorDescription("Missing totp").otpType(OtpType.EMAIL);
       context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
-          Response.status(Status.BAD_REQUEST).entity(challengeResponse)
+          Response.status(Status.BAD_REQUEST)
+              .entity(challenge(decision.retryAfterSeconds()).errorDescription("Missing totp"))
               .type(MediaType.APPLICATION_JSON_TYPE).build());
     } catch (MailSendingException e) {
       credentialService.invalidate(credentialModel, credContext);
@@ -107,6 +139,11 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
           errorResponse(Status.INTERNAL_SERVER_ERROR.getStatusCode(),
               INTERNAL_ERROR, "failed to send otp email"));
     }
+  }
+
+  private Challenge challenge(int resendAvailableInSeconds) {
+    return new Challenge().error(INVALID_GRANT_ERROR).otpType(OtpType.EMAIL)
+        .resendAvailableInSeconds(resendAvailableInSeconds);
   }
 
   private void validateOtp(String otpRequest, MailOtpCredentialModel credentialModel,

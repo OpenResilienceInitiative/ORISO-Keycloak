@@ -14,6 +14,7 @@ import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Challenge;
 import de.onlineberatung.mail.MailSendingException;
 import de.onlineberatung.otp.Otp;
+import de.onlineberatung.otp.MailOtpSendPolicy;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpService;
 import de.onlineberatung.otp.ValidationResult;
@@ -62,7 +63,8 @@ public class OtpMailAuthenticatorTest {
     when(authFlow.getUser()).thenReturn(user);
     credentialService = mock(MailOtpCredentialService.class);
     credentialContext = new CredentialContext(session, realm, user);
-    authenticator = new OtpMailAuthenticator(otpService, credentialService, mailSender);
+    authenticator = new OtpMailAuthenticator(otpService, credentialService, mailSender,
+        new MailOtpSendPolicy(systemDefaultZone(), null));
   }
 
   @Test

@@ -14,6 +14,7 @@ import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.mail.MailSendingException;
 import de.onlineberatung.otp.Otp;
+import de.onlineberatung.otp.MailOtpSendPolicy;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpService;
 import de.onlineberatung.otp.ValidationResult;
@@ -87,7 +88,8 @@ public class OtpMailFormAuthenticatorTest {
     when(otpService.createOtp(anyString()))
         .thenReturn(new Otp("5678", 300, 2000L, "counsellor@example.org", 0));
 
-    authenticator = new OtpMailFormAuthenticator(otpService, credentialService, mailSender);
+    authenticator = new OtpMailFormAuthenticator(otpService, credentialService, mailSender,
+        new MailOtpSendPolicy(java.time.Clock.systemDefaultZone(), null));
   }
 
   @Test
@@ -253,5 +255,43 @@ public class OtpMailFormAuthenticatorTest {
   @Test
   public void requiresUser_should_be_true_because_the_factor_belongs_to_an_identified_user() {
     assertThat(authenticator.requiresUser()).isTrue();
+  }
+
+  @Test
+  public void authenticate_shows_the_form_without_a_second_mail_inside_the_cooldown()
+      throws Exception {
+    // #1338: a login restarted within 30 s must not rotate the code the user is reading in their
+    // inbox. Showing the form is the right answer; mailing a new code is what used to make a
+    // correctly typed code fail.
+    var policy = new MailOtpSendPolicy(Clock.systemDefaultZone(), null);
+    policy.recordSent(activeCredential);
+    var codeInTheUsersInbox = activeCredential.getOtp().getCode();
+    var cooldownAuthenticator =
+        new OtpMailFormAuthenticator(otpService, credentialService, mailSender, policy);
+
+    cooldownAuthenticator.authenticate(authFlow);
+
+    verify(authFlow).challenge(formResponse);
+    verify(mailSender, never()).sendOtpCode(any(Otp.class), any(CredentialContext.class));
+    verify(credentialService, never()).update(any(), any());
+    assertThat(activeCredential.getOtp().getCode()).isEqualTo(codeInTheUsersInbox);
+  }
+
+  @Test
+  public void authenticate_refuses_once_the_per_window_ceiling_is_reached() throws Exception {
+    var policy = new MailOtpSendPolicy(Clock.systemDefaultZone(), null);
+    for (var i = 0; i < MailOtpSendPolicy.DEFAULT_MAX_SENDS_PER_WINDOW; i++) {
+      policy.recordSent(activeCredential);
+    }
+    // move the last send out of the cooldown so the ceiling is what refuses
+    activeCredential.applySendBookkeeping(System.currentTimeMillis() - 60_000L,
+        activeCredential.getSendWindowStartedAt(), activeCredential.getMailsSentInWindow());
+    var cappedAuthenticator =
+        new OtpMailFormAuthenticator(otpService, credentialService, mailSender, policy);
+
+    cappedAuthenticator.authenticate(authFlow);
+
+    verify(authFlow).failure(eq(AuthenticationFlowError.ACCESS_DENIED), eq(formResponse));
+    verify(mailSender, never()).sendOtpCode(any(Otp.class), any(CredentialContext.class));
   }
 }
