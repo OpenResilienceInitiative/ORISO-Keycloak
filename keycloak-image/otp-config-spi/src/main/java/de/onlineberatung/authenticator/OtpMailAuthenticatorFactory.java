@@ -6,8 +6,10 @@ import de.onlineberatung.credential.MailOtpCredentialProviderFactory;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.mail.DefaultMailSender;
 import de.onlineberatung.otp.MemoryOtpService;
+import de.onlineberatung.otp.OtpMailThrottle;
 import de.onlineberatung.otp.RandomDigitsCodeGenerator;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import org.keycloak.Config;
 import org.keycloak.authentication.Authenticator;
@@ -59,7 +61,7 @@ public class OtpMailAuthenticatorFactory implements AuthenticatorFactory {
 
   @Override
   public List<ProviderConfigProperty> getConfigProperties() {
-    return asList(
+    var properties = new ArrayList<>(asList(
         new ProviderConfigProperty("length", "Code length",
             "The number of digits of the generated code.", ProviderConfigProperty.STRING_TYPE, 6),
         new ProviderConfigProperty("ttl", "Time-to-live",
@@ -71,7 +73,9 @@ public class OtpMailAuthenticatorFactory implements AuthenticatorFactory {
         new ProviderConfigProperty("simulation", "Simulation mode",
             "In simulation mode, the EMAIL won't be sent, but printed to the server logs",
             ProviderConfigProperty.BOOLEAN_TYPE, true)
-    );
+    ));
+    properties.addAll(OtpMailThrottle.configProperties());
+    return properties;
   }
 
   @Override
@@ -84,7 +88,8 @@ public class OtpMailAuthenticatorFactory implements AuthenticatorFactory {
     var credentialService = new MailOtpCredentialService(mailOtpCredentialProvider, systemClock);
     var otpService = new MemoryOtpService(generator, systemClock, authConfig);
     var mailSender = new DefaultMailSender();
-    return new OtpMailAuthenticator(otpService, credentialService, mailSender);
+    var throttle = OtpMailThrottle.fromConfig(systemClock, authConfig);
+    return new OtpMailAuthenticator(otpService, credentialService, mailSender, throttle);
   }
 
   @Override

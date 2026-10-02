@@ -41,3 +41,30 @@ the Bindings tab:
 Finally, configure the email theme in your Realm Settings:
 
 ![Example Email Theme Config](docu/theme_config.png)
+
+## E-mail code: resend cooldown and cap
+
+A token request without a code mails a new e-mail code, but not without limit
+(ORISO-UserService#1338). Both e-mail authenticators (direct grant and browser
+form) read three optional keys from the realm's `email-otp-config`; a missing
+or invalid key means the default, so no rebuild is needed to change them:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `resendCooldownSeconds` | `30` | After a mail, no new mail for this long; the last code stays valid. |
+| `maxMailsPerWindow` | `5` | At most this many code mails per user in the window. |
+| `mailWindowSeconds` | `900` | Length of the sliding window. |
+
+The send history lives in the credential data (`mailsSentAt`), so all pods
+share it and a restart forgets nothing. A new code always replaces the old one
+and starts with a fresh attempt counter (3 wrong codes kill it); a request
+inside the cooldown changes nothing, so it cannot reset that counter.
+
+Direct-grant answers to a request without a code:
+
+- `400` `{"error":"invalid_grant","error_description":"Missing totp","otpType":"EMAIL","resendAvailableInSeconds":30}`
+  after a mail went out, or with the remaining seconds inside the cooldown (no mail).
+- `429` `{"error":"invalid_grant","error_description":"Too many codes requested","otpType":"EMAIL","resendAvailableInSeconds":745}`
+  plus `Retry-After: 745` once the cap is used up (no mail).
+- A wrong code still answers `401`; the fourth try on a dead code answers `429`
+  with `"Maximal number of failed attempts reached"` (unchanged).
