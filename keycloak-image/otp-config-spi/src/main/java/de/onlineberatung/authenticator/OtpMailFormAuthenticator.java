@@ -10,6 +10,7 @@ import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpMailThrottle;
 import de.onlineberatung.otp.OtpService;
+import jakarta.ws.rs.core.Response;
 import java.time.Clock;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
@@ -23,7 +24,7 @@ import org.keycloak.services.messages.Messages;
  * Asks for an e-mail one-time code on the BROWSER login flow.
  *
  * <p>{@link OtpMailAuthenticator} does the same job for the direct grant, but it cannot be reused
- * here: it answers with a JSON body over {@code context.failure(...)}, which is what a token
+ * here: it answers with a JSON challenge body, which is what a token
  * request understands and what a browser cannot act on. A browser needs a page to type the code
  * into and a second request that carries it back, which is {@link #authenticate} and {@link
  * #action}. The verdict itself is shared through {@link MailOtpVerifier}.
@@ -121,7 +122,8 @@ public class OtpMailFormAuthenticator implements Authenticator {
         // INVALID and NOT_PRESENT both mean "that code does not open this account".
         // A browser user who mistyped gets the form back; sending them to the
         // password screen for a typo would be its own bug report.
-        challengeAgain(context, Messages.INVALID_TOTP);
+        context.failureChallenge(AuthenticationFlowError.INVALID_CREDENTIALS,
+            context.form().setError(Messages.INVALID_TOTP).createLoginTotp());
     }
   }
 
@@ -141,17 +143,27 @@ public class OtpMailFormAuthenticator implements Authenticator {
         if (nonNull(errorKey)) {
           form = form.setError(errorKey);
         }
-        context.challenge(form.createLoginTotp());
+        showCodeForm(context, form.createLoginTotp(), errorKey);
         break;
       case LIMIT_REACHED:
-        context.failure(AuthenticationFlowError.ACCESS_DENIED,
+        showCodeForm(context,
             context.form().setError(Messages.ACCOUNT_TEMPORARILY_DISABLED_TOTP)
-                .createLoginTotp());
+                .createLoginTotp(), errorKey);
         break;
       default:
-        context.failure(AuthenticationFlowError.INTERNAL_ERROR,
+        showCodeForm(context,
             context.form().setError(Messages.COULD_NOT_PROCEED_WITH_AUTHENTICATION_REQUEST)
-                .createLoginTotp());
+                .createLoginTotp(), errorKey);
+    }
+  }
+
+  private void showCodeForm(AuthenticationFlowContext context, Response form, String errorKey) {
+    if (Messages.EXPIRED_CODE.equals(errorKey)) {
+      // The replacement mail is a legitimate next step, but the submitted expired
+      // credential still failed. Count that verdict even if replacement delivery fails.
+      context.failureChallenge(AuthenticationFlowError.EXPIRED_CODE, form);
+    } else {
+      context.challenge(form);
     }
   }
 
