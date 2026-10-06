@@ -1,7 +1,6 @@
 package de.onlineberatung.authenticator;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,7 +13,6 @@ import java.util.Collections;
 import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.authentication.AuthenticationFlowContext;
-import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.http.HttpRequest;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -71,14 +69,13 @@ public class OtpParameterAuthenticatorTest {
   }
 
   @Test
-  public void should_fail_if_request_contains_no_form_params() {
+  public void should_challenge_without_counting_a_failure_if_request_contains_no_form_params() {
     when(authFlow.getHttpRequest()).thenReturn(httpRequest);
 
     authenticator.authenticate(authFlow);
 
     var responseCaptor = ArgumentCaptor.forClass(Response.class);
-    verify(authFlow).failure(eq(AuthenticationFlowError.INVALID_CREDENTIALS),
-        responseCaptor.capture());
+    verify(authFlow).challenge(responseCaptor.capture());
     assertThat(responseCaptor.getValue().getStatus()).isEqualTo(400);
     var challenge = responseCaptor.getValue().readEntity(Challenge.class);
     assertThat(challenge.getOtpType()).isEqualTo(OtpType.APP);
@@ -91,18 +88,41 @@ public class OtpParameterAuthenticatorTest {
 
     authenticator.authenticate(authFlow);
     verify(authFlow).success();
+    assertThat(decodedFormParams.getFirst("totp")).isEqualTo("765432");
   }
 
   @Test
-  public void should_fail_with_challenge_if_otp_param_is_blank() {
+  public void should_validate_the_same_selected_code_when_aliases_conflict() {
+    decodedFormParams.putSingle("otp", "765432");
+    decodedFormParams.putSingle("totp", "111111");
+    when(authFlow.getHttpRequest()).thenReturn(httpRequest);
+
+    authenticator.authenticate(authFlow);
+
+    assertThat(decodedFormParams.getFirst("totp")).isEqualTo("765432");
+    verify(authFlow).success();
+  }
+
+  @Test
+  public void should_keep_the_standard_totp_parameter_usable() {
+    decodedFormParams.putSingle("totp", "765432");
+    when(authFlow.getHttpRequest()).thenReturn(httpRequest);
+
+    authenticator.authenticate(authFlow);
+
+    assertThat(decodedFormParams.getFirst("totp")).isEqualTo("765432");
+    verify(authFlow).success();
+  }
+
+  @Test
+  public void should_challenge_without_counting_a_failure_if_otp_param_is_blank() {
     decodedFormParams.put("otp", Collections.singletonList(" "));
     when(authFlow.getHttpRequest()).thenReturn(httpRequest);
 
     authenticator.authenticate(authFlow);
 
     var responseCaptor = ArgumentCaptor.forClass(Response.class);
-    verify(authFlow).failure(eq(AuthenticationFlowError.INVALID_CREDENTIALS),
-        responseCaptor.capture());
+    verify(authFlow).challenge(responseCaptor.capture());
     assertThat(responseCaptor.getValue().getStatus()).isEqualTo(400);
     var challenge = responseCaptor.getValue().readEntity(Challenge.class);
     assertThat(challenge.getOtpType()).isEqualTo(OtpType.APP);

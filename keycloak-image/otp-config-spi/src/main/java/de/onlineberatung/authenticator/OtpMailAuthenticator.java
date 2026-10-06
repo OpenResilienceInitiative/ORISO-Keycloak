@@ -97,19 +97,17 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
         // Same challenge whether or not a mail went out: inside the cooldown the code the
         // user already has stays valid, and resendAvailableInSeconds says when asking again
         // will mail a new one. Clients that do not know the field see the old answer.
-        context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
-            challenge(Status.BAD_REQUEST, "Missing totp", outcome));
+        context.challenge(challenge(Status.BAD_REQUEST, "Missing totp", outcome));
         break;
       case LIMIT_REACHED:
-        context.failure(AuthenticationFlowError.ACCESS_DENIED,
+        context.challenge(
             Response.fromResponse(challenge(Status.TOO_MANY_REQUESTS, TOO_MANY_CODES, outcome))
                 .header(HttpHeaders.RETRY_AFTER, outcome.getResendAvailableInSeconds())
                 .build());
         break;
       default:
-        context.failure(AuthenticationFlowError.INTERNAL_ERROR,
-            errorResponse(Status.INTERNAL_SERVER_ERROR.getStatusCode(),
-                INTERNAL_ERROR, "failed to send otp email"));
+        context.challenge(errorResponse(Status.INTERNAL_SERVER_ERROR.getStatusCode(),
+            INTERNAL_ERROR, "failed to send otp email"));
     }
   }
 

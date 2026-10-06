@@ -43,6 +43,7 @@ public class OtpMailAuthenticatorResendTest {
 
     assertThat(fx.mailedCodes).hasSize(1);
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
     assertThat(answer.challenge.getOtpType()).isEqualTo(OtpType.EMAIL);
     assertThat(answer.challenge.getError()).isEqualTo("invalid_grant");
     assertThat(answer.challenge.getErrorDescription()).isEqualTo("Missing totp");
@@ -59,6 +60,7 @@ public class OtpMailAuthenticatorResendTest {
 
     assertThat(fx.mailedCodes).hasSize(1);
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
     assertThat(answer.challenge.getOtpType()).isEqualTo(OtpType.EMAIL);
     assertThat(answer.challenge.getResendAvailableInSeconds()).isEqualTo(20);
 
@@ -86,6 +88,7 @@ public class OtpMailAuthenticatorResendTest {
 
     assertThat(fx.mailedCodes).hasSize(2);
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
     assertThat(answer.challenge.getResendAvailableInSeconds()).isEqualTo(30);
     var secondCode = fx.lastMailedCode();
     assertThat(secondCode).isNotEqualTo(firstCode);
@@ -106,6 +109,7 @@ public class OtpMailAuthenticatorResendTest {
 
     assertThat(fx.mailedCodes).hasSize(5);
     assertThat(answer.status).isEqualTo(429);
+    assertThat(answer.credentialFailure).isFalse();
     assertThat(answer.retryAfter).isEqualTo("745");
     assertThat(answer.challenge.getOtpType()).isEqualTo(OtpType.EMAIL);
     assertThat(answer.challenge.getResendAvailableInSeconds()).isEqualTo(745);
@@ -122,6 +126,7 @@ public class OtpMailAuthenticatorResendTest {
 
     assertThat(fx.mailedCodes).hasSize(5);
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
     assertThat(answer.challenge.getResendAvailableInSeconds()).isEqualTo(900 - 124);
   }
 
@@ -149,6 +154,7 @@ public class OtpMailAuthenticatorResendTest {
 
     assertThat(fx.mailedCodes).hasSize(6);
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
   }
 
   @Test
@@ -156,7 +162,9 @@ public class OtpMailAuthenticatorResendTest {
     tokenRequest(null);
     var code = fx.lastMailedCode();
     for (int i = 0; i < 3; i++) {
-      assertThat(tokenRequest("000000").status).isEqualTo(401);
+      var wrongCode = tokenRequest("000000");
+      assertThat(wrongCode.status).isEqualTo(401);
+      assertThat(wrongCode.credentialFailure).isTrue();
     }
     assertThat(tokenRequest(code).status).isEqualTo(429);
 
@@ -187,13 +195,16 @@ public class OtpMailAuthenticatorResendTest {
   @Test
   public void a_failed_mail_does_not_start_the_cooldown() {
     fx.mailServerDown(true);
-    assertThat(tokenRequest(null).status).isEqualTo(500);
+    var failedMail = tokenRequest(null);
+    assertThat(failedMail.status).isEqualTo(500);
+    assertThat(failedMail.credentialFailure).isFalse();
 
     fx.mailServerDown(false);
     var answer = tokenRequest(null);
 
     assertThat(fx.mailedCodes).hasSize(1);
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
     assertThat(answer.challenge.getResendAvailableInSeconds()).isEqualTo(30);
   }
 
@@ -209,6 +220,7 @@ public class OtpMailAuthenticatorResendTest {
 
     assertThat(fx.mailedCodes).hasSize(2);
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
   }
 
   @Test
@@ -244,6 +256,7 @@ public class OtpMailAuthenticatorResendTest {
     var answer = tokenRequest(null);
 
     assertThat(answer.status).isEqualTo(400);
+    assertThat(answer.credentialFailure).isFalse();
     assertThat(fx.mailedCodes).hasSize(1);
     assertThat(tokenRequest(fx.lastMailedCode()).succeeded).isTrue();
   }
@@ -273,14 +286,14 @@ public class OtpMailAuthenticatorResendTest {
 
     var answer = new TokenAnswer();
     doAnswer(invocation -> {
-      Response response = invocation.getArgument(1);
-      answer.status = response.getStatus();
-      answer.retryAfter = response.getHeaderString("Retry-After");
-      if (response.getEntity() instanceof Challenge) {
-        answer.challenge = (Challenge) response.getEntity();
-      }
+      answer.credentialFailure = true;
+      recordResponse(answer, invocation.getArgument(1));
       return null;
     }).when(flow).failure(any(), any(Response.class));
+    doAnswer(invocation -> {
+      recordResponse(answer, invocation.getArgument(0));
+      return null;
+    }).when(flow).challenge(any(Response.class));
     doAnswer(invocation -> {
       answer.succeeded = true;
       return null;
@@ -290,11 +303,20 @@ public class OtpMailAuthenticatorResendTest {
     return answer;
   }
 
+  private void recordResponse(TokenAnswer answer, Response response) {
+    answer.status = response.getStatus();
+    answer.retryAfter = response.getHeaderString("Retry-After");
+    if (response.getEntity() instanceof Challenge) {
+      answer.challenge = (Challenge) response.getEntity();
+    }
+  }
+
   private static final class TokenAnswer {
 
     int status;
     String retryAfter;
     Challenge challenge;
     boolean succeeded;
+    boolean credentialFailure;
   }
 }
