@@ -57,7 +57,7 @@ final class LifecycleCommands {
                               classify(
                                   coarse, role.getName(), "account".equals(client.getClientId()))));
     }
-    if (coarse.isEmpty()) coarse.add("UNKNOWN");
+    // Human local consultant/admin records are corroborated by UserService before UNKNOWN fallback.
     return Response.ok(
             Map.of(
                 "enabled", user.isEnabled(), "sessionCount", sessionCount(user), "roles", coarse))

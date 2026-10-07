@@ -141,6 +141,21 @@ def verify_lifecycle_effects(admin, grant, check, authorized, commands, key, rea
     )
     actor = "backend-account-maintenance"
     path = commands + "/accounts/" + account
+    native_only = admin("/users?username=000-inventory-orphan&exact=true")[1][0]["id"]
+    status, state = authorized(
+        commands + "/accounts/" + native_only + "/lifecycle-status",
+        {},
+        actor,
+        "GET",
+        "account.lifecycle-status",
+        native_only,
+        key,
+        kind="LIFECYCLE",
+        tenant="17",
+        roles=[],
+    )
+    check("default-only human lifecycle status", status, 200)
+    assert state["roles"] == [], "Native human projection must permit local corroboration before UNKNOWN fallback"
 
     def call(suffix, data, method, operation, kind="LIFECYCLE", tenant="17", target=None, roles=None):
         return authorized(
