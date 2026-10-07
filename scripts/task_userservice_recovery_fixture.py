@@ -9,7 +9,7 @@ import time
 import xml.etree.ElementTree as XML
 
 
-def verify_userservice_recovery(receiver, java_home, issuer, provisioning, provisioning_key, maintenance_key):
+def verify_userservice_recovery(receiver, java_home, issuer, provisioning, maintenance, importer, provisioning_key, maintenance_key):
     receiver = Path(receiver).resolve()
     if not (receiver / "pom.xml").is_file():
         raise AssertionError("UserService receiver must be an existing Maven checkout")
@@ -23,6 +23,8 @@ def verify_userservice_recovery(receiver, java_home, issuer, provisioning, provi
                 {
                     "issuer": issuer,
                     "provisioning": provisioning,
+                    "maintenance": maintenance,
+                    "importer": importer,
                     "provisioningOriginKey": provisioning_key,
                     "maintenanceOriginKey": maintenance_key,
                 },

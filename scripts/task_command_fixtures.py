@@ -551,11 +551,17 @@ def verify_origin_workflows(admin, check, authorized, creation, completion, comm
         maint_key,
         kind="IMPORT",
         tenant="17",
-        roles=["consultant", "group-chat-consultant"],
+        roles=[],
     )
-    check("IMPORT maintenance reads only existing consultant", status, 200)
+    check("IMPORT maintenance reads only existing consultant with the actual empty read grant", status, 200)
     assert set(projection["roles"]) == {"consultant", "user-admin"}
     full_roles = {"roles": ["consultant", "group-chat-consultant", "user-admin"]}
+    check(
+        "IMPORT empty read grant cannot mutate roles",
+        authorized(account_path + "/roles", full_roles, maintenance, "PUT", "account.roles",
+                   consultant_id, maint_key, kind="IMPORT", tenant="17", roles=[])[0],
+        403,
+    )
     check(
         "IMPORT preserves existing unrelated role",
         authorized(

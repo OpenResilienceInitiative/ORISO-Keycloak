@@ -91,30 +91,9 @@ final class CommandValidation {
   }
 
   static void createKind(String kind, Set<String> roles, Grant grant) {
-    Set<String> allowed =
-        switch (kind) {
-          case "ASKER" -> Set.of("user");
-          case "ANONYMOUS" -> Set.of("user");
-          case "CONSULTANT" -> Set.of("consultant", "group-chat-consultant");
-          case "AGENCY_ADMIN" -> Set.of("restricted-agency-admin", "user-admin");
-          case "CONSULTANT_AGENCY_ADMIN" ->
-              Set.of(
-                  "consultant", "group-chat-consultant", "restricted-agency-admin", "user-admin");
-          case "TENANT_ADMIN" ->
-              Set.of("user-admin", "agency-admin", "tenant-admin", "topic-admin");
-          default -> throw new BadRequestException("Unsupported registration kind");
-        };
-    Set<String> required =
-        switch (kind) {
-          case "ASKER" -> Set.of("user");
-          case "ANONYMOUS" -> Set.of("user");
-          case "CONSULTANT" -> Set.of("consultant");
-          case "AGENCY_ADMIN" -> Set.of("restricted-agency-admin", "user-admin");
-          case "CONSULTANT_AGENCY_ADMIN" ->
-              Set.of("consultant", "restricted-agency-admin", "user-admin");
-          case "TENANT_ADMIN" -> Set.of("user-admin", "agency-admin", "tenant-admin");
-          default -> Set.of();
-        };
+    RegistrationPolicy policy = registrationPolicy(kind);
+    Set<String> allowed = policy.allowedRoles();
+    Set<String> required = policy.requiredRoles();
     if (!roles.containsAll(required) || !allowed.containsAll(roles)) deny();
     if (Set.of("AGENCY_ADMIN", "CONSULTANT_AGENCY_ADMIN", "TENANT_ADMIN").contains(kind)
         && !Set.of("INVITATION", "HUMAN_ADMIN").contains(grant.originKind())) deny();
@@ -122,6 +101,26 @@ final class CommandValidation {
     if ("IMPORT".equals(grant.originKind()) && !"CONSULTANT".equals(kind)) deny();
     if (!Set.of("REGISTRATION", "INVITATION", "ANONYMOUS", "HUMAN_ADMIN", "IMPORT")
         .contains(grant.originKind())) deny();
+  }
+
+  private record RegistrationPolicy(Set<String> requiredRoles, Set<String> allowedRoles) {}
+
+  private static RegistrationPolicy registrationPolicy(String kind) {
+    return switch (kind) {
+      case "ASKER", "ANONYMOUS" -> new RegistrationPolicy(Set.of("user"), Set.of("user"));
+      case "CONSULTANT" -> new RegistrationPolicy(
+          Set.of("consultant"), Set.of("consultant", "group-chat-consultant"));
+      case "AGENCY_ADMIN" -> new RegistrationPolicy(
+          Set.of("restricted-agency-admin", "user-admin"),
+          Set.of("restricted-agency-admin", "user-admin"));
+      case "CONSULTANT_AGENCY_ADMIN" -> new RegistrationPolicy(
+          Set.of("consultant", "restricted-agency-admin", "user-admin"),
+          Set.of("consultant", "group-chat-consultant", "restricted-agency-admin", "user-admin"));
+      case "TENANT_ADMIN" -> new RegistrationPolicy(
+          Set.of("user-admin", "agency-admin", "tenant-admin"),
+          Set.of("user-admin", "agency-admin", "tenant-admin", "topic-admin"));
+      default -> throw new BadRequestException("Unsupported registration kind");
+    };
   }
 
   static void bad() {

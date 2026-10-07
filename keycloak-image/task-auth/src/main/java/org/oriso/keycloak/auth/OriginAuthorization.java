@@ -163,7 +163,8 @@ public final class OriginAuthorization {
           denied();
       }
       if ("IMPORT".equals(claim.path("originKind").asText())
-          && (!roles.contains("consultant")
+          && ((!roles.contains("consultant")
+                  && !(operation.equals("account.read") && roles.isEmpty()))
               || !Set.of("consultant", "group-chat-consultant").containsAll(roles))) denied();
       String tenant = claim.path("tenantId").isNull() ? null : claim.path("tenantId").asText();
       return new Grant(claim.path("originKind").asText(), tenant, Set.copyOf(roles), digest);

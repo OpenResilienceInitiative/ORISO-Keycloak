@@ -1003,9 +1003,28 @@ def main(image, legacy_otp=False, userservice_receiver=None, userservice_java_ho
                 userservice_java_home,
                 base + "/realms/" + realm,
                 {"clientId": actor, "clientSecret": secrets[actor], "serviceSubject": subjects[actor]},
+                {"clientId": "backend-account-maintenance", "clientSecret": secrets["backend-account-maintenance"], "serviceSubject": subjects["backend-account-maintenance"]},
+                {"clientId": "backend-consultant-import", "serviceSubject": subjects["backend-consultant-import"], "token": tokens["backend-consultant-import"]},
                 KEY,
                 MAINT_KEY,
             )
+            # The joined Maven callback can outlive the disposable bootstrap token.
+            claims = json.loads(base64.urlsafe_b64decode(master.split(".")[1] + "=="))
+            print(json.dumps({"fixtureAdminToken": {
+                "lifetimeSeconds": claims["exp"] - claims["iat"],
+                "expiredAfterUserserviceCallback": time.time() >= claims["exp"],
+            }}), flush=True)
+            st, refreshed_admin = grant(
+                "master",
+                {
+                    "grant_type": "password",
+                    "client_id": "admin-cli",
+                    "username": "synthetic-admin",
+                    "password": "Synthetic-master-2026!",
+                },
+            )
+            check("fixture admin refresh after joined callback", st, 200)
+            master = refreshed_admin["access_token"]
         # Changing the actual linked subject cannot transfer durable creation ownership.
         old_subject = subjects[actor]
         check("synthetic service-account replacement", admin("/users/" + old_subject, method="DELETE")[0], 204)
