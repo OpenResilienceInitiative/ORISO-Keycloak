@@ -48,4 +48,10 @@
       </column>
     </createTable>
   </changeSet>
+  <changeSet id="oriso-creation-recovery-v1" author="oriso">
+    <addColumn tableName="ORISO_CREATION_ATTEMPT">
+      <column name="ORIGIN_KIND" type="VARCHAR(30)"/>
+      <column name="INITIAL_ROLES" type="VARCHAR(500)"/>
+    </addColumn>
+  </changeSet>
 </databaseChangeLog>

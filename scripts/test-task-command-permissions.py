@@ -14,6 +14,7 @@ from task_command_fixtures import (
 )
 
 from task_inactivity_fixtures import verify_inventory, verify_lifecycle_effects
+from task_creation_recovery_fixtures import verify_creation_recovery
 
 import concurrent.futures
 import argparse
@@ -27,6 +28,8 @@ import urllib.error
 import urllib.parse
 import uuid
 
+from task_userservice_recovery_fixture import verify_userservice_recovery
+
 KEY = base64.b64encode(os.urandom(32)).decode()
 MAINT_KEY = base64.b64encode(os.urandom(32)).decode()
 CLIENTS = {
@@ -38,7 +41,7 @@ CLIENTS = {
 }
 
 
-def main(image, legacy_otp=False):
+def main(image, legacy_otp=False, userservice_receiver=None, userservice_java_home=None):
     name = "task-command-probe-" + uuid.uuid4().hex[:10]
     realm = "task-probe"
     checks = []
@@ -282,6 +285,20 @@ def main(image, legacy_otp=False):
         path = "/realms/" + realm + "/oriso-commands/v1/account-creations/" + attempt
         st, receipt = authorized(path, body, actor, "PUT", "account.create", attempt, KEY, tenant="17")
         check("creator creates complete account", st, 201)
+        check(
+            "primary fixture commits before human use",
+            authorized(
+                path + "/commit",
+                {"accountId": receipt["accountId"], "creationProof": receipt["creationProof"]},
+                actor,
+                "POST",
+                "account.commit",
+                attempt,
+                KEY,
+                tenant="17",
+            )[0],
+            204,
+        )
         account = receipt["accountId"]
         reader = "backend-account-maintenance"
         account_path = "/realms/" + realm + "/oriso-commands/v1/accounts/" + account
@@ -365,6 +382,35 @@ def main(image, legacy_otp=False):
                 roles=combo["roles"],
             )[0],
             201,
+        )
+        combo_path = "/realms/" + realm + "/oriso-commands/v1/account-creations/" + combo_attempt
+        combo_receipt = authorized(
+            combo_path,
+            combo,
+            actor,
+            "PUT",
+            "account.create",
+            combo_attempt,
+            KEY,
+            kind="INVITATION",
+            tenant="17",
+            roles=combo["roles"],
+        )[1]
+        check(
+            "counselling fixture commits before human authentication",
+            authorized(
+                combo_path + "/commit",
+                {"accountId": combo_receipt["accountId"], "creationProof": combo_receipt["creationProof"]},
+                actor,
+                "POST",
+                "account.commit",
+                combo_attempt,
+                KEY,
+                kind="INVITATION",
+                tenant="17",
+                roles=combo["roles"],
+            )[0],
+            204,
         )
         commands = "/realms/" + realm + "/oriso-commands/v1"
         verify_inventory(admin, check, authorized, commands, MAINT_KEY, subjects)
@@ -657,6 +703,9 @@ def main(image, legacy_otp=False):
                 roles=roles,
             )
 
+        recovery = verify_creation_recovery(
+            admin, grant, check, authorized, creation, completion, commands, KEY, body, realm
+        )
         verify_origin_workflows(
             admin, check, authorized, creation, completion, commands, KEY, MAINT_KEY, body, human_id
         )
@@ -919,6 +968,7 @@ def main(image, legacy_otp=False):
             )
             check(task + " token after restart", st, 200)
             tokens[task] = b["access_token"]
+        recovery.verify_after_restart()
         st, replayed = creation(restart_body, restart_attempt)[2]
         check("open attempt survives restart", st, 200)
         assert replayed == restart_owned
@@ -947,6 +997,15 @@ def main(image, legacy_otp=False):
             )[0],
             409,
         )
+        if userservice_receiver:
+            verify_userservice_recovery(
+                userservice_receiver,
+                userservice_java_home,
+                base + "/realms/" + realm,
+                {"clientId": actor, "clientSecret": secrets[actor], "serviceSubject": subjects[actor]},
+                KEY,
+                MAINT_KEY,
+            )
         # Changing the actual linked subject cannot transfer durable creation ownership.
         old_subject = subjects[actor]
         check("synthetic service-account replacement", admin("/users/" + old_subject, method="DELETE")[0], 204)
@@ -972,6 +1031,7 @@ def main(image, legacy_otp=False):
         )
         check("actual replacement owner token", st, 200)
         tokens[actor] = new_token["access_token"]
+        recovery.verify_foreign_owner()
         denied("new linked owner cannot finish old attempt", completion(owned_attempt, owned, True)[0])
         denied("new linked owner cannot reopen old attempt", creation(owned_body, owned_attempt)[2][0])
         assert admin("/users/" + owned["accountId"])[0] == 200
@@ -997,5 +1057,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--image", required=True)
     p.add_argument("--legacy-otp-compatibility", action="store_true")
+    p.add_argument("--userservice-receiver", help="Existing checkout with explicit joined native recovery test")
+    p.add_argument("--userservice-java-home", help="Java runtime for the optional joined UserService gate")
     a = p.parse_args()
-    main(a.image, a.legacy_otp_compatibility)
+    main(a.image, a.legacy_otp_compatibility, a.userservice_receiver, a.userservice_java_home)

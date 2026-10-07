@@ -15,7 +15,7 @@ operation,taskClient,taskSubject,originKind,originAction,target,tenantId,roles,
 payloadDigest. iss=oriso-userservice; aud=oriso-task-commands;
 purpose=oriso-command; exp>now, exp>iat, exp-iat<=60, now-60<=iat<=now+5; unique jti UUID.
 originKind INVITATION|REGISTRATION|ANONYMOUS|HUMAN_ADMIN|SELF_SERVICE|LIFECYCLE|IMPORT|ONBOARDING|PASSWORD_RESET.
-originAction must equal operation. target=attempt UUID for create/commit/compensate,
+originAction must equal operation. target=attempt UUID for create/commit/compensate/creation-recover,
 account ID for account operations; exact query value for email/username search.
 tenantId string or null; roles array of allowed human realm-role names.
 payloadDigest = base64url(no padding)(HMAC-SHA256(key,
@@ -30,6 +30,7 @@ Keys purpose-separated by input prefix; compare constant-time. No secrets in log
 | Operation claim | HTTP | Command body / projection |
 |---|---|---|
 | account.create | PUT /account-creations/{attemptId} | {username,email,firstName,lastName,preferredLanguage,tenantId,password,passwordTemporary,roles:[...],registrationKind} |
+| account.creation-recover | POST /account-creations/{attemptId}/recovery-claims | {registrationKind} |
 | account.commit | POST /account-creations/{attemptId}/commit | {accountId,creationProof} |
 | account.compensate | POST /account-creations/{attemptId}/compensations | {accountId,creationProof} |
 | account.read | GET /accounts/{id} | proof digest over {} |
@@ -48,6 +49,25 @@ Keys purpose-separated by input prefix; compare constant-time. No secrets in log
 Create returns HTTP201 {attemptId,accountId,creationProof,status:OPEN}, replay200 same
 receipt; commit204; compensate204 repeated legitimate tombstone remains204;
 committed compensation409; foreign/forged403; changed attempt payload409.
+OPEN accounts remain native enabled=false until the first valid OPEN commit.
+That commit atomically enables only the owned account and marks COMMITTED.
+Repeated COMMITTED commit is a no-op and never undoes a later independent disable.
+Recovery/compensation never activate an account.
+
+Recovery claims return HTTP200 {attemptId,accountId,creationProof,status}.
+OPEN atomically becomes RECOVERY_CLAIMED, retaining the exact original receipt;
+old create/commit then409. Owned compensation remains idempotent.
+Absent attempt creates an owner-bound ABANDONED tombstone with explicit null
+accountId/creationProof, fencing any delayed create409 without account mutation.
+Existing COMMITTED/COMPENSATED status is diagnostic; COMMITTED never compensates.
+Registration kind in the body is taken from the durable caller journal and bound
+by the unchanged signed payloadDigest. Provider compares original persisted
+registrationKind, tenant, initial role set, originKind, task client and subject.
+Absent tombstones validate the same createKind/role/origin policy before capture.
+No username search, foreign receipt, arbitrary deletion or new JWT claim exists.
+Concurrent ownership insertion may return409; retry reads the durable winner.
+Rows predating the origin/initial-role migration cannot be recovered by guessing
+missing authority; operational migration must explicitly drain those attempts.
 Projection HTTP200 {id,username,email,firstName,lastName,tenantId,preferredLanguage,
 enabled,emailVerified,roles:[...],passwordChangeRequired:boolean}; absent404.
 Search returns array [] or bounded matching projections (exact matches only), no
@@ -55,8 +75,9 @@ wildcards, arbitrary attrs, credentials or capability/receipt leakage.
 Maintenance204, delete absent204, SMTP200 {revision,status}; status APPLIED or DISABLED_OR_INCOMPLETE.
 
 registrationKind ASKER|ANONYMOUS|CONSULTANT|AGENCY_ADMIN|CONSULTANT_AGENCY_ADMIN|TENANT_ADMIN.
+Create/profile tenantId JSON type is string or null; caller domain Long is converted at the wire adapter before payload signing.
 Creator sets userId=created ID, username/userName decoded username, locale=language,
-optional tenantId; enabled=true,emailVerified=true matches current behavior.
+optional tenantId; enabled=false until first valid commit, emailVerified=true.
 Kinds require respectively: user; user; consultant; restricted-agency-admin+user-admin;
 consultant+restricted-agency-admin+user-admin; user-admin+agency-admin+tenant-admin.
 Optional group-chat-consultant for consultant kinds and topic-admin for TENANT_ADMIN only, as limited by signed origin role authority.
@@ -83,7 +104,7 @@ ONBOARDING is limited to account.read/account.password. UserService must hold or
 
 PASSWORD_RESET allows only account.read/account.password, including the existing protected tenant0 platform-admin recovery. UserService must consume/verify the existing reset token, preserve existing MFA/OTP guards, and derive the exact persisted subject/tenant; no caller body target or no-JWT SELF_SERVICE fallback. All reset profile/role/tenant/deletion/deactivation operations are rejected. Valid signed same-body transport retries within the proof lifetime are intentional; consumed one-time domain claims cannot mint a new authority again (UserService responsibility).
 
-Existing CSV Consultant maintenance extension: IMPORT on account-maintenance transport + maintenance origin key permits only account.read/account.roles for an existing native consultant and exact captured/persisted row tenant. DTO roles is the full desired bounded HUMAN_ROLES set; proof roles is only consultant/group-chat-consultant additions. Receiver requires every current human role preserved, additions only those two roles and included in proof, then adds without deleting mappings. Admin addition/removal, profile/password/search/delete/deactivation and platform/service targets remain denied. Provisioner IMPORT still permits only CONSULTANT create/commit/compensate. AccountProjection.roles always excludes default/offline/uma/task roles.
+Existing CSV Consultant maintenance extension: IMPORT on account-maintenance transport + maintenance origin key permits only account.read/account.roles for an existing native consultant and exact captured/persisted row tenant. DTO roles is the full desired bounded HUMAN_ROLES set; proof roles is only consultant/group-chat-consultant additions. Receiver requires every current human role preserved, additions only those two roles and included in proof, then adds without deleting mappings. Admin addition/removal, profile/password/search/delete/deactivation and platform/service targets remain denied. Provisioner IMPORT still permits only CONSULTANT create/commit/compensate/recovery. AccountProjection.roles always excludes default/offline/uma/task roles.
 
 Read-only inactivity orphan inventory: POST /account-inventory {cutoff:ISO-8601 Instant,first:int>=0,max:int1..1000}. Maintenance-key LIFECYCLE proof only, target cutoff:<cutoff>/first:<first>/max:<max>, tenantId:null,roles:[]; US factory reads actual immutable account_inactivity_rollout id=1 cutoff inside the existing FOR UPDATE transaction, never caller-provided authority. Response {accounts:[{id,tenantId,createdTimestamp,eligibleHuman}],hasMore:boolean}; original native page length==max determines hasMore, so technical-only pages do not truncate scan. No names/email/roles/credentials/filter/realm input. Actual service accounts and effective pure machine identities are ineligible; native realm/client HUMAN_ROLES preserve mixed technical-human and platform-human enrollment and missing-snapshot diagnostics. Inventory grants no mutation authority; protected-target command guard remains independent.
 
@@ -104,3 +125,5 @@ python3 scripts/test-task-command-permissions.py --image oriso-keycloak:permissi
 This verifies the actual custom image against its embedded H2 database locally. MariaDB rollout, remote image publication, live caller readback, legacy retirement and deployed browser flows are separate delivery gates. Managed origin keys and task client secrets must come from deployment Secrets; never include them in the realm export, command events or logs.
 
 First import and existing-realm reconciliation are owned by ORISO-Helm. Receiver first, dedicated clients next, callers next; exact legacy OTP compatibility may be explicitly enabled during that sequence and must then be removed. Retirement remains operator-gated after verified caller readback.
+
+The optional local joined gate keeps the disposable custom provider alive while running UserService `IdentityCreationNativeRestartIT` with its real durable creation journal and command adapter. Invoke `scripts/test-task-command-permissions.py --image <custom-image> --userservice-receiver <existing-UserService-checkout> --userservice-java-home <Java-21-home>`. `ORISO_CREATION_NATIVE_FIXTURE` points only to a mode-0600 temporary synthetic fixture; the harness removes it after Maven and removes its container in the outer finally block. Successful exit is insufficient: the harness requires a fresh explicit suite report with executed cases and zero failures/errors/skips. Ordinary single-repository test selection excludes this fixture-dependent class. Required cross-repository CI must invoke the joined gate against immutable provider and UserService commits; it does not substitute for the full native permission suite or deployment/browser acceptance.

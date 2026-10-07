@@ -141,7 +141,11 @@ public final class OriginAuthorization {
       if ("IMPORT".equals(kind)) {
         Set<String> allowed =
             caller.clientId().equals(TaskIdentity.configured("account-provisioning"))
-                ? Set.of("account.create", "account.commit", "account.compensate")
+                ? Set.of(
+                    "account.create",
+                    "account.commit",
+                    "account.compensate",
+                    "account.creation-recover")
                 : caller.clientId().equals(TaskIdentity.configured("account-maintenance"))
                     ? Set.of("account.read", "account.roles")
                     : Set.of();
