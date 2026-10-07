@@ -14,7 +14,8 @@ This repository contains the Keycloak authentication and authorization configura
 ## Custom ORISO Keycloak Image
 
 This repo owns the custom ORISO Keycloak image source. The image bundles the
-OTP configuration SPI and ORISO email OTP theme from `keycloak-image/`.
+OTP configuration SPI, bounded task command providers, and ORISO email OTP theme from `keycloak-image/`.
+See [task identities and commands](docs/task-commands.md) for the current service contract and migration gates.
 
 The GitHub workflow `.github/workflows/keycloak-image.yml` builds and publishes:
 
@@ -218,7 +219,7 @@ kubectl logs -n caritas deployment/keycloak
 
 ## 🔄 Version Information
 
-- **Keycloak Version**: 20.0.5
+- **Custom image Keycloak Version**: 26.6.3 (the realm export retains its historical migration version)
 - **Realm**: online-beratung
 - **Last Updated**: 2025-10-31
 
