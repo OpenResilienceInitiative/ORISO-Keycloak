@@ -79,9 +79,16 @@ final class AccountCommands {
     attempt.status = "OPEN";
     attempt.tenantId = tenant;
     attempt.registrationKind = body.path("registrationKind").asText();
+    attempt.originKind = grant.originKind();
+    attempt.initialRoles = String.join(",", new TreeSet<>(roleNames));
     try {
-      em().persist(attempt);
-      em().flush();
+      try {
+        em().persist(attempt);
+        em().flush();
+      } catch (jakarta.persistence.PersistenceException collision) {
+        session.getTransactionManager().setRollbackOnly();
+        throw new ClientErrorException("Creation ownership changed concurrently", 409);
+      }
       Map<String, Object> attrs = new HashMap<>();
       attrs.put("username", username);
       for (String key : List.of("email", "firstName", "lastName")) {
@@ -103,7 +110,7 @@ final class AccountCommands {
         completed.validate();
         completed.update(false);
       }
-      user.setEnabled(true);
+      user.setEnabled(false);
       user.setEmailVerified(true);
       user.setSingleAttribute("userId", user.getId());
       String decoded = URLDecoder.decode(username, StandardCharsets.UTF_8);
@@ -132,6 +139,57 @@ final class AccountCommands {
       session.getTransactionManager().setRollbackOnly();
       throw e;
     }
+  }
+
+  Response recover(String attemptId, JsonNode body, String encoded) {
+    try {
+      if (!UUID.fromString(attemptId).toString().equals(attemptId)) bad();
+    } catch (IllegalArgumentException invalid) {
+      bad();
+    }
+    fields(body, "registrationKind");
+    var caller = TaskIdentity.require(session, "account-provisioning", "account-provisioning");
+    var grant = origins.require(encoded, caller, "account.creation-recover", attemptId, body, true);
+    String kind = text(body, "registrationKind", true, 30);
+    createKind(kind, grant.roles(), grant);
+    if ("0".equals(grant.tenantId()) && grant.roles().contains("tenant-admin")) deny();
+    String pk = realm.getId() + ":" + attemptId;
+    var attempt = em().find(CreationAttempt.class, pk, LockModeType.PESSIMISTIC_WRITE);
+    String initialRoles = String.join(",", new TreeSet<>(grant.roles()));
+    if (attempt == null) {
+      // A durable tombstone fences a delayed create from a caller whose outcome was unknown.
+      attempt = new CreationAttempt();
+      attempt.id = pk;
+      attempt.realmId = realm.getId();
+      attempt.attemptId = attemptId;
+      attempt.ownerSubject = caller.subject();
+      attempt.ownerClient = caller.clientId();
+      attempt.registrationKind = kind;
+      attempt.originKind = grant.originKind();
+      attempt.tenantId = grant.tenantId();
+      attempt.initialRoles = initialRoles;
+      attempt.fingerprint = "abandoned";
+      attempt.status = "ABANDONED";
+      try {
+        em().persist(attempt);
+        em().flush();
+      } catch (RuntimeException concurrent) {
+        session.getTransactionManager().setRollbackOnly();
+        throw new ClientErrorException(
+            "Creation ownership changed concurrently; retry recovery", 409);
+      }
+    } else {
+      if (!caller.subject().equals(attempt.ownerSubject)
+          || !caller.clientId().equals(attempt.ownerClient)
+          || !kind.equals(attempt.registrationKind)
+          || !Objects.equals(grant.tenantId(), attempt.tenantId)
+          || !Objects.equals(grant.originKind(), attempt.originKind)
+          || !Objects.equals(initialRoles, attempt.initialRoles)) deny();
+      if (attempt.status.equals("OPEN")) attempt.status = "RECOVERY_CLAIMED";
+      else if (!Set.of("RECOVERY_CLAIMED", "ABANDONED", "COMMITTED", "COMPENSATED")
+          .contains(attempt.status)) deny();
+    }
+    return response(attempt, 200);
   }
 
   Response finish(String attemptId, JsonNode body, String encoded, boolean commit) {
@@ -168,13 +226,24 @@ final class AccountCommands {
         expected.getBytes(StandardCharsets.UTF_8),
         text(body, "creationProof", true, 100).getBytes(StandardCharsets.UTF_8))) deny();
     if (commit) {
-      if (attempt.status.equals("COMPENSATED"))
-        throw new ClientErrorException("Creation was compensated", 409);
-      attempt.status = "COMMITTED";
+      if (!Set.of("OPEN", "COMMITTED").contains(attempt.status))
+        throw new ClientErrorException("Creation no longer belongs to its active caller", 409);
+      if (attempt.status.equals("OPEN")) {
+        UserModel user = session.users().getUserById(realm, attempt.accountId);
+        if (user == null) throw new ClientErrorException("Owned account no longer exists", 409);
+        user.setEnabled(true);
+        attempt.status = "COMMITTED";
+        audit(caller, OperationType.UPDATE, attempt.accountId);
+      }
     } else {
       if (attempt.status.equals("COMMITTED"))
         throw new ClientErrorException("Creation is committed", 409);
-      if (attempt.status.equals("OPEN")) {
+      if (attempt.status.equals("RECOVERY_CLAIMED")) {
+        if (!Objects.equals(attempt.originKind, grant.originKind())
+            || !Objects.equals(
+                attempt.initialRoles, String.join(",", new TreeSet<>(grant.roles())))) deny();
+      }
+      if (Set.of("OPEN", "RECOVERY_CLAIMED").contains(attempt.status)) {
         UserModel user = session.users().getUserById(realm, attempt.accountId);
         if (user != null) session.users().removeUser(realm, user);
         attempt.status = "COMPENSATED";
@@ -415,20 +484,21 @@ final class AccountCommands {
   }
 
   private Response response(CreationAttempt attempt, int status) {
-    return Response.status(status)
-        .header("Cache-Control", "no-store")
-        .entity(
-            Map.of(
-                "attemptId",
-                attempt.attemptId,
-                "accountId",
-                attempt.accountId,
-                "creationProof",
-                origins.receipt(
-                    realm.getId(), attempt.attemptId, attempt.ownerSubject, attempt.accountId),
-                "status",
-                attempt.status))
-        .build();
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("attemptId", attempt.attemptId);
+    result.put(
+        "accountId",
+        attempt.accountId == null
+            ? com.fasterxml.jackson.databind.node.NullNode.instance
+            : attempt.accountId);
+    result.put(
+        "creationProof",
+        attempt.accountId == null
+            ? com.fasterxml.jackson.databind.node.NullNode.instance
+            : origins.receipt(
+                realm.getId(), attempt.attemptId, attempt.ownerSubject, attempt.accountId));
+    result.put("status", attempt.status);
+    return Response.status(status).header("Cache-Control", "no-store").entity(result).build();
   }
 
   private void setPassword(UserModel user, String password, boolean temporary) {

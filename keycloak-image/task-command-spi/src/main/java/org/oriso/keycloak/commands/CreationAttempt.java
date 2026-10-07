@@ -25,6 +25,12 @@ public class CreationAttempt {
   @Column(name = "REGISTRATION_KIND", length = 30, nullable = false)
   public String registrationKind;
 
+  @Column(name = "ORIGIN_KIND", length = 30)
+  public String originKind;
+
+  @Column(name = "INITIAL_ROLES", length = 500)
+  public String initialRoles;
+
   @Column(name = "ACCOUNT_ID", length = 255)
   public String accountId;
 

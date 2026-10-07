@@ -34,6 +34,15 @@ public final class CommandResource implements RealmResourceProvider {
   }
 
   @POST
+  @Path("v1/account-creations/{attemptId}/recovery-claims")
+  public Response recover(
+      @PathParam("attemptId") String attempt,
+      JsonNode body,
+      @HeaderParam("X-ORISO-Origin-Authorization") String origin) {
+    return accounts.recover(attempt, body, origin);
+  }
+
+  @POST
   @Path("v1/account-creations/{attemptId}/commit")
   public Response commit(
       @PathParam("attemptId") String attempt,
