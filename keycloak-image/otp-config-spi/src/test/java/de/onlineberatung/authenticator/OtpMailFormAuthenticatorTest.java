@@ -108,7 +108,8 @@ public class OtpMailFormAuthenticatorTest {
     authenticator.authenticate(authFlow);
 
     verify(credentialService).invalidate(eq(activeCredential), any(CredentialContext.class));
-    verify(authFlow).failure(eq(AuthenticationFlowError.INTERNAL_ERROR), any(Response.class));
+    verify(authFlow).challenge(formResponse);
+    verify(authFlow, never()).failure(any(), any(Response.class));
   }
 
   @Test
@@ -152,7 +153,7 @@ public class OtpMailFormAuthenticatorTest {
     authenticator.action(authFlow);
 
     verify(form).setError(anyString());
-    verify(authFlow).challenge(formResponse);
+    verify(authFlow).failureChallenge(AuthenticationFlowError.INVALID_CREDENTIALS, formResponse);
     verify(authFlow, never()).success();
   }
 
@@ -164,7 +165,7 @@ public class OtpMailFormAuthenticatorTest {
     authenticator.action(authFlow);
 
     verify(form).setError(anyString());
-    verify(authFlow).challenge(formResponse);
+    verify(authFlow).failureChallenge(AuthenticationFlowError.EXPIRED_CODE, formResponse);
     verify(authFlow, never()).success();
   }
 
@@ -235,7 +236,7 @@ public class OtpMailFormAuthenticatorTest {
 
     verify(mailSender).sendOtpCode(any(Otp.class), any(CredentialContext.class));
     verify(form).setError(anyString());
-    verify(authFlow).challenge(formResponse);
+    verify(authFlow).failureChallenge(AuthenticationFlowError.EXPIRED_CODE, formResponse);
     verify(authFlow, never()).success();
   }
 

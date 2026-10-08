@@ -1,5 +1,8 @@
 package de.onlineberatung.credential;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class MailOtpSecretData {
 
   private String code;
