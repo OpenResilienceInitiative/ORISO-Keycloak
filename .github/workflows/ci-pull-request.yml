@@ -22,12 +22,13 @@ jobs:
         uses: ./.github/actions/maven-build
         with:
           java_version: "21"
-          working_directory: keycloak-image/otp-config-spi
+          working_directory: keycloak-image
 
-      - name: Create Docker image
-        uses: ./.github/actions/docker-build-push
-        with:
-          push_to_ghcr: false
-          image_name: oriso-keycloak
-          context: keycloak-image
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build exact provider image for permission contract
+        run: docker build --tag oriso-keycloak:permission-contract keycloak-image
+
+      - name: Verify real tokens, native HTTP denials and durable command state
+        run: python3 scripts/test-task-command-permissions.py --image oriso-keycloak:permission-contract
+
+      - name: Verify explicit temporary legacy OTP compatibility
+        run: python3 scripts/test-task-command-permissions.py --image oriso-keycloak:permission-contract --legacy-otp-compatibility

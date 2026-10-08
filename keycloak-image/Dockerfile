@@ -7,14 +7,16 @@
 
 FROM maven:3.9-eclipse-temurin-21 AS spi-build
 WORKDIR /build
-COPY otp-config-spi/pom.xml .
-COPY otp-config-spi/api ./api
-RUN mvn -q -B dependency:go-offline || true
-COPY otp-config-spi/src ./src
-RUN mvn -q -B package -DskipTests
+COPY pom.xml .
+COPY task-auth/ ./task-auth/
+COPY task-command-spi/ ./task-command-spi/
+COPY otp-config-spi/ ./otp-config-spi/
+RUN --mount=type=cache,target=/root/.m2 mvn -q -B package -DskipTests
 
 FROM quay.io/keycloak/keycloak:26.6.3 AS builder
-COPY --from=spi-build /build/target/keycloak-otp-config-spi-*-keycloak.jar /opt/keycloak/providers/
+COPY --from=spi-build /build/otp-config-spi/target/keycloak-otp-config-spi-*-keycloak.jar /opt/keycloak/providers/
+COPY --from=spi-build /build/task-auth/target/task-auth-*.jar /opt/keycloak/providers/
+COPY --from=spi-build /build/task-command-spi/target/task-command-spi-*.jar /opt/keycloak/providers/
 COPY themes/ /opt/keycloak/themes/
 RUN /opt/keycloak/bin/kc.sh build
 

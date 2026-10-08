@@ -33,28 +33,26 @@ public class RealmServiceIdentitiesTest {
   }
 
   @Test
-  public void the_service_admin_holds_exactly_the_user_management_roles() {
+  public void the_legacy_service_admin_is_disabled_without_any_privileges() {
     var user = user(SERVICE_ADMIN);
 
-    assertThat(names(user.path("realmRoles")))
-        .containsExactlyInAnyOrder("default-roles-online-beratung", "otp-config-admin");
-    assertThat(fieldNames(user.path("clientRoles"))).containsExactly("realm-management");
-    assertThat(names(user.path("clientRoles").path("realm-management")))
-        .containsExactlyInAnyOrder("manage-users", "view-users", "query-users", "view-realm");
+    assertThat(user.path("enabled").asBoolean()).isFalse();
+    assertThat(names(user.path("realmRoles"))).isEmpty();
+    assertThat(fieldNames(user.path("clientRoles"))).isEmpty();
   }
 
   @Test
   public void the_service_admin_ships_without_a_password() {
-    // The password comes from the deployment's secret values, never from the public realm file.
+    // The retired password identity must not be recreated by bootstrap.
     assertThat(user(SERVICE_ADMIN).path("credentials")).isEmpty();
   }
 
   @Test
-  public void technical_is_a_pure_service_identity() {
+  public void the_legacy_technical_password_identity_is_disabled_without_privileges() {
     var user = user("technical");
 
-    assertThat(names(user.path("realmRoles")))
-        .containsExactlyInAnyOrder("default-roles-online-beratung", "technical");
+    assertThat(user.path("enabled").asBoolean()).isFalse();
+    assertThat(names(user.path("realmRoles"))).isEmpty();
     assertThat(user.path("clientRoles").size()).isZero();
   }
 

@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.6.xsd">
+  <changeSet id="oriso-task-commands-v1" author="oriso">
+    <createTable tableName="ORISO_CREATION_ATTEMPT">
+      <column name="ID" type="VARCHAR(100)">
+        <constraints primaryKey="true" nullable="false"/>
+      </column>
+      <column name="REALM_ID" type="VARCHAR(36)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="ATTEMPT_ID" type="VARCHAR(36)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="OWNER_SUBJECT" type="VARCHAR(255)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="OWNER_CLIENT" type="VARCHAR(255)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="REGISTRATION_KIND" type="VARCHAR(30)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="ACCOUNT_ID" type="VARCHAR(255)"/>
+      <column name="TENANT_ID" type="VARCHAR(40)"/>
+      <column name="FINGERPRINT" type="VARCHAR(64)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="STATUS" type="VARCHAR(20)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="VERSION" type="BIGINT" defaultValueNumeric="0">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <addUniqueConstraint tableName="ORISO_CREATION_ATTEMPT" columnNames="REALM_ID,ATTEMPT_ID" constraintName="ORISO_ATTEMPT_REALM_UNIQUE"/>
+    <createTable tableName="ORISO_SMTP_REVISION">
+      <column name="REALM_ID" type="VARCHAR(36)">
+        <constraints primaryKey="true" nullable="false"/>
+      </column>
+      <column name="REVISION" type="BIGINT">
+        <constraints nullable="false"/>
+      </column>
+      <column name="FINGERPRINT" type="VARCHAR(64)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="VERSION" type="BIGINT" defaultValueNumeric="0">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+  </changeSet>
+  <changeSet id="oriso-creation-recovery-v1" author="oriso">
+    <addColumn tableName="ORISO_CREATION_ATTEMPT">
+      <column name="ORIGIN_KIND" type="VARCHAR(30)"/>
+      <column name="INITIAL_ROLES" type="VARCHAR(500)"/>
+    </addColumn>
+  </changeSet>
+</databaseChangeLog>

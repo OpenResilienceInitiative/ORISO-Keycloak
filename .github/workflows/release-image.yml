@@ -57,7 +57,7 @@ jobs:
         uses: ./.github/actions/maven-build
         with:
           java_version: "21"
-          working_directory: keycloak-image/otp-config-spi
+          working_directory: keycloak-image
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

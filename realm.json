@@ -184,6 +184,103 @@
         "clientRole": false,
         "containerId": "online-beratung",
         "attributes": {}
+      },
+      {
+        "name": "config-wizard",
+        "description": "Config Wizard",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "invitation-reservations",
+        "description": "Bounded ORISO task capability: invitation-reservations",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "notification-dispatch",
+        "description": "Bounded ORISO task capability: notification-dispatch",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "notifications-technical",
+        "description": "Bounded ORISO task capability: notifications-technical",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "system-email-delivery",
+        "description": "Bounded ORISO task capability: system-email-delivery",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "runtime-policy",
+        "description": "Bounded ORISO task capability: runtime-policy",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "matrix-agency",
+        "description": "Bounded ORISO task capability: matrix-agency",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "matrix-agency-provision",
+        "description": "Bounded ORISO task capability: matrix-agency-provision",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "appointment-sync",
+        "description": "Bounded ORISO task capability: appointment-sync",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "appointment-participant-cleanup",
+        "description": "Bounded ORISO task capability: appointment-participant-cleanup",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "account-provisioning",
+        "description": "Bounded ORISO task capability: account-provisioning",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "account-read",
+        "description": "Bounded ORISO task capability: account-read",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "account-maintenance",
+        "description": "Bounded ORISO task capability: account-maintenance",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "session-exchange",
+        "description": "Bounded ORISO task capability: session-exchange",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "smtp-sync",
+        "description": "Bounded ORISO task capability: smtp-sync",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "consultant-import",
+        "description": "Bounded consultant CSV importer",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
       }
     ],
     "client": {
@@ -559,15 +656,91 @@
       ]
     },
     {
-      "client": "backend-technical",
+      "client": "backend-config-wizard",
       "roles": [
-        "technical"
+        "config-wizard"
       ]
     },
     {
-      "client": "backend-admin",
+      "client": "backend-invite-reservations",
+      "roles": [
+        "invitation-reservations"
+      ]
+    },
+    {
+      "client": "backend-notification-dispatch",
+      "roles": [
+        "notification-dispatch",
+        "notifications-technical"
+      ]
+    },
+    {
+      "client": "backend-system-email-delivery",
+      "roles": [
+        "system-email-delivery"
+      ]
+    },
+    {
+      "client": "backend-runtime-policy",
+      "roles": [
+        "runtime-policy"
+      ]
+    },
+    {
+      "client": "backend-matrix-agency",
+      "roles": [
+        "matrix-agency",
+        "matrix-agency-provision"
+      ]
+    },
+    {
+      "client": "backend-appointment-sync",
+      "roles": [
+        "appointment-sync"
+      ]
+    },
+    {
+      "client": "backend-appointment-cleanup",
+      "roles": [
+        "appointment-participant-cleanup"
+      ]
+    },
+    {
+      "client": "backend-account-provisioning",
+      "roles": [
+        "account-provisioning",
+        "account-read"
+      ]
+    },
+    {
+      "client": "backend-account-maintenance",
+      "roles": [
+        "account-maintenance",
+        "account-read"
+      ]
+    },
+    {
+      "client": "backend-account-otp",
       "roles": [
         "otp-config-admin"
+      ]
+    },
+    {
+      "client": "backend-session-exchange",
+      "roles": [
+        "session-exchange"
+      ]
+    },
+    {
+      "client": "backend-smtp-sync",
+      "roles": [
+        "smtp-sync"
+      ]
+    },
+    {
+      "client": "backend-consultant-import",
+      "roles": [
+        "consultant-import"
       ]
     }
   ],
@@ -581,17 +754,7 @@
         ]
       }
     ],
-    "realm-management": [
-      {
-        "client": "backend-admin",
-        "roles": [
-          "manage-users",
-          "view-users",
-          "query-users",
-          "view-realm"
-        ]
-      }
-    ]
+    "realm-management": []
   },
   "clients": [
     {
@@ -921,7 +1084,7 @@
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": true,
+      "serviceAccountsEnabled": false,
       "publicClient": false,
       "frontchannelLogout": false,
       "protocol": "openid-connect",
@@ -961,7 +1124,7 @@
       "id": "cd244ea9-b6c1-45f9-986a-b9d6039359d8",
       "clientId": "backend-technical",
       "name": "backend-technical",
-      "enabled": true,
+      "enabled": false,
       "clientAuthenticatorType": "client-secret",
       "protocol": "openid-connect",
       "publicClient": false,
@@ -981,7 +1144,7 @@
       "id": "abb2340b-208d-4a9a-ba58-c57295e7f0f4",
       "clientId": "backend-admin",
       "name": "backend-admin",
-      "enabled": true,
+      "enabled": false,
       "clientAuthenticatorType": "client-secret",
       "protocol": "openid-connect",
       "publicClient": false,
@@ -996,6 +1159,644 @@
         "roles"
       ],
       "optionalClientScopes": []
+    },
+    {
+      "clientId": "backend-config-wizard",
+      "name": "backend-config-wizard",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-tenantservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "tenantservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-agencyservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "agencyservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-consultingtypeservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "consultingtypeservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-invite-reservations",
+      "name": "backend-invite-reservations",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-tenantservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "tenantservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-agencyservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "agencyservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-notification-dispatch",
+      "name": "backend-notification-dispatch",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-tenantservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "tenantservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-agencyservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "agencyservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-userservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "userservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-system-email-delivery",
+      "name": "backend-system-email-delivery",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-consultingtypeservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "consultingtypeservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-runtime-policy",
+      "name": "backend-runtime-policy",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-tenantservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "tenantservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-matrix-agency",
+      "name": "backend-matrix-agency",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-agencyservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "agencyservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-appointment-sync",
+      "name": "backend-appointment-sync",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-appointmentservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "appointmentservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-appointment-cleanup",
+      "name": "backend-appointment-cleanup",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-appointmentservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "appointmentservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-account-provisioning",
+      "name": "backend-account-provisioning",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-oriso-task-commands",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "oriso-task-commands",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-account-maintenance",
+      "name": "backend-account-maintenance",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-oriso-task-commands",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "oriso-task-commands",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-account-otp",
+      "name": "backend-account-otp",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-oriso-task-commands",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "oriso-task-commands",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-session-exchange",
+      "name": "backend-session-exchange",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-smtp-sync",
+      "name": "backend-smtp-sync",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-oriso-task-commands",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "oriso-task-commands",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-consultingtypeservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "consultingtypeservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "backend-consultant-import",
+      "name": "backend-consultant-import",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "task-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "audience-userservice",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "userservice",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "clientScopes": [
@@ -1567,20 +2368,9 @@
     }
   ],
   "defaultDefaultClientScopes": [
-    "email",
-    "role_list",
-    "profile",
-    "roles",
-    "web-origins",
-    "acr",
-    "app-custom"
+    "basic"
   ],
-  "defaultOptionalClientScopes": [
-    "offline_access",
-    "address",
-    "phone",
-    "microprofile-jwt"
-  ],
+  "defaultOptionalClientScopes": [],
   "browserSecurityHeaders": {
     "contentSecurityPolicyReportOnly": "",
     "xContentTypeOptions": "nosniff",
@@ -2491,12 +3281,10 @@
       "email": "technical@example.com",
       "disableableCredentialTypes": [],
       "requiredActions": [],
-      "realmRoles": [
-        "default-roles-online-beratung",
-        "technical"
-      ],
+      "realmRoles": [],
       "notBefore": 0,
-      "groups": []
+      "groups": [],
+      "clientRoles": {}
     },
     {
       "id": "2ede87a6-89ce-4883-9778-7a33d30797ac",
@@ -2507,18 +3295,8 @@
       "emailVerified": false,
       "disableableCredentialTypes": [],
       "requiredActions": [],
-      "realmRoles": [
-        "default-roles-online-beratung",
-        "otp-config-admin"
-      ],
-      "clientRoles": {
-        "realm-management": [
-          "manage-users",
-          "view-users",
-          "query-users",
-          "view-realm"
-        ]
-      },
+      "realmRoles": [],
+      "clientRoles": {},
       "notBefore": 0,
       "groups": []
     },
@@ -2549,36 +3327,212 @@
     {
       "id": "12316d09-a9da-41b9-a13e-ee2c515800b5",
       "username": "service-account-backend-technical",
-      "enabled": true,
+      "enabled": false,
       "emailVerified": false,
       "serviceAccountClientId": "backend-technical",
+      "realmRoles": [],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": [],
+      "clientRoles": {}
+    },
+    {
+      "id": "615a7bf8-3e12-40c7-a949-f88640acea8e",
+      "username": "service-account-backend-admin",
+      "enabled": false,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-admin",
+      "realmRoles": [],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": [],
+      "clientRoles": {}
+    },
+    {
+      "id": "db32b84a-8242-36d8-16c5-bd3c700e2f71",
+      "username": "service-account-backend-config-wizard",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-config-wizard",
       "realmRoles": [
-        "technical"
+        "config-wizard"
       ],
       "credentials": [],
       "requiredActions": [],
       "groups": []
     },
     {
-      "id": "615a7bf8-3e12-40c7-a949-f88640acea8e",
-      "username": "service-account-backend-admin",
+      "id": "e4bebe11-7f78-3bae-9c2f-3bd77c2f4e53",
+      "username": "service-account-backend-invite-reservations",
       "enabled": true,
       "emailVerified": false,
-      "serviceAccountClientId": "backend-admin",
+      "serviceAccountClientId": "backend-invite-reservations",
+      "realmRoles": [
+        "invitation-reservations"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "b73815be-e04e-48f8-b5c5-ea1a9a619c4e",
+      "username": "service-account-backend-notification-dispatch",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-notification-dispatch",
+      "realmRoles": [
+        "notification-dispatch",
+        "notifications-technical"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "8f07992f-6a13-3fd4-a098-e89a28090287",
+      "username": "service-account-backend-system-email-delivery",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-system-email-delivery",
+      "realmRoles": [
+        "system-email-delivery"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "e928c7d9-8eeb-22a8-69b7-00b27bde71b9",
+      "username": "service-account-backend-runtime-policy",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-runtime-policy",
+      "realmRoles": [
+        "runtime-policy"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "49d1623a-a524-397a-dae7-6db88c573dcd",
+      "username": "service-account-backend-matrix-agency",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-matrix-agency",
+      "realmRoles": [
+        "matrix-agency",
+        "matrix-agency-provision"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "eb33c32f-60c1-05af-bd6d-8c5391eb876a",
+      "username": "service-account-backend-appointment-sync",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-appointment-sync",
+      "realmRoles": [
+        "appointment-sync"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "c22f8db3-70d1-bdfa-2832-12c2577a95bc",
+      "username": "service-account-backend-appointment-cleanup",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-appointment-cleanup",
+      "realmRoles": [
+        "appointment-participant-cleanup"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "785d676e-5f3d-23e6-aca7-ef8d4fc6543c",
+      "username": "service-account-backend-account-provisioning",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-account-provisioning",
+      "realmRoles": [
+        "account-provisioning",
+        "account-read"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "ddd60758-8e6e-f4a6-4980-c8724f1ffd4d",
+      "username": "service-account-backend-account-maintenance",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-account-maintenance",
+      "realmRoles": [
+        "account-maintenance",
+        "account-read"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "ae874ebc-0318-df56-7661-2f7273912fc1",
+      "username": "service-account-backend-account-otp",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-account-otp",
       "realmRoles": [
         "otp-config-admin"
       ],
       "credentials": [],
       "requiredActions": [],
-      "groups": [],
-      "clientRoles": {
-        "realm-management": [
-          "manage-users",
-          "view-users",
-          "query-users",
-          "view-realm"
-        ]
-      }
+      "groups": []
+    },
+    {
+      "id": "c43f068b-5b61-983f-cd23-c029af95bb09",
+      "username": "service-account-backend-session-exchange",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-session-exchange",
+      "realmRoles": [
+        "session-exchange"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "29c6233d-90c7-db5b-45d8-055ab705d4c2",
+      "username": "service-account-backend-smtp-sync",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-smtp-sync",
+      "realmRoles": [
+        "smtp-sync"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "35744936-e80c-065f-eecd-d0ce5a84e03e",
+      "username": "service-account-backend-consultant-import",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-consultant-import",
+      "realmRoles": [
+        "consultant-import"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
     }
   ],
   "emailTheme": "oriso"
