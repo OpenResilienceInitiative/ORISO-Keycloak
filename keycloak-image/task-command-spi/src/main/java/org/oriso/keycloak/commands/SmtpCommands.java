@@ -3,12 +3,16 @@ package org.oriso.keycloak.commands;
 import static org.oriso.keycloak.commands.CommandValidation.*;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.core.Response;
 import java.util.*;
 import org.keycloak.connections.jpa.JpaConnectionProvider;
+import org.keycloak.email.EmailException;
+import org.keycloak.email.EmailSenderProvider;
 import org.keycloak.models.*;
 import org.oriso.keycloak.auth.*;
 
@@ -119,10 +123,30 @@ final class SmtpCommands {
     config.put("ssl", Boolean.toString(secure));
     config.put("starttls", Boolean.toString(!secure));
     config.put("auth", "true");
-    config.put("from", from.trim());
-    config.put("fromDisplayName", System.getenv().getOrDefault("EMAIL_BRANDING_NAME", "ORISO"));
+    try {
+      InternetAddress[] senders = InternetAddress.parse(from.trim(), true);
+      if (senders.length != 1 || senders[0].isGroup()) bad();
+      var sender = senders[0];
+      sender.validate();
+      String mailbox = sender.getAddress();
+      if (mailbox == null || mailbox.chars().filter(c -> c == '@').count() != 1) bad();
+      config.put("from", mailbox);
+      String personal = sender.getPersonal();
+      config.put(
+          "fromDisplayName",
+          personal == null || personal.isBlank()
+              ? System.getenv().getOrDefault("EMAIL_BRANDING_NAME", "ORISO")
+              : personal);
+    } catch (AddressException failure) {
+      bad();
+    }
     config.put("user", username);
     config.put("password", password);
+    try {
+      session.getProvider(EmailSenderProvider.class).validate(config);
+    } catch (EmailException failure) {
+      bad();
+    }
     return config;
   }
 

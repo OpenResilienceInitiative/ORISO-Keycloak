@@ -801,3 +801,29 @@ def verify_smtp_revisions(admin, check, request, path, token, smtp):
         200,
     )
     assert admin("")[1]["smtpServer"] == {}
+
+    formatted = dict(smtp, revision=4, globalSmtpFrom="Organisation <sender@example.org>")
+    check("SMTP formatted sender accepted", request(path, formatted, token, "PUT")[0], 200)
+    native = admin("")[1]["smtpServer"]
+    assert native["from"] == "sender@example.org", "native sender must be a mailbox, not a formatted header"
+    assert native["fromDisplayName"] == "Organisation", "configured sender display name must survive"
+    for sender in [
+        "first@example.org, second@example.org",
+        "broken <sender@example.org",
+        "sender",
+        "sender@example.org\r\nBcc: foreign@example.org",
+    ]:
+        check(
+            "SMTP invalid sender rejected",
+            request(path, dict(formatted, revision=5, globalSmtpFrom=sender), token, "PUT")[0],
+            400,
+        )
+        assert admin("")[1]["smtpServer"] == native, "invalid sender must not mutate current snapshot"
+    check(
+        "SMTP bare sender uses branding",
+        request(path, dict(smtp, revision=5), token, "PUT")[0],
+        200,
+    )
+    native = admin("")[1]["smtpServer"]
+    assert native["from"] == smtp["globalSmtpFrom"]
+    assert native["fromDisplayName"] == "Synthetic"
