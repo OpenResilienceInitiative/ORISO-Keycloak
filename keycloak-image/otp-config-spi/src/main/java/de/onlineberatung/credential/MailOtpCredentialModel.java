@@ -5,6 +5,7 @@ import static org.keycloak.util.JsonSerialization.writeValueAsString;
 import de.onlineberatung.otp.Otp;
 import java.io.IOException;
 import java.time.Clock;
+import java.util.List;
 import org.jetbrains.annotations.NotNull;
 import org.keycloak.credential.CredentialModel;
 import org.keycloak.util.JsonSerialization;
@@ -85,6 +86,30 @@ public class MailOtpCredentialModel extends CredentialModel {
 
     updateInternalModel();
     return this;
+  }
+
+  /** When the last code mails went out (epoch millis); null for a credential never mailed. */
+  public List<Long> getMailsSentAt() {
+    return credentialData.getMailsSentAt();
+  }
+
+  /** Replaces the stored code and records the mail history that comes with it. */
+  public MailOtpCredentialModel updateFrom(Otp otp, List<Long> mailsSentAt) {
+    credentialData.setMailsSentAt(mailsSentAt);
+    return updateFrom(otp);
+  }
+
+  /** Puts back a mail history, e.g. when the mail it recorded could not be sent. */
+  public MailOtpCredentialModel restoreMailsSentAt(List<Long> mailsSentAt) {
+    credentialData.setMailsSentAt(mailsSentAt);
+    updateInternalModel();
+    return this;
+  }
+
+  /** Whether the stored code can still be typed in: neither used nor expired. */
+  public boolean hasLiveCode(Clock clock) {
+    var code = secretData.getCode();
+    return code != null && !INVALIDATED.equals(code) && secretData.getExpiry() >= clock.millis();
   }
 
   public boolean isActive() {

@@ -4,7 +4,6 @@ import static java.time.Clock.systemDefaultZone;
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,7 +23,6 @@ import jakarta.ws.rs.core.Response;
 import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.authentication.AuthenticationFlowContext;
-import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.http.HttpRequest;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -106,8 +104,7 @@ public class OtpMailAuthenticatorTest {
     authenticator.authenticate(authFlow);
 
     var responseCaptor = ArgumentCaptor.forClass(Response.class);
-    verify(authFlow).failure(eq(AuthenticationFlowError.INVALID_CREDENTIALS),
-        responseCaptor.capture());
+    verify(authFlow).challenge(responseCaptor.capture());
     assertThat(responseCaptor.getValue().getStatus()).isEqualTo(400);
     var challenge = responseCaptor.getValue().readEntity(Challenge.class);
     assertThat(challenge.getOtpType()).isEqualTo(OtpType.EMAIL);
@@ -125,8 +122,7 @@ public class OtpMailAuthenticatorTest {
     authenticator.authenticate(authFlow);
 
     var responseCaptor = ArgumentCaptor.forClass(Response.class);
-    verify(authFlow).failure(eq(AuthenticationFlowError.INVALID_CREDENTIALS),
-        responseCaptor.capture());
+    verify(authFlow).challenge(responseCaptor.capture());
     assertThat(responseCaptor.getValue().getStatus()).isEqualTo(400);
     var challenge = responseCaptor.getValue().readEntity(Challenge.class);
     assertThat(challenge.getOtpType()).isEqualTo(OtpType.EMAIL);
@@ -146,8 +142,7 @@ public class OtpMailAuthenticatorTest {
     authenticator.authenticate(authFlow);
 
     var responseCaptor = ArgumentCaptor.forClass(Response.class);
-    verify(authFlow).failure(eq(AuthenticationFlowError.INTERNAL_ERROR),
-        responseCaptor.capture());
+    verify(authFlow).challenge(responseCaptor.capture());
     assertThat(responseCaptor.getValue().getStatus()).isEqualTo(500);
     verify(credentialService).invalidate(credentialModel, credentialContext);
   }

@@ -7,11 +7,11 @@ import static java.util.Objects.nonNull;
 import de.onlineberatung.credential.CredentialContext;
 import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
-import de.onlineberatung.mail.MailSendingException;
 import de.onlineberatung.otp.OtpMailSender;
+import de.onlineberatung.otp.OtpMailThrottle;
 import de.onlineberatung.otp.OtpService;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
+import java.time.Clock;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
@@ -24,7 +24,7 @@ import org.keycloak.services.messages.Messages;
  * Asks for an e-mail one-time code on the BROWSER login flow.
  *
  * <p>{@link OtpMailAuthenticator} does the same job for the direct grant, but it cannot be reused
- * here: it answers with a JSON body over {@code context.failure(...)}, which is what a token
+ * here: it answers with a JSON challenge body, which is what a token
  * request understands and what a browser cannot act on. A browser needs a page to type the code
  * into and a second request that carries it back, which is {@link #authenticate} and {@link
  * #action}. The verdict itself is shared through {@link MailOtpVerifier}.
@@ -44,19 +44,23 @@ public class OtpMailFormAuthenticator implements Authenticator {
 
   public static final String AUTHENTICATOR_ID = "email-form-authenticator";
 
-  private static final Logger logger = Logger.getLogger(OtpMailFormAuthenticator.class);
-
-  private final OtpService otpService;
   private final MailOtpCredentialService credentialService;
-  private final OtpMailSender mailSender;
   private final MailOtpVerifier verifier;
+  private final MailOtpIssuer issuer;
 
+  /** Cooldown and cap at their defaults; kept for callers that do not configure them. */
   public OtpMailFormAuthenticator(OtpService otpService,
       MailOtpCredentialService credentialService, OtpMailSender mailSender) {
-    this.otpService = otpService;
+    this(otpService, credentialService, mailSender,
+        OtpMailThrottle.fromConfig(Clock.systemDefaultZone(), null));
+  }
+
+  public OtpMailFormAuthenticator(OtpService otpService,
+      MailOtpCredentialService credentialService, OtpMailSender mailSender,
+      OtpMailThrottle throttle) {
     this.credentialService = credentialService;
-    this.mailSender = mailSender;
     this.verifier = new MailOtpVerifier(otpService, credentialService);
+    this.issuer = new MailOtpIssuer(otpService, credentialService, mailSender, throttle);
   }
 
   @Override
@@ -118,7 +122,8 @@ public class OtpMailFormAuthenticator implements Authenticator {
         // INVALID and NOT_PRESENT both mean "that code does not open this account".
         // A browser user who mistyped gets the form back; sending them to the
         // password screen for a typo would be its own bug report.
-        challengeAgain(context, Messages.INVALID_TOTP);
+        context.failureChallenge(AuthenticationFlowError.INVALID_CREDENTIALS,
+            context.form().setError(Messages.INVALID_TOTP).createLoginTotp());
     }
   }
 
@@ -129,31 +134,36 @@ public class OtpMailFormAuthenticator implements Authenticator {
 
   private void sendCodeAndShowForm(MailOtpCredentialModel credentialModel,
       CredentialContext credContext, AuthenticationFlowContext context, String errorKey) {
-    var emailAddress = credContext.getUser().getEmail();
-    if (isNull(emailAddress) || emailAddress.isBlank()) {
-      logger.warn("keycloak user with id " + credContext.getUser().getId()
-          + " has no email configured. Will use address from credentials instead");
-      emailAddress = credentialModel.getOtp().getEmail();
+    switch (issuer.issue(credentialModel, credContext).getResult()) {
+      case SENT:
+      case KEPT:
+        // Inside the cooldown the page comes back without a new mail; the code the user
+        // already has stays valid, so a reload cannot be used to get around the brake.
+        var form = context.form();
+        if (nonNull(errorKey)) {
+          form = form.setError(errorKey);
+        }
+        showCodeForm(context, form.createLoginTotp(), errorKey);
+        break;
+      case LIMIT_REACHED:
+        showCodeForm(context,
+            context.form().setError(Messages.ACCOUNT_TEMPORARILY_DISABLED_TOTP)
+                .createLoginTotp(), errorKey);
+        break;
+      default:
+        showCodeForm(context,
+            context.form().setError(Messages.COULD_NOT_PROCEED_WITH_AUTHENTICATION_REQUEST)
+                .createLoginTotp(), errorKey);
     }
+  }
 
-    var otp = otpService.createOtp(emailAddress);
-    credentialService.update(credentialModel.updateFrom(otp), credContext);
-
-    try {
-      mailSender.sendOtpCode(otp, credContext);
-      var form = context.form();
-      if (nonNull(errorKey)) {
-        form = form.setError(errorKey);
-      }
-      context.challenge(form.createLoginTotp());
-    } catch (MailSendingException e) {
-      // The stored code was already rotated to one nobody received; leaving it live
-      // would make the next attempt fail against a code that exists only here.
-      credentialService.invalidate(credentialModel, credContext);
-      logger.error("failed to send otp mail", e);
-      context.failure(AuthenticationFlowError.INTERNAL_ERROR,
-          context.form().setError(Messages.COULD_NOT_PROCEED_WITH_AUTHENTICATION_REQUEST)
-              .createLoginTotp());
+  private void showCodeForm(AuthenticationFlowContext context, Response form, String errorKey) {
+    if (Messages.EXPIRED_CODE.equals(errorKey)) {
+      // The replacement mail is a legitimate next step, but the submitted expired
+      // credential still failed. Count that verdict even if replacement delivery fails.
+      context.failureChallenge(AuthenticationFlowError.EXPIRED_CODE, form);
+    } else {
+      context.challenge(form);
     }
   }
 

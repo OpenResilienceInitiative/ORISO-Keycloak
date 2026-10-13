@@ -35,14 +35,17 @@
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": false,
   "editUsernameAllowed": false,
-  "bruteForceProtected": false,
+  "bruteForceProtected": true,
   "permanentLockout": false,
+  "maxTemporaryLockouts": 0,
+  "maxSecondaryAuthFailures": 0,
+  "bruteForceStrategy": "MULTIPLE",
   "maxFailureWaitSeconds": 900,
-  "minimumQuickLoginWaitSeconds": 60,
+  "minimumQuickLoginWaitSeconds": 5,
   "waitIncrementSeconds": 60,
   "quickLoginCheckMilliSeconds": 1000,
   "maxDeltaTimeSeconds": 43200,
-  "failureFactor": 30,
+  "failureFactor": 15,
   "roles": {
     "realm": [
       {
@@ -554,6 +557,18 @@
       "roles": [
         "offline_access"
       ]
+    },
+    {
+      "client": "backend-technical",
+      "roles": [
+        "technical"
+      ]
+    },
+    {
+      "client": "backend-admin",
+      "roles": [
+        "otp-config-admin"
+      ]
     }
   ],
   "clientScopeMappings": {
@@ -563,6 +578,17 @@
         "roles": [
           "manage-account",
           "view-groups"
+        ]
+      }
+    ],
+    "realm-management": [
+      {
+        "client": "backend-admin",
+        "roles": [
+          "manage-users",
+          "view-users",
+          "query-users",
+          "view-realm"
         ]
       }
     ]
@@ -930,6 +956,46 @@
         "configure": true,
         "manage": true
       }
+    },
+    {
+      "id": "cd244ea9-b6c1-45f9-986a-b9d6039359d8",
+      "clientId": "backend-technical",
+      "name": "backend-technical",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "roles"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "id": "abb2340b-208d-4a9a-ba58-c57295e7f0f4",
+      "clientId": "backend-admin",
+      "name": "backend-admin",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "roles"
+      ],
+      "optionalClientScopes": []
     }
   ],
   "clientScopes": [
@@ -2419,19 +2485,10 @@
       "id": "8294c392-e1e0-405b-ac2f-ba3043cbad3e",
       "createdTimestamp": 1609459200000,
       "username": "technical",
-      "enabled": true,
+      "enabled": false,
       "totp": false,
       "emailVerified": true,
       "email": "technical@example.com",
-      "credentials": [
-        {
-          "id": "tech-cred-1",
-          "type": "password",
-          "createdDate": 1609459200000,
-          "secretData": "{\"value\":\"qPbdCHYDbC8uElO7dO43u7nbFhhow5xv0nFUHFlS\",\"salt\":\"\",\"additionalParameters\":{}}",
-          "credentialData": "{\"hashIterations\":27500,\"algorithm\":\"pbkdf2-sha256\",\"additionalParameters\":{}}"
-        }
-      ],
       "disableableCredentialTypes": [],
       "requiredActions": [],
       "realmRoles": [
@@ -2445,7 +2502,7 @@
       "id": "2ede87a6-89ce-4883-9778-7a33d30797ac",
       "createdTimestamp": 1609459200000,
       "username": "svc-keycloak-admin",
-      "enabled": true,
+      "enabled": false,
       "totp": false,
       "emailVerified": false,
       "disableableCredentialTypes": [],
@@ -2488,6 +2545,40 @@
       },
       "notBefore": 0,
       "groups": []
+    },
+    {
+      "id": "12316d09-a9da-41b9-a13e-ee2c515800b5",
+      "username": "service-account-backend-technical",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-technical",
+      "realmRoles": [
+        "technical"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": []
+    },
+    {
+      "id": "615a7bf8-3e12-40c7-a949-f88640acea8e",
+      "username": "service-account-backend-admin",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "backend-admin",
+      "realmRoles": [
+        "otp-config-admin"
+      ],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": [],
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users",
+          "view-realm"
+        ]
+      }
     }
   ],
   "emailTheme": "oriso"
