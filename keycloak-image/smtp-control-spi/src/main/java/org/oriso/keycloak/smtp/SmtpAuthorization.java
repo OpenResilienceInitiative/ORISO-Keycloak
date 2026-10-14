@@ -73,8 +73,16 @@ final class SmtpAuthorization {
         || !Arrays.asList(token.getAudience()).contains("oriso-task-commands")
         || !AUDIENCES.containsAll(Arrays.asList(token.getAudience()))) denied();
     var expected = session.users().getServiceAccount(client);
-    if (expected == null || !subject.equals(expected.getId())
-        || user.getGroupsStream().findAny().isPresent()) denied();
+    if (expected == null || !subject.equals(expected.getId())) denied();
+    var memberships = user.getGroupsStream().limit(2).collect(Collectors.toList());
+    if (memberships.size() != 1) denied();
+    var technical = memberships.get(0);
+    var protectedAdmins = technical.getParent();
+    if (!"technical-identities".equals(technical.getName()) || protectedAdmins == null
+        || !"protected-admins".equals(protectedAdmins.getName())
+        || protectedAdmins.getParent() != null
+        || technical.getRoleMappingsStream().findAny().isPresent()
+        || protectedAdmins.getRoleMappingsStream().findAny().isPresent()) denied();
     var direct = user.getRoleMappingsStream().collect(Collectors.toList());
     if (direct.stream().anyMatch(role -> role.isClientRole() || role.isComposite())
         || !direct.stream().map(RoleModel::getName).collect(Collectors.toSet()).equals(ROLES)

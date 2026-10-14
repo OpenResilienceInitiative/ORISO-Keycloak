@@ -158,6 +158,7 @@ class SmtpControlPermissions(unittest.TestCase):
         roles = [self.admin("GET", "/roles/" + role) for role in ROLES]
         self.admin("POST", "/users/" + SUBJECT + "/role-mappings/realm", roles)
         self.admin("POST", "/clients/" + self.client + "/scope-mappings/realm", roles)
+        self.protected_parent, self.technical_group = self.prepare_protected_mail_membership()
 
     def token(self):
         status, response = call(self.base, "POST", "/realms/" + REALM + "/protocol/openid-connect/token",
@@ -165,6 +166,79 @@ class SmtpControlPermissions(unittest.TestCase):
                                  "client_secret": SECRET}, form=True)
         self.assertEqual(200, status)
         return response["access_token"]
+
+    def prepare_protected_mail_membership(self):
+        self.admin("POST", "/groups", {"name": "protected-admins"})
+        parent = self.admin("GET", "/group-by-path/protected-admins")["id"]
+        self.admin("POST", "/groups/" + parent + "/children", {"name": "technical-identities"})
+        group = self.admin("GET", "/group-by-path/protected-admins/technical-identities")["id"]
+        self.admin("PUT", "/users/" + SUBJECT + "/groups/" + group)
+        return parent, group
+
+    def test_real_canonical_protected_mail_can_apply_and_read_status(self):
+        parent, group = self.protected_parent, self.technical_group
+        self.assertEqual([group], [g["id"] for g in self.admin("GET", "/users/" + SUBJECT + "/groups")])
+        for gid in (parent, group):
+            self.assertEqual({}, self.admin("GET", "/groups/" + gid + "/role-mappings"))
+        status, result = self.smtp(PAYLOAD, proof(PAYLOAD))
+        self.assertEqual(200, status, result)
+        self.assertEqual({"revision": 1, "status": "APPLIED"}, result)
+        self.assertEqual("smtp.fixture.internal", self.admin("GET")["smtpServer"]["host"])
+        status, result = self.smtp(context=proof({}, "SMTP_STATUS"), method="GET")
+        self.assertEqual(200, status, result)
+        self.assertEqual({"revision": 1, "status": "APPLIED"}, result)
+
+    def assert_membership_refusal_preserves_revision(self, token):
+        before = self.admin("GET")["smtpServer"]
+        self.assertEqual(403, self.smtp(PAYLOAD, proof(PAYLOAD), token=token)[0])
+        self.assertEqual(403, self.smtp(context=proof({}, "SMTP_STATUS"), method="GET", token=token)[0])
+        self.assertEqual(before, self.admin("GET")["smtpServer"])
+
+    def assert_unconsumed_revision(self, token):
+        status, result = self.smtp(context=proof({}, "SMTP_STATUS"), method="GET", token=token)
+        self.assertEqual(200, status, result)
+        self.assertEqual({"revision": -1, "status": "NOT_APPLIED"}, result)
+
+    def test_missing_arbitrary_or_extra_membership_is_denied(self):
+        token = self.token()
+        membership = "/users/" + SUBJECT + "/groups/"
+        self.admin("DELETE", membership + self.technical_group)
+        self.assert_membership_refusal_preserves_revision(token)
+        self.admin("POST", "/groups", {"name": "arbitrary-mail-group"})
+        arbitrary = self.admin("GET", "/group-by-path/arbitrary-mail-group")["id"]
+        self.admin("PUT", membership + arbitrary)
+        self.assert_membership_refusal_preserves_revision(token)
+        self.admin("PUT", membership + self.technical_group)
+        self.assert_membership_refusal_preserves_revision(token)
+        self.admin("DELETE", membership + arbitrary)
+        self.assert_unconsumed_revision(token)
+
+    def test_group_and_ancestor_ambient_roles_are_denied_even_for_existing_mail_role(self):
+        token = self.token()
+        role = self.admin("GET", "/roles/smtp-sync")
+        for group in (self.technical_group, self.protected_parent):
+            with self.subTest(group=group):
+                path = "/groups/" + group + "/role-mappings/realm"
+                self.admin("POST", path, [role])
+                self.assert_membership_refusal_preserves_revision(token)
+                self.admin("DELETE", path, [role])
+                self.assert_unconsumed_revision(token)
+
+    def test_lookalike_membership_under_an_extra_ancestor_is_denied(self):
+        token = self.token()
+        self.admin("POST", "/groups", {"name": "unexpected-root"})
+        root = self.admin("GET", "/group-by-path/unexpected-root")["id"]
+        self.admin("POST", "/groups/" + root + "/children", {"name": "protected-admins"})
+        parent = self.admin("GET", "/group-by-path/unexpected-root/protected-admins")["id"]
+        self.admin("POST", "/groups/" + parent + "/children", {"name": "technical-identities"})
+        group = self.admin("GET", "/group-by-path/unexpected-root/protected-admins/technical-identities")["id"]
+        membership = "/users/" + SUBJECT + "/groups/"
+        self.admin("DELETE", membership + self.technical_group)
+        self.admin("PUT", membership + group)
+        self.assert_membership_refusal_preserves_revision(token)
+        self.admin("DELETE", membership + group)
+        self.admin("PUT", membership + self.technical_group)
+        self.assert_unconsumed_revision(token)
 
     def smtp(self, body=None, context=None, method="PUT", token=None, realm=REALM):
         return call(self.base, method, "/realms/" + realm + "/oriso-smtp-control/v1/smtp", body,

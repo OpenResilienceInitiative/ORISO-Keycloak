@@ -25,9 +25,13 @@ credentials. There is no forwarding or proxy to the stock Admin REST API.
 
 Both operations require a real Keycloak bearer token and an
 `X-ORISO-Task-Context` proof. Direct service-account subject, client, issuer,
-audience, role mappings and effective grants are checked at the receiver. Groups,
-composites, inherited defaults and all client-role grants are denied. The fixed
-MAIL role union is verified against both current model state and issued token.
+audience, role mappings and effective grants are checked at the receiver. MAIL
+must belong only to `/protected-admins/technical-identities`, matching the
+standalone Helm preparation. The leaf and its top-level parent must have no
+role mappings, including duplicate MAIL roles. Missing, arbitrary, additional or
+lookalike nested memberships are denied. Composites, inherited defaults and all
+client-role grants remain denied. The fixed MAIL role union is verified against
+both current model state and issued token. There is no groupless legacy fallback.
 
 The draft additionally requires the pinned Keycloak26.6.3 FGAP v2 schema. It
 evaluates the complete current native permission inventory with Keycloak's own
