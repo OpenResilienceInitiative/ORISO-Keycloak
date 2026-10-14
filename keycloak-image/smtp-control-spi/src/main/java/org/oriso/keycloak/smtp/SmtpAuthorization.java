@@ -12,12 +12,18 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.keycloak.authorization.common.DefaultEvaluationContext;
+import org.keycloak.authorization.common.KeycloakIdentity;
+import org.keycloak.authorization.fgap.AdminPermissionsSchema;
+import org.keycloak.authorization.permission.ResourcePermission;
+import org.keycloak.authorization.policy.evaluation.DecisionPermissionCollector;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RoleModel;
 import org.keycloak.services.Urls;
@@ -82,6 +88,7 @@ final class SmtpAuthorization {
     if (nativeRights.isRealmAdmin() || nativeRights.realm().canManageRealm()
         || nativeRights.realm().canViewRealm() || nativeRights.users().canManage()
         || nativeRights.users().canView() || nativeRights.users().canQuery()) denied();
+    requireNoNativePermissions(session, token);
     String secret = client.getSecret();
     if (secret == null || MessageDigest.isEqual(key, secret.getBytes(StandardCharsets.UTF_8))
         || MessageDigest.isEqual(encodedKey.getBytes(StandardCharsets.UTF_8),
@@ -89,6 +96,63 @@ final class SmtpAuthorization {
     String digest = digest(body);
     verify(proof, operation, method, realm.getId(), digest);
     return digest;
+  }
+
+  private static void requireNoNativePermissions(
+      KeycloakSession session, org.keycloak.representations.AccessToken token) {
+    try {
+      var realm = session.getContext().getRealm();
+      var schema = AdminPermissionsSchema.SCHEMA;
+      // This proposal supports the pinned v2 schema, never an uninspected v1 fallback.
+      if (!schema.isAdminPermissionsEnabled(realm)) denied();
+      var management = AdminPermissions.management(session, realm);
+      var authorization = management.authz();
+      var server = management.realmResourceServer();
+      if (authorization == null || server == null) denied();
+      var stores = authorization.getStoreFactory();
+      var inventory = new LinkedHashMap<String, ResourcePermission>();
+      Set<String> represented = new HashSet<>();
+      // Global type resources exist even without permissions. Target resource types
+      // come from the native scope policy, not Resource.getType() (which may be null).
+      for (var type : schema.getResourceTypes().values()) {
+        var resource = stores.getResourceStore().findByName(server, type.getType());
+        if (resource == null || !resource.getScopes().stream().map(scope -> scope.getName())
+            .collect(Collectors.toSet()).equals(type.getScopes())) denied();
+        inventory.put(type.getType() + ":" + resource.getId(),
+            new ResourcePermission(type.getType(), resource, resource.getScopes(), server));
+        represented.add(resource.getId());
+      }
+      for (var policy : stores.getPolicyStore().findByResourceServer(server)) {
+        if ("resource".equals(policy.getType())) denied();
+        if (!"scope".equals(policy.getType())) {
+          if (!policy.getScopes().isEmpty()) denied();
+          continue; // Native condition policies are evaluated by Keycloak itself.
+        }
+        var type = schema.getResourceTypes().get(policy.getResourceType());
+        if (type == null || policy.getResources().isEmpty() || policy.getScopes().isEmpty()
+            || !type.getScopes().containsAll(policy.getScopes().stream()
+                .map(scope -> scope.getName()).collect(Collectors.toSet()))) denied();
+        for (var resource : policy.getResources()) {
+          if (!resource.getScopes().stream().map(scope -> scope.getName())
+              .collect(Collectors.toSet()).equals(type.getScopes())) denied();
+          inventory.put(type.getType() + ":" + resource.getId(),
+              new ResourcePermission(type.getType(), resource, resource.getScopes(), server));
+          represented.add(resource.getId());
+        }
+      }
+      if (stores.getResourceStore().findByResourceServer(server).stream()
+          .anyMatch(resource -> !represented.contains(resource.getId()))) denied();
+      // Same identity, context, typed permission and native DecisionPermissionCollector
+      // path as Keycloak26.6.3 MgmtPermissions; no local policy/condition solver.
+      var context = new DefaultEvaluationContext(new KeycloakIdentity(token, session, realm), session);
+      var decisions = authorization.evaluators().from(inventory.values(), server, context)
+          .getDecision(server, null, DecisionPermissionCollector.class);
+      if (!decisions.results().isEmpty()) denied();
+    } catch (ForbiddenException failure) {
+      throw failure;
+    } catch (RuntimeException failure) {
+      throw new ForbiddenException("Native SMTP permission inventory is not verified");
+    }
   }
 
   private void verify(String proof, String operation, String method, String target, String digest) {

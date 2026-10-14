@@ -351,6 +351,83 @@ class SmtpControlPermissions(unittest.TestCase):
         self.assertEqual(403, self.smtp(PAYLOAD, proof(PAYLOAD), token=token)[0])
         self.assertEqual(before, self.admin("GET")["smtpServer"])
 
+    def test_target_scoped_native_user_power_invalidates_smtp_authorization(self):
+        self.admin("POST", "/users", {"username": "scoped-fgap-human", "enabled": True})
+        human = self.admin("GET", "/users?username=scoped-fgap-human&exact=true")[0]["id"]
+        self.install_scoped_native_permission("Users", human, ["manage"])
+        token = self.token()
+        status, _ = call(self.base, "PUT", "/admin/realms/" + REALM + "/users/" + human,
+                         {"firstName": "target-scoped-policy-control"}, token)
+        self.assertEqual(204, status)  # Target permission really works without a management role.
+        self.assertEqual("target-scoped-policy-control", self.admin("GET", "/users/" + human)["firstName"])
+        self.assert_native_grant_excludes_smtp(token)
+
+    def test_target_scoped_native_client_power_invalidates_smtp_authorization(self):
+        self.admin("POST", "/clients", {"clientId": "scoped-client-target", "enabled": True})
+        target = self.admin("GET", "/clients?clientId=scoped-client-target")[0]["id"]
+        self.install_scoped_native_permission("Clients", target, ["manage"])
+        token = self.token()
+        status, _ = call(self.base, "PUT", "/admin/realms/" + REALM + "/clients/" + target,
+                         {"name": "target-scoped-policy-control"}, token)
+        self.assertEqual(204, status)
+        self.assertEqual("target-scoped-policy-control", self.admin("GET", "/clients/" + target)["name"])
+        self.assert_native_grant_excludes_smtp(token)
+
+    def install_scoped_native_permission(self, resource_type, target, scopes):
+        client = self.admin("GET", "/clients?clientId=admin-permissions")[0]["id"]
+        path = "/clients/" + client + "/authz/resource-server"
+        condition = "unexpected-scoped-mail-power-" + resource_type
+        self.admin("POST", path + "/policy/user", {"name": condition,
+                   "logic": "POSITIVE", "users": [SUBJECT]})
+        created = self.admin("POST", path + "/permission/scope", {"name": "unexpected-scoped-mail-permission-" + resource_type,
+                   "resourceType": resource_type, "resources": [target],
+                   "scopes": scopes, "policies": [condition]})
+        permission = path + "/policy/" + created["id"]
+        self.native_permission_paths = getattr(self, "native_permission_paths", []) + [permission]
+        return permission
+
+    def test_target_scoped_native_group_power_invalidates_smtp_authorization(self):
+        self.admin("POST", "/groups", {"name": "scoped-group-target"})
+        group = self.admin("GET", "/groups?search=scoped-group-target")[0]["id"]
+        self.install_scoped_native_permission("Groups", group, ["view"])
+        token = self.token()
+        status, result = call(self.base, "GET", "/admin/realms/" + REALM + "/groups/" + group, token=token)
+        self.assertEqual(200, status)
+        self.assertEqual("scoped-group-target", result["name"])
+        self.assert_native_grant_excludes_smtp(token)
+
+    def test_target_scoped_native_role_power_invalidates_smtp_authorization(self):
+        self.admin("POST", "/users", {"username": "role-scope-human", "enabled": True})
+        human = self.admin("GET", "/users?username=role-scope-human&exact=true")[0]["id"]
+        self.admin("POST", "/roles", {"name": "scoped-role-target"})
+        role = self.admin("GET", "/roles/scoped-role-target")
+        user_permission = self.install_scoped_native_permission("Users", human, ["map-roles"])
+        self.install_scoped_native_permission("Roles", role["id"], ["map-role"])
+        token = self.token()
+        status, _ = call(self.base, "POST", "/admin/realms/" + REALM + "/users/" + human
+                         + "/role-mappings/realm", [role], token)
+        self.assertEqual(204, status)  # Native role mapping needs both component permissions.
+        self.assertIn(role["id"], [value["id"] for value in self.admin("GET", "/users/" + human + "/role-mappings/realm")])
+        self.admin("DELETE", user_permission)
+        self.native_permission_paths.remove(user_permission)
+        # Only the Roles component remains. The SMTP guard must still reject it.
+        self.assert_native_grant_excludes_smtp(token)
+
+    def assert_native_grant_excludes_smtp(self, token):
+        before = self.admin("GET")["smtpServer"]
+        self.assertEqual(403, self.smtp(PAYLOAD, proof(PAYLOAD), token=token)[0])
+        self.assertEqual(before, self.admin("GET")["smtpServer"])
+        # Privilege screening also denies metadata access; it cannot silently
+        # publish a status that looks like the configuration command succeeded.
+        self.assertEqual(403, self.smtp(context=proof({}, "SMTP_STATUS"), method="GET", token=token)[0])
+        # Remove only installer-injected fixture grants, then use the public
+        # status operation to prove denied control requests consumed no revision.
+        for permission in self.native_permission_paths:
+            self.admin("DELETE", permission)
+        status, result = self.smtp(context=proof({}, "SMTP_STATUS"), method="GET", token=token)
+        self.assertEqual(200, status)
+        self.assertEqual({"revision": -1, "status": "NOT_APPLIED"}, result)
+
     def test_idempotent_revisions_and_stale_replay_cannot_reactivate_smtp(self):
         first_proof = proof(PAYLOAD)
         self.assertEqual(200, self.smtp(PAYLOAD, first_proof)[0])

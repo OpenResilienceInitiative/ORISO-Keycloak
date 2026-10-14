@@ -29,6 +29,21 @@ audience, role mappings and effective grants are checked at the receiver. Groups
 composites, inherited defaults and all client-role grants are denied. The fixed
 MAIL role union is verified against both current model state and issued token.
 
+The draft additionally requires the pinned Keycloak26.6.3 FGAP v2 schema. It
+evaluates the complete current native permission inventory with Keycloak's own
+authorization engine: global and target-scoped Users, Clients, Groups and Roles,
+including their native scopes. Target types come from native scope-permission
+metadata; a target resource's type field alone is insufficient. Unsupported,
+missing or incomplete native inventory fails closed. The same native identity,
+evaluation context and typed permission path is used as `MgmtPermissions`; this
+does not implement a separate policy solver or enumerate human accounts.
+
+Rejecting SMTP when native powers exist does **not** revoke those powers. A
+privileged installer can still grant MAIL a native capability used through stock
+Admin APIs. Production policy inventory and real native API denials remain
+separate activation gates. The receiving check proves only that this SMTP
+resource refuses a currently privileged actor.
+
 ## One context key, distinct purposes
 
 The draft uses the sole managed `ORISO_TASK_CONTEXT_KEY` (base64, at least 32
