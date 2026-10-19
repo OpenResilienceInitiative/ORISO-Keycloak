@@ -7,6 +7,7 @@ import static java.util.Objects.nonNull;
 import de.onlineberatung.credential.CredentialContext;
 import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
+import de.onlineberatung.otp.OtpFailureLockout;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpMailThrottle;
 import de.onlineberatung.otp.OtpService;
@@ -48,19 +49,27 @@ public class OtpMailFormAuthenticator implements Authenticator {
   private final MailOtpVerifier verifier;
   private final MailOtpIssuer issuer;
 
-  /** Cooldown and cap at their defaults; kept for callers that do not configure them. */
+  /** Cooldown, cap and lockout at their defaults; kept for callers that do not configure them. */
   public OtpMailFormAuthenticator(OtpService otpService,
       MailOtpCredentialService credentialService, OtpMailSender mailSender) {
     this(otpService, credentialService, mailSender,
         OtpMailThrottle.fromConfig(Clock.systemDefaultZone(), null));
   }
 
+  /** Lockout at its defaults. */
   public OtpMailFormAuthenticator(OtpService otpService,
       MailOtpCredentialService credentialService, OtpMailSender mailSender,
       OtpMailThrottle throttle) {
+    this(otpService, credentialService, mailSender, throttle,
+        OtpFailureLockout.fromConfig(throttle.clock(), null));
+  }
+
+  public OtpMailFormAuthenticator(OtpService otpService,
+      MailOtpCredentialService credentialService, OtpMailSender mailSender,
+      OtpMailThrottle throttle, OtpFailureLockout lockout) {
     this.credentialService = credentialService;
-    this.verifier = new MailOtpVerifier(otpService, credentialService);
-    this.issuer = new MailOtpIssuer(otpService, credentialService, mailSender, throttle);
+    this.verifier = new MailOtpVerifier(otpService, credentialService, lockout);
+    this.issuer = new MailOtpIssuer(otpService, credentialService, mailSender, throttle, lockout);
   }
 
   @Override
@@ -102,7 +111,7 @@ public class OtpMailFormAuthenticator implements Authenticator {
       return;
     }
 
-    switch (verifier.verify(submittedCode, credentialModel, credContext)) {
+    switch (verifier.verify(submittedCode, credentialModel, credContext).getResult()) {
       case VALID:
         context.success();
         break;
@@ -149,6 +158,14 @@ public class OtpMailFormAuthenticator implements Authenticator {
         showCodeForm(context,
             context.form().setError(Messages.ACCOUNT_TEMPORARILY_DISABLED_TOTP)
                 .createLoginTotp(), errorKey);
+        break;
+      case LOCKED_OUT:
+        // The form would be a dead end: nothing typed into it can be accepted before the
+        // lockout ends. Keycloak's own "temporarily disabled" message is the closest the
+        // shared login theme has, and every theme already translates it.
+        context.failure(AuthenticationFlowError.ACCESS_DENIED,
+            context.form().setError(Messages.ACCOUNT_TEMPORARILY_DISABLED_TOTP)
+                .createLoginTotp());
         break;
       default:
         showCodeForm(context,

@@ -158,38 +158,115 @@ public class OtpMailAuthenticatorResendTest {
   }
 
   @Test
-  public void a_resend_request_does_not_revive_a_code_after_three_wrong_guesses() {
+  public void the_third_wrong_guess_locks_the_second_factor_and_says_for_how_long() {
     tokenRequest(null);
-    var code = fx.lastMailedCode();
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
       var wrongCode = tokenRequest("000000");
       assertThat(wrongCode.status).isEqualTo(401);
       assertThat(wrongCode.credentialFailure).isTrue();
     }
-    assertThat(tokenRequest(code).status).isEqualTo(429);
+
+    // The third wrong code is the last one the code tolerates, so the lockout starts with it
+    // and not one submission later: in between, a resend would hand out a fresh three.
+    var third = tokenRequest("000000");
+
+    assertThat(third.status).isEqualTo(429);
+    assertThat(third.credentialFailure).isTrue();
+    assertThat(third.challenge.getResendAvailableInSeconds()).isEqualTo(60);
+  }
+
+  @Test
+  public void a_resend_request_mails_nothing_while_the_lockout_runs() {
+    tokenRequest(null);
+    var code = fx.lastMailedCode();
+    for (int i = 0; i < 3; i++) {
+      tokenRequest("000000");
+    }
 
     fx.clock.advanceSeconds(5);
     var resend = tokenRequest(null);
 
+    // This is the whole point of the lockout. While it ran, a resend used to cost a mail
+    // instead of a wait, so three wrong guesses were a speed bump, not a limit.
     assertThat(fx.mailedCodes).hasSize(1);
-    assertThat(resend.challenge.getResendAvailableInSeconds()).isEqualTo(25);
+    assertThat(resend.status).isEqualTo(429);
+    assertThat(resend.credentialFailure).isTrue();
+    assertThat(resend.challenge.getResendAvailableInSeconds()).isEqualTo(55);
     assertThat(tokenRequest(code).status).isEqualTo(429);
   }
 
   @Test
-  public void a_permitted_resend_after_three_wrong_guesses_mails_a_code_that_works() {
+  public void once_the_lockout_has_passed_a_new_code_is_mailed_and_works() {
     tokenRequest(null);
     var deadCode = fx.lastMailedCode();
     for (int i = 0; i < 3; i++) {
       tokenRequest("000000");
     }
 
-    fx.clock.advanceSeconds(30);
+    fx.clock.advanceSeconds(60);
     tokenRequest(null);
 
     assertThat(fx.mailedCodes).hasSize(2);
     assertThat(tokenRequest(deadCode).status).isEqualTo(401);
     assertThat(tokenRequest(fx.lastMailedCode()).succeeded).isTrue();
+  }
+
+  @Test
+  public void the_second_lockout_is_the_next_step_of_the_ladder() {
+    tokenRequest(null);
+    for (int i = 0; i < 3; i++) {
+      tokenRequest("000000");
+    }
+    fx.clock.advanceSeconds(60);
+    tokenRequest(null);
+
+    for (int i = 0; i < 2; i++) {
+      assertThat(tokenRequest("000000").status).isEqualTo(401);
+    }
+    var third = tokenRequest("000000");
+
+    // 24 minutes, the second step. Guessing again right after a lockout has to cost more
+    // than the first time, or waiting it out is just part of the attack.
+    assertThat(third.status).isEqualTo(429);
+    assertThat(third.challenge.getResendAvailableInSeconds()).isEqualTo(1440);
+  }
+
+  @Test
+  public void a_correct_code_clears_the_ladder_so_the_next_lockout_starts_at_the_first_step() {
+    tokenRequest(null);
+    for (int i = 0; i < 3; i++) {
+      tokenRequest("000000");
+    }
+    fx.clock.advanceSeconds(60);
+    tokenRequest(null);
+    assertThat(tokenRequest(fx.lastMailedCode()).succeeded).isTrue();
+
+    fx.clock.advanceSeconds(31);
+    tokenRequest(null);
+    for (int i = 0; i < 2; i++) {
+      tokenRequest("000000");
+    }
+    var third = tokenRequest("000000");
+
+    // Someone who signs in successfully is not the attacker the ladder is aimed at.
+    assertThat(third.challenge.getResendAvailableInSeconds()).isEqualTo(60);
+  }
+
+  @Test
+  public void the_lockout_ladder_comes_from_the_authenticator_config() {
+    var config = new AuthenticatorConfigModel();
+    config.setAlias("email-otp-config");
+    config.setConfig(Map.of("length", "6", "ttl", "900",
+        "failureLockoutLadderSeconds", "120,300", "failureLockoutResetSeconds", "600"));
+    authenticator = new OtpMailAuthenticator(fx.otpService, fx.credentialService, fx.mailSender,
+        fx.defaultThrottle(), fx.lockoutFromConfig(config));
+
+    tokenRequest(null);
+    for (int i = 0; i < 2; i++) {
+      tokenRequest("000000");
+    }
+
+    assertThat(tokenRequest("000000").challenge.getResendAvailableInSeconds()).isEqualTo(120);
   }
 
   @Test
