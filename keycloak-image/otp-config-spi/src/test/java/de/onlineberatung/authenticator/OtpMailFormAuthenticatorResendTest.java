@@ -3,6 +3,7 @@ package de.onlineberatung.authenticator;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,6 +14,7 @@ import jakarta.ws.rs.core.Response;
 import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.authentication.AuthenticationFlowContext;
+import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.http.HttpRequest;
 
@@ -70,6 +72,37 @@ public class OtpMailFormAuthenticatorResendTest {
     assertThat(fx.mailedCodes).hasSize(5);
     verify(refused).challenge(any(Response.class));
     verify(refused, never()).failure(any(), any(Response.class));
+  }
+
+  @Test
+  public void three_wrong_codes_lock_the_browser_flow_and_reloading_mails_nothing() {
+    openCodePage();
+    for (int i = 0; i < 3; i++) {
+      submitCode("000000");
+    }
+
+    var reload = openCodePage();
+
+    // The same hole as on the app login: without this, the code page would hand out a new
+    // code with three fresh attempts the moment the old one was used up.
+    assertThat(fx.mailedCodes).hasSize(1);
+    verify(reload).failure(eq(AuthenticationFlowError.ACCESS_DENIED), any(Response.class));
+    verify(reload, never()).challenge(any(Response.class));
+  }
+
+  @Test
+  public void the_browser_flow_mails_again_once_the_lockout_has_passed() {
+    openCodePage();
+    for (int i = 0; i < 3; i++) {
+      submitCode("000000");
+    }
+
+    fx.clock.advanceSeconds(60);
+    var afterLockout = openCodePage();
+
+    assertThat(fx.mailedCodes).hasSize(2);
+    verify(afterLockout).challenge(any(Response.class));
+    verify(submitCode(fx.lastMailedCode())).success();
   }
 
   private AuthenticationFlowContext openCodePage() {

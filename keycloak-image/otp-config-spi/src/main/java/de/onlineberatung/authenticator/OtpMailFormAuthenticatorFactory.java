@@ -6,6 +6,7 @@ import de.onlineberatung.credential.MailOtpCredentialProviderFactory;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.mail.DefaultMailSender;
 import de.onlineberatung.otp.MemoryOtpService;
+import de.onlineberatung.otp.OtpFailureLockout;
 import de.onlineberatung.otp.OtpMailThrottle;
 import de.onlineberatung.otp.RandomDigitsCodeGenerator;
 import java.time.Clock;
@@ -82,6 +83,7 @@ public class OtpMailFormAuthenticatorFactory implements AuthenticatorFactory {
             ProviderConfigProperty.BOOLEAN_TYPE, true)
     ));
     properties.addAll(OtpMailThrottle.configProperties());
+    properties.addAll(OtpFailureLockout.configProperties());
     return properties;
   }
 
@@ -96,7 +98,8 @@ public class OtpMailFormAuthenticatorFactory implements AuthenticatorFactory {
     var otpService = new MemoryOtpService(generator, systemClock, authConfig);
     var mailSender = new DefaultMailSender();
     var throttle = OtpMailThrottle.fromConfig(systemClock, authConfig);
-    return new OtpMailFormAuthenticator(otpService, credentialService, mailSender, throttle);
+    var lockout = OtpFailureLockout.fromConfig(systemClock, authConfig);
+    return new OtpMailFormAuthenticator(otpService, credentialService, mailSender, throttle, lockout);
   }
 
   @Override

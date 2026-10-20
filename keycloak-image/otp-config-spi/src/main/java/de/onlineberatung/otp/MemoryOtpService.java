@@ -48,6 +48,11 @@ public class MemoryOtpService implements OtpService {
   }
 
   @Override
+  public int maxFailedValidations() {
+    return MAX_FAILED_VALIDATIONS;
+  }
+
+  @Override
   public ValidationResult validate(String currentCode, Otp storedOtp) {
     if (isNull(currentCode) || currentCode.isBlank()) {
       return ValidationResult.INVALID;

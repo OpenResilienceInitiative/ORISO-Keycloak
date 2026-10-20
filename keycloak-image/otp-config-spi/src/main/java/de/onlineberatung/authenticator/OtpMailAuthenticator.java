@@ -8,6 +8,7 @@ import de.onlineberatung.credential.CredentialContext;
 import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.keycloak_otp_config_spi.keycloakextension.generated.web.model.Challenge;
+import de.onlineberatung.otp.OtpFailureLockout;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpMailThrottle;
 import de.onlineberatung.otp.OtpService;
@@ -36,23 +37,31 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
   private static final String INTERNAL_ERROR = "internal_error";
 
   private static final String TOO_MANY_CODES = "Too many codes requested";
+  private static final String TOO_MANY_ATTEMPTS = "Maximal number of failed attempts reached";
 
   private final MailOtpCredentialService credentialService;
   private final MailOtpVerifier verifier;
   private final MailOtpIssuer issuer;
 
-  /** Cooldown and cap at their defaults; kept for callers that do not configure them. */
+  /** Cooldown, cap and lockout at their defaults; kept for callers that do not configure them. */
   public OtpMailAuthenticator(OtpService otpService, MailOtpCredentialService credentialService,
       OtpMailSender mailSender) {
     this(otpService, credentialService, mailSender,
         OtpMailThrottle.fromConfig(Clock.systemDefaultZone(), null));
   }
 
+  /** Lockout at its defaults. */
   public OtpMailAuthenticator(OtpService otpService, MailOtpCredentialService credentialService,
       OtpMailSender mailSender, OtpMailThrottle throttle) {
+    this(otpService, credentialService, mailSender, throttle,
+        OtpFailureLockout.fromConfig(throttle.clock(), null));
+  }
+
+  public OtpMailAuthenticator(OtpService otpService, MailOtpCredentialService credentialService,
+      OtpMailSender mailSender, OtpMailThrottle throttle, OtpFailureLockout lockout) {
     this.credentialService = credentialService;
-    this.verifier = new MailOtpVerifier(otpService, credentialService);
-    this.issuer = new MailOtpIssuer(otpService, credentialService, mailSender, throttle);
+    this.verifier = new MailOtpVerifier(otpService, credentialService, lockout);
+    this.issuer = new MailOtpIssuer(otpService, credentialService, mailSender, throttle, lockout);
   }
 
   @Override
@@ -100,10 +109,13 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
         context.challenge(challenge(Status.BAD_REQUEST, "Missing totp", outcome));
         break;
       case LIMIT_REACHED:
-        context.challenge(
-            Response.fromResponse(challenge(Status.TOO_MANY_REQUESTS, TOO_MANY_CODES, outcome))
-                .header(HttpHeaders.RETRY_AFTER, outcome.getResendAvailableInSeconds())
-                .build());
+        context.challenge(tooManyRequests(TOO_MANY_CODES, outcome.getResendAvailableInSeconds()));
+        break;
+      case LOCKED_OUT:
+        // Not a challenge: there is nothing the client can send that would help before the
+        // lockout ends, and a challenge invites it to try.
+        context.failure(AuthenticationFlowError.ACCESS_DENIED,
+            tooManyRequests(TOO_MANY_ATTEMPTS, outcome.getResendAvailableInSeconds()));
         break;
       default:
         context.challenge(errorResponse(Status.INTERNAL_SERVER_ERROR.getStatusCode(),
@@ -113,10 +125,28 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
 
   private static Response challenge(Status status, String description,
       MailOtpIssuer.Outcome outcome) {
+    return challenge(status, description, outcome.getResendAvailableInSeconds());
+  }
+
+  private static Response challenge(Status status, String description, long retryInSeconds) {
     var body = new Challenge().error(INVALID_GRANT_ERROR).errorDescription(description)
         .otpType(OtpType.EMAIL)
-        .resendAvailableInSeconds(Math.toIntExact(outcome.getResendAvailableInSeconds()));
+        .resendAvailableInSeconds(Math.toIntExact(retryInSeconds));
     return Response.status(status).entity(body).type(MediaType.APPLICATION_JSON_TYPE).build();
+  }
+
+  /**
+   * A 429 that says for how long, in the body and in the header.
+   *
+   * <p>The body field is what the login screen reads to name the wait; without it the only honest
+   * sentence it can show is "wait a few minutes", which is wrong by hours once the lockout ladder
+   * reaches its upper steps, and a person who comes back early extends their own lockout.
+   */
+  private static Response tooManyRequests(String description, long retryInSeconds) {
+    return Response.fromResponse(
+            challenge(Status.TOO_MANY_REQUESTS, description, retryInSeconds))
+        .header(HttpHeaders.RETRY_AFTER, retryInSeconds)
+        .build();
   }
 
   private void validateOtp(String otpRequest, MailOtpCredentialModel credentialModel,
@@ -125,7 +155,8 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
     // The verdict and its bookkeeping are shared with the browser-flow authenticator
     // (MailOtpVerifier); only the shape of the answer differs. What is left here is
     // the direct-grant answer: a JSON body a token client can read.
-    switch (verifier.verify(otpRequest, credentialModel, credContext)) {
+    var verdict = verifier.verify(otpRequest, credentialModel, credContext);
+    switch (verdict.getResult()) {
       case NOT_PRESENT:
         context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
             errorResponse(Status.UNAUTHORIZED.getStatusCode(),
@@ -143,8 +174,7 @@ public class OtpMailAuthenticator extends AbstractDirectGrantAuthenticator {
         break;
       case TOO_MANY_FAILED_ATTEMPTS:
         context.failure(AuthenticationFlowError.ACCESS_DENIED,
-            errorResponse(Status.TOO_MANY_REQUESTS.getStatusCode(),
-                INVALID_GRANT_ERROR, "Maximal number of failed attempts reached"));
+            tooManyRequests(TOO_MANY_ATTEMPTS, verdict.getRetryInSeconds()));
         break;
       case VALID:
         context.success();

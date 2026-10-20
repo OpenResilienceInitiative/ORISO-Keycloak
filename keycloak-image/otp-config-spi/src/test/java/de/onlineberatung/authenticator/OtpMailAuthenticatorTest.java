@@ -52,6 +52,9 @@ public class OtpMailAuthenticatorTest {
     when(httpRequest.getDecodedFormParameters()).thenReturn(decodedFormParams);
     mailSender = mock(OtpMailSender.class);
     otpService = mock(OtpService.class);
+    // A mock would answer 0, and then the first wrong code would already be the last
+    // one and start a lockout. The real service tolerates three.
+    when(otpService.maxFailedValidations()).thenReturn(3);
     realm = mock(RealmModel.class);
     when(authFlow.getRealm()).thenReturn(realm);
     session = mock(KeycloakSession.class);
