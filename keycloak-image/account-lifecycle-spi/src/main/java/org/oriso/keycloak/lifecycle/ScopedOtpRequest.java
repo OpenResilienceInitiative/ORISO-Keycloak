@@ -8,9 +8,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 record ScopedOtpRequest(String operation, String accountId, String operationId,
     String expectedState, JsonNode target, JsonNode otp, JsonNode body) {
   static ScopedOtpRequest parse(String operation, String accountId, JsonNode body) {
-    // Compiling diagnostic signature; positive wire assertions must fail before decoding is added.
-    bad();
-    return null;
+    if (!"otp.app-setup".equals(operation)) deny();
+    uuid(accountId);
+    fields(body, "target", "operationId", "expectedState", "otp");
+    var read = JSON.createObjectNode();
+    read.set("target", body.path("target"));
+    var checkedTarget = MaintenanceRequest.parse("read", accountId, read).target();
+    String operationId = uuid(text(body, "operationId", 36, false));
+    String state = text(body, "expectedState", 64, false);
+    hex(state);
+    var otp = body.path("otp");
+    fields(otp, "initialCode", "secret", "email");
+    String initialCode = text(otp, "initialCode", 8, false);
+    String secret = text(otp, "secret", 512, false);
+    if (!initialCode.matches("[0-9]{6,8}") || !secret.matches("[A-Z2-7]{16,512}")
+        || !otp.path("email").isNull()) bad();
+    return new ScopedOtpRequest(operation, accountId, operationId, state,
+        checkedTarget.deepCopy(), otp.deepCopy(), body.deepCopy());
   }
 
   @Override public String toString() {
