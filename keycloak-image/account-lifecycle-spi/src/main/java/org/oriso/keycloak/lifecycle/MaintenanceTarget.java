@@ -26,10 +26,14 @@ final class MaintenanceTarget {
   }
 
   JsonNode read(MaintenanceRequest request) {
-    // First vertical slice accepts only a UserService checked durable deletion workflow.
-    // Other domain and human origins remain closed until their actual caller/native tests exist.
+    return read(request, null, null);
+  }
+
+  JsonNode read(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer) {
+    // Domain deletion and independently native-verified ordinary self are separate authorities.
     var origin = request.target().path("origin");
-    if (!"DELETION".equals(origin.path("kind").asText())) deny();
+    boolean humanSelf = "SELF".equals(origin.path("kind").asText());
+    if (!("DELETION".equals(origin.path("kind").asText()) || humanSelf && policy != null)) deny();
     var realm = session.getContext().getRealm();
     if (realm.getComponentsStream(realm.getId(), "org.keycloak.storage.UserStorageProvider")
         .findAny().isPresent()) deny();
@@ -59,6 +63,7 @@ final class MaintenanceTarget {
     if (!scope.path("tenantId").equals(request.target().path("tenantId"))) deny();
     var expectedRoles = mappings.get(scope.path("initialGroup").asText());
     if (expectedRoles == null) deny();
+    if (humanSelf) policy.requireSelf(session, request, rawHumanBearer);
     var entity = em.find(UserEntity.class, request.accountId(), LockModeType.PESSIMISTIC_WRITE);
     if (entity == null) deny();
     em.refresh(entity);

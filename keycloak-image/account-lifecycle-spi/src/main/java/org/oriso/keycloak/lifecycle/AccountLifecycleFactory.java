@@ -73,10 +73,10 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   }
 
   // Both finite providers share exactly the same trusted configuration parser.
-  RealmResourceProvider createMaintenance(KeycloakSession session) {
+  RealmResourceProvider createMaintenance(KeycloakSession session, GeneralPolicy humanPolicy) {
     return authorization == null
         ? null
-        : new AccountMaintenanceResource(session, authorization, groups);
+        : new AccountMaintenanceResource(session, authorization, groups, humanPolicy);
   }
 
   public String getId() {

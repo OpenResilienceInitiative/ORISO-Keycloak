@@ -22,18 +22,21 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   private final KeycloakSession session;
   private final LifecycleAuthorization auth;
   private final MaintenanceTarget targets;
+  private final GeneralPolicy humanPolicy;
 
   AccountMaintenanceResource(KeycloakSession session, LifecycleAuthorization auth,
-      Map<String, Set<String>> mappings) {
+      Map<String, Set<String>> mappings, GeneralPolicy humanPolicy) {
     this.session = session;
     this.auth = auth;
+    this.humanPolicy = humanPolicy;
     this.targets = new MaintenanceTarget(session, auth, mappings);
   }
 
   @POST
   @Path("v1/accounts/{account}/read")
   public Response read(@PathParam("account") String account, byte[] raw,
-      @HeaderParam("X-ORISO-Task-Context") String proof) {
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String rawHumanBearer) {
     return guarded(() -> {
       var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
       var body = parse(raw);
@@ -41,7 +44,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "account.read", "POST",
           "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("read", account, body);
-      return Response.ok(targets.read(request)).header("Cache-Control", "no-store").build();
+      return Response.ok(targets.read(request, humanPolicy, rawHumanBearer)).header("Cache-Control", "no-store").build();
     });
   }
 
