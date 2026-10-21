@@ -1088,6 +1088,9 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         while time.time() <= deadline + 1:
             require_active("waiting-for-receiver-approval-expiry")
             time.sleep(0.2)
+        self.assertEqual(
+            409, call(self.base, "PUT", self.endpoint(approval), request, bearer)[0]
+        )
         status, expired = self.protected_machine_request("status", approval, query)
         after = self.admin("GET", "/users/count")
         type(self).expiry_observation = {

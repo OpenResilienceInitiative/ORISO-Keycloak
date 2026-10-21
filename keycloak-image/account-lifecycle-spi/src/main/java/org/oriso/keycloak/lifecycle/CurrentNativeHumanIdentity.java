@@ -55,11 +55,9 @@ public final class CurrentNativeHumanIdentity {
       currentClient(em, policy.realmId, rows.get(0).toString(), clientId, null);
     }
     if (!policy.subjects.containsAll(currentRoutineSubjects(em, policy.realmId).values())) deny();
-    for (String subject : policy.subjects) {
-      var rows = em.createNativeQuery("select ID from USER_ENTITY where REALM_ID = :realm and ID = :id for update")
-          .setParameter("realm", policy.realmId).setParameter("id", subject).getResultList();
-      if (rows.size() != 1) deny();
-    }
+    // Extras are permanent exact denials even when foreign-realm or deleted.
+    // Required current actors and every discovered current technical subject
+    // are checked independently; no configured deny entry grants authority.
     for (var subject : em.createNativeQuery("select ID from USER_ENTITY where REALM_ID = :realm and SERVICE_ACCOUNT_CLIENT_LINK is not null for update")
         .setParameter("realm", policy.realmId).getResultList()) if (!policy.subjects.contains(subject.toString())) deny();
     NativeCurrentGrants.read(em, policy.realmId, Set.of(), policy.groups);

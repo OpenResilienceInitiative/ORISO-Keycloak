@@ -53,6 +53,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     if (binding == null) deny();
     var human = CurrentHumanAuthorization.require(session, binding.policy());
     if (row != null && !"AUTHORIZED".equals(row.state)) conflict();
+    if (row != null && !Instant.parse(row.validUntil).isAfter(Instant.now())) conflict();
     var profile = validateScope(scope, binding, human);
     String requestJson = canonical(request);
     var requestBinding = JSON.createObjectNode();
@@ -273,7 +274,26 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         || !LifecycleAuthorization.equal(row.requestDigest, body.path("approvalRequestDigest").asText())
         || scopeDigest != null && !LifecycleAuthorization.equal(row.scopeDigest, scopeDigest)
         || attempt != null && !attempt.equals(row.boundAttemptId)) deny();
+    materializeAuthorizedExpiry(row, em);
     return result(row, 200);
+  }
+
+  private void materializeAuthorizedExpiry(ProtectedInvitationApproval row, EntityManager em) {
+    if (!"AUTHORIZED".equals(row.state) || Instant.parse(row.validUntil).isAfter(Instant.now())) return;
+    if (row.approvalReceipt == null || row.boundAttemptId != null || row.transitionReceipt != null) conflict();
+    row.state = "EXPIRED";
+    var transition = JSON.createObjectNode();
+    transition.put("realmId", row.realmId); transition.put("approvalId", row.approvalId);
+    transition.put("workflowId", row.workflowId); transition.put("inviteId", row.inviteId);
+    transition.put("authorizationRevision", row.authorizationRevision);
+    transition.put("scopeDigest", row.scopeDigest); transition.put("approvalRequestDigest", row.requestDigest);
+    transition.put("operation", "protected-invitation.expire"); transition.put("reason", "EXPIRED");
+    transition.put("state", "EXPIRED"); transition.put("actor", "RECEIVER");
+    transition.put("expiryId", UUID.randomUUID().toString());
+    transition.put("validUntil", row.validUntil); transition.put("expiredAt", Instant.now().toString());
+    transition.put("receipt", crypto.receipt("protected-approval-expire/v1", transition.deepCopy()));
+    row.transitionReceipt = canonical(transition);
+    em.flush();
   }
 
   private EntityManager lockedRealm() {
