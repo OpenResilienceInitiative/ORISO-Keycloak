@@ -25,6 +25,7 @@ WORKFLOW = ROOT / ".github/workflows/scenario-c-scoped-otp-proof.yml"
 POSITIVE = "test_otp_scoped.ScopedOtpRead.test_canonical_admin_current_self_reads_setup_without_native_grants"
 APP_POSITIVE = "test_otp_scoped.ScopedOtpRead.test_current_self_app_enrollment_retry_never_replaces_later_credentials"
 DELETE_POSITIVE = "test_otp_scoped.ScopedOtpRead.test_current_self_delete_retry_never_removes_a_later_enrollment"
+EMAIL_FINISH_POSITIVE = "test_otp_scoped.ScopedOtpRead.test_current_self_finishes_exact_native_pending_email_credential"
 
 
 def sources():
@@ -102,7 +103,7 @@ def units(report):
 
 
 def missing(report, status):
-    save(report, {"status": status, "executed": 0, "floor": 10, "failures": 0, "errors": 1, "skipped": 0, "accepted": False, "genuine_scoped_read_red": False, "genuine_scoped_app_setup_red": False, "source_manifest": sources()})
+    save(report, {"status": status, "executed": 0, "floor": 11, "failures": 0, "errors": 1, "skipped": 0, "accepted": False, "genuine_scoped_read_red": False, "genuine_scoped_app_setup_red": False, "source_manifest": sources()})
     root = ET.Element("testsuite", name="scoped-otp", tests="1", failures="0", errors="1", skipped="0")
     ET.SubElement(ET.SubElement(root, "testcase", classname="scoped-otp.fixture", name="not_executed"), "error", message=status)
     ET.ElementTree(root).write(report.with_suffix(".xml"), encoding="utf-8", xml_declaration=True)
@@ -133,8 +134,8 @@ def native(report):
         unittest.defaultTestLoader.loadTestsFromTestCase(test_otp_scoped.ScopedOtpRead),
         unittest.defaultTestLoader.loadTestsFromTestCase(legacy.LegacyOtpPermissions),
     ])
-    if suite.countTestCases() != 10:
-        raise ValueError("Exact scopedGET5 plus app3 plus delete1 plus legacy1 method inventory required")
+    if suite.countTestCases() != 11:
+        raise ValueError("Exact scopedGET5 plus app3 plus delete1 plus emailfinish1 plus legacy1 method inventory required")
     original = subprocess.run
 
     def bounded(args, *values, **options):
@@ -171,14 +172,16 @@ def native(report):
     failures = {case.id() for case, _ in result.failures}
     phases = test_otp_scoped.ScopedOtpRead.phase_receipts
     preconditions = any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "exact_three_audiences", "stock_native_denied", "actual_self_human", "committed_ordinary_target")) for x in phases)
-    red = bool(preconditions and failures == {POSITIVE} and POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 10 and any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
+    red = bool(preconditions and failures == {POSITIVE} and POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
     app_preconditions = any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "stock_native_denied", "actual_self_human", "committed_ordinary_target", "scoped_setup_read", "frozen_current_state", "reviewed_app_selector")) for x in phases)
-    app_red = bool(app_preconditions and failures == {APP_POSITIVE} and APP_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 10 and any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
+    app_red = bool(app_preconditions and failures == {APP_POSITIVE} and APP_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
     delete_preconditions = any(x.get("case") == DELETE_POSITIVE and x.get("phase") == "scoped-otp-delete-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "stock_native_denied", "actual_self_human", "committed_ordinary_target", "actual_prior_scoped_enrollment", "frozen_current_state")) for x in phases)
-    delete_red = bool(delete_preconditions and failures == {DELETE_POSITIVE} and DELETE_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 10 and any(x.get("case") == DELETE_POSITIVE and x.get("phase") == "scoped-otp-delete-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
+    delete_red = bool(delete_preconditions and failures == {DELETE_POSITIVE} and DELETE_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == DELETE_POSITIVE and x.get("phase") == "scoped-otp-delete-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
+    email_finish_preconditions = any(x.get("case") == EMAIL_FINISH_POSITIVE and x.get("phase") == "scoped-otp-email-finish-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "stock_native_denied", "actual_self_human", "committed_ordinary_target", "installer_owned_pending_fixture", "exact_one_inactive_native_credential", "frozen_current_state", "reviewed_email_finish_selector")) for x in phases)
+    email_finish_red = bool(email_finish_preconditions and failures == {EMAIL_FINISH_POSITIVE} and EMAIL_FINISH_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == EMAIL_FINISH_POSITIVE and x.get("phase") == "scoped-otp-email-finish-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
     stable = before == sources() and hashes == {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in jars.items()}
-    accepted = bool(stable and result.wasSuccessful() and result.testsRun == 10 and not result.skipped)
-    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 10, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "genuine_scoped_app_setup_red": app_red and stable, "genuine_scoped_delete_red": delete_red and stable, "accepted": accepted, "status": "GREEN" if accepted else "SCOPED_READ403_RED" if red and stable else "SCOPED_APP_SETUP403_RED" if app_red and stable else "SCOPED_DELETE403_RED" if delete_red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Original scopedGET5+app3+firstdelete1+defaultofflegacy1; other scoped routes/effects/User/SMTP/image/fullC remain open"})
+    accepted = bool(stable and result.wasSuccessful() and result.testsRun == 11 and not result.skipped)
+    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 11, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "genuine_scoped_app_setup_red": app_red and stable, "genuine_scoped_delete_red": delete_red and stable, "genuine_scoped_email_finish_red": email_finish_red and stable, "accepted": accepted, "status": "GREEN" if accepted else "SCOPED_READ403_RED" if red and stable else "SCOPED_APP_SETUP403_RED" if app_red and stable else "SCOPED_DELETE403_RED" if delete_red and stable else "SCOPED_EMAIL_FINISH403_RED" if email_finish_red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Original scopedGET5+app3+firstdelete1+emailfinish1+defaultofflegacy1; other scoped routes/effects/User/SMTP/image/fullC remain open"})
     print(json.dumps({"executed": result.testsRun, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "accepted": accepted, "genuine_scoped_read_red": red and stable}))
     return 0 if accepted else 1
 

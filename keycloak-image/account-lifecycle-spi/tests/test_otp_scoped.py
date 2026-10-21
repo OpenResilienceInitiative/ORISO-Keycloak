@@ -42,9 +42,9 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
 
     def remove_fixture_app_credentials(self):
         # Exact disposable target only. Cleanup after a failed positive preserves the failure
-        # while preventing its real MFA credential from changing later login preconditions.
+        # while preventing real fixture app/mail MFA from changing later login preconditions.
         for credential in self.admin("GET", "/users/" + self.account_id + "/credentials"):
-            if credential["type"] == "otp":
+            if credential["type"] in {"otp", "MAIL_OTP_CM"}:
                 self.admin("DELETE", "/users/" + self.account_id + "/credentials/" + credential["id"])
 
     def target(self):
@@ -156,8 +156,10 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         except HTTPError as error:
             status, raw = error.code, error.read()
             error.close()
-        self.phase("scoped-otp-app-setup-http" if operation == "otp.app-setup" else "scoped-otp-delete-http",
-                   status=status, expected_status=expected)
+        phase = {"otp.app-setup": "scoped-otp-app-setup-http",
+                 "otp.delete": "scoped-otp-delete-http",
+                 "otp.email-finish": "scoped-otp-email-finish-http"}[operation]
+        self.phase(phase, status=status, expected_status=expected)
         return status, json.loads(raw) if raw else None
 
     def test_current_self_app_enrollment_retry_never_replaces_later_credentials(self):
@@ -312,6 +314,51 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual(deleted, retried)
         self.assertTrue(self.scoped_read(human, target, 200)[1]["otpSetup"])
         self.phase("scoped-otp-delete-exact-retry", saved_receipt_equal=True, no_redelete=True)
+
+    def test_current_self_finishes_exact_native_pending_email_credential(self):
+        human, target = self.human(), self.target()
+        before = self.admin("GET", "/users/" + self.account_id)
+        existing = self.admin("GET", "/users/" + self.account_id + "/credentials")
+        self.assertFalse(any(c["type"] in {"otp", "MAIL_OTP_CM"} for c in existing))
+        credential_id, code = str(uuid.uuid4()), "937451"
+        now = int(time.time() * 1000)
+        pending = {"id": credential_id, "type": "MAIL_OTP_CM", "createdDate": now,
+                   "credentialData": canonical({"ttlInSeconds": 600, "email": "pending@fixture.invalid",
+                       "failedVerifications": 0, "active": False, "mailsSentAt": [],
+                       "lockedUntil": None, "lockoutLevel": 0}).decode(),
+                   "secretData": canonical({"code": code, "expiry": now + 600000}).decode()}
+        updated = dict(before)
+        updated["credentials"] = [pending]
+        self.admin("PUT", "/users/" + self.account_id, updated)
+        after = self.admin("GET", "/users/" + self.account_id)
+        for field in ["id", "username", "email", "firstName", "lastName", "enabled", "attributes", "requiredActions"]:
+            self.assertEqual(before.get(field), after.get(field))
+        credentials = self.admin("GET", "/users/" + self.account_id + "/credentials")
+        mail = [c for c in credentials if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail))
+        self.assertEqual(credential_id, mail[0]["id"])
+        self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        self.assertEqual(403, call(self.base, "GET", "/admin/realms/" + REALM
+                                  + "/users/" + self.account_id, token=self.token("ACCOUNT_ADMIN"))[0])
+        body = {"target": target, "operationId": str(uuid.uuid4()),
+                "expectedState": current["state"],
+                "otp": {"initialCode": code, "secret": None, "email": None}}
+        self.phase("scoped-otp-email-finish-preconditions", canonical_admin=True,
+                   stock_native_denied=True, actual_self_human=True, committed_ordinary_target=True,
+                   installer_owned_pending_fixture=True, exact_one_inactive_native_credential=True,
+                   frozen_current_state=True, reviewed_email_finish_selector=True)
+        status, result = self.scoped_mutation(human, body, "otp.email-finish", "POST", "setup-otp-mail", 201)
+        self.assertEqual(201, status)
+        self.assertEqual(201, result["status"])
+        self.assertEqual(body["operationId"], result["operationId"])
+        mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials")
+                if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail))
+        self.assertEqual(credential_id, mail[0]["id"])
+        self.assertTrue(json.loads(mail[0]["credentialData"])["active"])
+        self.phase("scoped-otp-email-finish-effect", exact_native_credential_activated=True)
 
     def test_create_actor_cannot_read_setup(self):
         self.assertEqual(403, self.scoped_read(self.human(), self.target(), 403,
