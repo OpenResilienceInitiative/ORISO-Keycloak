@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 9:
+        if discovered != 10:
             raise AssertionError(
-                "Exactly nine protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read cases required"
+                "Exactly ten protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit cases required"
             )
 
         def deadline(signum, frame):
@@ -346,6 +346,7 @@ def main():
                 "createObservation": getattr(fixture, "create_observation", None),
                 "ownedReadObservation": getattr(fixture, "read_observation", None),
                 "ownedReadProofControls": getattr(fixture, "read_proof_controls", []),
+                "commitObservation": getattr(fixture, "commit_observation", None),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -411,8 +412,54 @@ def main():
             and len(summary["ownedReadProofControls"]) == 16
             and len({v["control"] for v in summary["ownedReadProofControls"]}) == 16
             and all(v["status"] == 403 for v in summary["ownedReadProofControls"])
+            and (summary["commitObservation"] or {}).get("actualStatus") == 200
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and observation.get("actualStatus") == 201
+            and observation.get("noAccountCreated") is True
+            and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
+            and (summary["createObservation"] or {}).get("actualStatus") == 201
+            and summary["createObservation"].get("oneAccountCreated") is True
+            and (summary["ownedReadObservation"] or {}).get("actualStatus") == 200
+            and len(summary["ownedReadProofControls"]) == 16
+            and all(v["status"] == 403 for v in summary["ownedReadProofControls"])
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["commitObservation"] or {}).get("actualStatus") in (404, 405)
+            and summary["commitObservation"].get("expectedStatus") == 200
+            and all(
+                summary["commitObservation"].get(key) is True
+                for key in (
+                    "sourceLiveApprovalAndCreateSucceeded",
+                    "nativePendingAccountValidated",
+                    "nativeCreatorSubjectRolesAndAudiencesMatched",
+                    "exactStoredApprovalAndCreationProof",
+                    "originalCommitDigestPredispatch",
+                    "accountCountUnchanged",
+                    "nativeAccountUnchanged",
+                    "nativeMembershipUnchanged",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_protected_commit_consumes_once_and_returns_bound_immutable_receipts"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = "GENUINE_PROTECTED_COMMIT_COUNTERFACTUAL_RED"
         elif (
             valid_preconditions
             and valid_controls

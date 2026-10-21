@@ -51,6 +51,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.create_observation = None
         cls.read_observation = None
         cls.read_proof_controls = []
+        cls.commit_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -372,6 +373,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             "Native fixture privileged configuration mismatch",
         )
         cls.configuration_checked = True
+        cls.native_configured_profiles = copy.deepcopy(configuration["profiles"])
         cls.phase = "configured-native-ready"
 
     @classmethod
@@ -995,6 +997,247 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
                 self.assertEqual(403, status)
         self.assertEqual(before, self.admin("GET", "/users/" + opened["accountId"]))
         self.assertEqual(count, self.admin("GET", "/users/count"))
+
+    def verified_receipt(self, receipt, domain, bound, fields):
+        self.assertIsInstance(receipt, str)
+        self.assertLessEqual(len(receipt.encode("utf-8")), bound)
+        self.assertEqual(1, receipt.count("."))
+        encoded, signature = receipt.split(".")
+        self.assertEqual(64, len(signature))
+        self.assertTrue(all(c in "0123456789abcdef" for c in signature))
+        expected = hmac.new(
+            CONTEXT_KEY, (domain + "\n" + encoded).encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        self.assertTrue(hmac.compare_digest(expected, signature))
+        value = json.loads(
+            base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        )
+        self.assertIsInstance(value, dict)
+        self.assertEqual(set(fields), set(value))
+        self.assertEqual(
+            encoded, base64.urlsafe_b64encode(canonical(value)).decode().rstrip("=")
+        )
+        return value
+
+    def test_protected_commit_consumes_once_and_returns_bound_immutable_receipts(self):
+        approval, attempt, scope, approved, create = self.approved_creation()
+        status, opened = self.protected_machine_request(
+            "create", approval, create, actor="ACCOUNT_CREATE", attempt=attempt
+        )
+        self.assertEqual(201, status)
+        self.assertEqual("OPEN", opened["state"])
+        account = opened["accountId"]
+        before = self.admin("GET", "/users/" + account)
+        self.assertFalse(before["enabled"])
+        groups = self.admin("GET", "/users/" + account + "/groups")
+        self.assertEqual(["/pending-provisioning"], [v["path"] for v in groups])
+        self.assertEqual(
+            [], self.admin("GET", "/users/" + account + "/role-mappings/realm")
+        )
+        count = self.admin("GET", "/users/count")
+        commit = {
+            key: create[key]
+            for key in (
+                "approvalReceipt",
+                "scopeDigest",
+                "authorizationRevision",
+                "creationFingerprint",
+                "execution",
+            )
+        }
+        commit.update(
+            accountId=account,
+            creationProof=opened["creationProof"],
+            localCommit={
+                "journalVersion": 1,
+                "outboxId": str(uuid.uuid4()),
+                "effectsDigest": "a" * 64,
+            },
+        )
+        self.assertLessEqual(len(canonical(commit)), 65536)
+        self.assertLessEqual(len(commit["creationProof"].encode()), 16384)
+        original_digest = mac("protected-invitation-payload/v1", commit)
+        type(self).phase = "protected-first-commit-http"
+        status, terminal = self.protected_machine_request(
+            "commit", approval, commit, actor="ACCOUNT_CREATE", attempt=attempt
+        )
+        type(self).commit_observation = {
+            "actualStatus": status,
+            "expectedStatus": 200,
+            "sourceLiveApprovalAndCreateSucceeded": True,
+            "nativePendingAccountValidated": True,
+            "nativeCreatorSubjectRolesAndAudiencesMatched": True,
+            "exactStoredApprovalAndCreationProof": True,
+            "originalCommitDigestPredispatch": True,
+            "accountCountUnchanged": count == self.admin("GET", "/users/count"),
+            "nativeAccountUnchanged": before == self.admin("GET", "/users/" + account),
+            "nativeMembershipUnchanged": groups
+            == self.admin("GET", "/users/" + account + "/groups"),
+        }
+        self.assertEqual(200, status)
+        self.assertEqual("COMMITTED", terminal["state"])
+        self.assertEqual(account, terminal["accountId"])
+        self.assertEqual(opened["execution"], terminal["execution"])
+        self.assertEqual(opened["creationProof"], terminal["creationProof"])
+        self.assertTrue(self.admin("GET", "/users/" + account)["enabled"])
+        self.assertEqual(
+            [self.protected_group_id],
+            [v["id"] for v in self.admin("GET", "/users/" + account + "/groups")],
+        )
+        self.assertEqual(
+            {"agency-admin", "tenant-admin"},
+            {
+                v["name"]
+                for v in self.admin(
+                    "GET", "/users/" + account + "/role-mappings/realm/composite"
+                )
+            },
+        )
+        self.assertEqual(
+            [], self.admin("GET", "/users/" + account + "/role-mappings/realm")
+        )
+        native = self.verified_receipt(
+            terminal["terminalReceipt"],
+            "terminal-receipt",
+            16000,
+            {
+                "realmId",
+                "attemptId",
+                "accountId",
+                "ownerClient",
+                "ownerSubject",
+                "scope",
+                "creationFingerprint",
+                "groupId",
+                "roleFingerprint",
+                "state",
+                "generation",
+                "executionId",
+                "operation",
+                "commandDigest",
+            },
+        )
+        self.assertEqual(self.realm_id, native["realmId"])
+        self.assertEqual(attempt, native["attemptId"])
+        self.assertEqual(account, native["accountId"])
+        self.assertEqual(ACTORS["ACCOUNT_CREATE"][0], native["ownerClient"])
+        self.assertEqual(SUBJECTS["ACCOUNT_CREATE"], native["ownerSubject"])
+        self.assertEqual("COMMITTED", native["state"])
+        self.assertEqual("commit", native["operation"])
+        self.assertEqual(original_digest, native["commandDigest"])
+        self.assertEqual(create["creationFingerprint"], native["creationFingerprint"])
+        self.assertEqual(self.protected_group_id, native["groupId"])
+        self.assertEqual(
+            mac("protected-initial-profile/v1", self.native_configured_profiles[0]),
+            native["roleFingerprint"],
+        )
+        self.assertEqual(create["execution"]["generation"], native["generation"])
+        self.assertEqual(create["execution"]["executionId"], native["executionId"])
+        self.assertIsInstance(native["scope"], str)
+        nested = json.loads(native["scope"])
+        self.assertEqual(canonical(nested).decode(), native["scope"])
+        self.assertEqual("PLATFORM_ADMIN", nested["registrationKind"])
+        self.assertEqual("0", nested["tenantId"])
+        self.assertEqual(
+            {
+                "approvalId": approval,
+                "scopeDigest": approved["scopeDigest"],
+                "authorizationRevision": 1,
+                "acceptanceClaim": create["acceptanceClaim"],
+            },
+            nested["approvalBinding"],
+        )
+        self.assertEqual(HUMAN, nested["origin"]["humanSubject"])
+        query = {
+            "scopeDigest": approved["scopeDigest"],
+            "workflowId": scope["workflowId"],
+            "inviteId": scope["inviteId"],
+            "authorizationRevision": 1,
+            "attemptId": attempt,
+            "approvalRequestDigest": approved["approvalRequestDigest"],
+        }
+        status, consumed = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual("CONSUMED", consumed["state"])
+        self.assertEqual(approved["approvalReceipt"], consumed["approvalReceipt"])
+        self.assertEqual(attempt, consumed["boundAttemptId"])
+        wrapper = consumed["transitionReceipt"]
+        self.assertLessEqual(len(canonical(wrapper)), 24000)
+        self.assertEqual(
+            {
+                "operation",
+                "state",
+                "approvalId",
+                "scopeDigest",
+                "boundAttemptId",
+                "accountId",
+                "terminalReceipt",
+                "receipt",
+            },
+            set(wrapper),
+        )
+        outer = self.verified_receipt(
+            wrapper["receipt"],
+            "protected-approval-consume/v1",
+            24000,
+            set(wrapper) - {"receipt"},
+        )
+        self.assertEqual({k: v for k, v in wrapper.items() if k != "receipt"}, outer)
+        self.assertEqual("protected-invitation.consume", outer["operation"])
+        self.assertEqual("CONSUMED", outer["state"])
+        self.assertEqual(approval, outer["approvalId"])
+        self.assertEqual(approved["scopeDigest"], outer["scopeDigest"])
+        self.assertEqual(attempt, outer["boundAttemptId"])
+        self.assertEqual(account, outer["accountId"])
+        self.assertEqual(terminal["terminalReceipt"], outer["terminalReceipt"])
+        # Even a saved terminal retry must authenticate its current machine/proof,
+        # then return before mutable native profile/expiry checks or account writes.
+        self.admin("PUT", "/users/" + account, {"enabled": False})
+        self.admin("DELETE", "/users/" + account + "/groups/" + self.protected_group_id)
+        self.admin(
+            "PUT",
+            "/groups/" + self.protected_group_id,
+            {"name": "temporarily-renamed-profile"},
+        )
+        try:
+            status, retry = self.protected_machine_request(
+                "commit", approval, commit, actor="ACCOUNT_CREATE", attempt=attempt
+            )
+            self.assertEqual(200, status)
+            self.assertEqual(terminal, retry)
+        finally:
+            self.admin(
+                "PUT", "/groups/" + self.protected_group_id, {"name": "platform-admins"}
+            )
+        self.assertFalse(self.admin("GET", "/users/" + account)["enabled"])
+        self.assertEqual([], self.admin("GET", "/users/" + account + "/groups"))
+        changed = copy.deepcopy(commit)
+        changed["localCommit"]["outboxId"] = str(uuid.uuid4())
+        self.assertEqual(
+            409,
+            self.protected_machine_request(
+                "commit", approval, changed, actor="ACCOUNT_CREATE", attempt=attempt
+            )[0],
+        )
+        oversized = copy.deepcopy(commit)
+        oversized["creationProof"] = "a" * 16385
+        self.assertEqual(
+            400,
+            self.protected_machine_request(
+                "commit", approval, oversized, actor="ACCOUNT_CREATE", attempt=attempt
+            )[0],
+        )
+        self.assertEqual(
+            403,
+            self.protected_machine_request(
+                "commit", approval, commit, actor="ACCOUNT_ADMIN", attempt=attempt
+            )[0],
+        )
+        self.assertEqual(
+            (200, consumed), self.protected_machine_request("status", approval, query)
+        )
+        self.assertEqual(count, self.admin("GET", "/users/count"))
+        self.assertFalse(self.admin("GET", "/users/" + account)["enabled"])
 
     def test_installer_routine_and_unbound_human_cannot_authorize_protected_scope(self):
         for actor in ACTORS:
