@@ -297,10 +297,18 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
       throw new jakarta.ws.rs.ClientErrorException("Current mail OTP credential conflicts", 409);
     }
     var credential = credentials.get(0);
-    if (otpService.validate(target.initialCode(), credential.getOtp()) != ValidationResult.VALID) {
+    var validation = otpService.validate(target.initialCode(), credential.getOtp());
+    if (validation != ValidationResult.VALID && validation != ValidationResult.INVALID) {
       throw new jakarta.ws.rs.ClientErrorException("Current mail OTP verification conflicts", 409);
     }
     target.bindEmailFinishCredential(credential);
+    if (validation == ValidationResult.INVALID) {
+      mailCredentialService.incrementFailedAttempts(
+          credential, context, credential.getOtp().getFailedVerifications());
+      // Return the refusal so its one attempt and the shared immutable receipt commit together.
+      return Response.status(Status.UNAUTHORIZED)
+          .entity(new Error().error(INVALID_GRANT_ERROR).errorDescription("Invalid code")).build();
+    }
     mailCredentialService.activate(credential, context);
     appCredentialService.deleteCredentials(context);
     return Response.status(Status.CREATED).entity(new Success().info("OTP setup created")).build();
