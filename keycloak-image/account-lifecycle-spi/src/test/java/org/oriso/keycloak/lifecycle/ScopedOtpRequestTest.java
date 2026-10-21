@@ -12,7 +12,8 @@ import org.junit.Test;
 public class ScopedOtpRequestTest {
   private static final String ID = "194b23de-93d9-4d1e-990f-4bf4c96b9dd8";
   private static final String OPERATION = "8c038518-f5e2-4557-9fa9-2698286b998c";
-  private static final String SECRET = "JBSWY3DPEHPK3PXP";
+  // Pinned HmacOTP.generateSecret uses a raw mixed-case alphanumeric key, then QR encodes it.
+  private static final String SECRET = "abcde0189ABCDEFGHIJKLMNOPQRSTUVW";
 
   @Test
   public void actualAppWireFieldsDecodeWithoutGenericNativeRepresentation() {
