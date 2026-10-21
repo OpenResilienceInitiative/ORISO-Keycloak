@@ -102,9 +102,17 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   jakarta.ws.rs.core.Response readOtpSelf(KeycloakSession session, String username,
       String targetHeader, String proofHeader, String humanHeader,
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> read) {
-    if (authorization == null || humanPolicy == null) LifecycleJson.deny();
+    if (authorization == null) LifecycleJson.deny();
     return ScopedOtpAccess.checkedSelfRead(session, authorization, groups, humanPolicy,
         username, targetHeader, proofHeader, humanHeader, read);
+  }
+
+  jakarta.ws.rs.core.Response appSetupOtpSelf(KeycloakSession session, String username,
+      byte[] raw, String proofHeader, String humanHeader,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> setup) {
+    if (authorization == null) LifecycleJson.deny();
+    return ScopedOtpAccess.checkedSelfAppSetup(session, authorization, groups, humanPolicy,
+        username, raw, proofHeader, humanHeader, setup);
   }
 
   public void close() {}

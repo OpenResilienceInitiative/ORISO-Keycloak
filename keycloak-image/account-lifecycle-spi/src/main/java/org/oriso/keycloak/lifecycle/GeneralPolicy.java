@@ -54,6 +54,11 @@ final class GeneralPolicy {
     return requireSelectedSelf(session, request, rawHumanBearer, "otp.read");
   }
 
+  OrdinaryHuman requireSelfOtpAppSetup(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
+    if (!"read".equals(request.command())) deny();
+    return requireSelectedSelf(session, request, rawHumanBearer, "otp.app-setup");
+  }
+
   private OrdinaryHuman requireSelectedSelf(KeycloakSession session, MaintenanceRequest request,
       String rawHumanBearer, String selectedOperation) {
     var origin = request.target().path("origin");

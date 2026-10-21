@@ -21,7 +21,7 @@ record ScopedOtpRequest(String operation, String accountId, String operationId,
     fields(otp, "initialCode", "secret", "email");
     String initialCode = text(otp, "initialCode", 8, false);
     String secret = text(otp, "secret", 512, false);
-    if (!initialCode.matches("[0-9]{6,8}") || !secret.matches("[A-Z2-7]{16,512}")
+    if (!initialCode.matches("[0-9]{6,8}") || !secret.matches("[A-Za-z0-9]{16,512}")
         || !otp.path("email").isNull()) bad();
     return new ScopedOtpRequest(operation, accountId, operationId, state,
         checkedTarget.deepCopy(), otp.deepCopy(), body.deepCopy());

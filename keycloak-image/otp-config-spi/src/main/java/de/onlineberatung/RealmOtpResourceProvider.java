@@ -117,7 +117,29 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("setup-otp/{username}")
   @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
-  public Response setupOtp(@PathParam("username") final String username, final OtpSetupDTO dto) {
+  public Response setupOtpRequest(@PathParam("username") final String username, final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfAppSetup(
+          session, username, raw,
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+            var dto = new OtpSetupDTO();
+            dto.setInitialCode(target.initialCode());
+            dto.setSecret(target.secret());
+            // The old native-power authentication barrier is retained for this wire-only slice.
+            // Actual scoped effects/immutable receipts are enabled only after its native RED.
+            return setupOtp(username, dto);
+          });
+    }
+    try {
+      return setupOtp(username, org.keycloak.util.JsonSerialization.readValue(raw, OtpSetupDTO.class));
+    } catch (java.io.IOException rejected) {
+      throw new jakarta.ws.rs.BadRequestException("Invalid OTP request");
+    }
+  }
+
+  public Response setupOtp(final String username, final OtpSetupDTO dto) {
     verifyAuthentication();
 
     final RealmModel realm = this.session.getContext().getRealm();
