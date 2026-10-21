@@ -2,6 +2,7 @@
 """Protected receiving HTTP seam. Synthetic fixture; missing setup is an error."""
 
 import base64
+import copy
 import hashlib
 import hmac
 import json
@@ -48,6 +49,8 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.absent_cancel_observation = None
         cls.expiry_observation = None
         cls.create_observation = None
+        cls.read_observation = None
+        cls.read_proof_controls = []
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -715,7 +718,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             proof=encoded + "." + signature,
         )
 
-    def test_protected_create_binds_live_approval_to_one_disabled_pending_account(self):
+    def approved_creation(self):
         approval, attempt = str(uuid.uuid4()), str(uuid.uuid4())
         scope = self.scope()
         status, approved = call(
@@ -751,6 +754,11 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             "account": account,
         }
         create["creationFingerprint"] = mac("protected-account-creation/v1", create)
+        return approval, attempt, scope, approved, create
+
+    def test_protected_create_binds_live_approval_to_one_disabled_pending_account(self):
+        approval, attempt, scope, approved, create = self.approved_creation()
+        account, receipt = create["account"], approved["approvalReceipt"]
         before = self.admin("GET", "/users/count")
         self.assertEqual(
             [],
@@ -817,6 +825,176 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         self.assertEqual(attempt, bound["boundAttemptId"])
         self.assertEqual(receipt, bound["approvalReceipt"])
         self.assertEqual(after, self.admin("GET", "/users/count"))
+
+    def test_protected_owned_read_requires_exact_receipt_and_original_wire_proof(self):
+        approval, attempt, scope, approved, create = self.approved_creation()
+        status, opened = self.protected_machine_request(
+            "create", approval, create, actor="ACCOUNT_CREATE", attempt=attempt
+        )
+        self.assertEqual(201, status)
+        self.assertEqual("OPEN", opened["state"])
+        before = self.admin("GET", "/users/" + opened["accountId"])
+        self.assertFalse(before["enabled"])
+        self.assertEqual(
+            ["/pending-provisioning"],
+            [
+                v["path"]
+                for v in self.admin("GET", "/users/" + opened["accountId"] + "/groups")
+            ],
+        )
+        count = self.admin("GET", "/users/count")
+        read = {
+            key: create[key]
+            for key in (
+                "approvalReceipt",
+                "scopeDigest",
+                "authorizationRevision",
+                "creationFingerprint",
+                "execution",
+            )
+        }
+        read.update(
+            {"accountId": opened["accountId"], "creationProof": opened["creationProof"]}
+        )
+        status, projection = self.protected_machine_request(
+            "owned-read", approval, read, actor="ACCOUNT_CREATE", attempt=attempt
+        )
+        type(self).read_observation = {
+            "actualStatus": status,
+            "expectedStatus": 200,
+            "sourceLiveApprovalAndCreateSucceeded": True,
+            "nativePendingAccountValidated": True,
+            "nativeCreatorSubjectRolesAndAudiencesMatched": True,
+            "exactStoredApprovalAndCreationProof": True,
+            "accountCountUnchanged": count == self.admin("GET", "/users/count"),
+            "nativeAccountUnchanged": before
+            == self.admin("GET", "/users/" + opened["accountId"]),
+        }
+        self.assertEqual(200, status)
+        self.assertEqual(
+            {
+                "id",
+                "username",
+                "email",
+                "firstName",
+                "lastName",
+                "tenantId",
+                "preferredLanguage",
+                "enabled",
+                "emailVerified",
+                "effectiveRoles",
+                "passwordChangeRequired",
+            },
+            set(projection),
+        )
+        self.assertEqual(opened["accountId"], projection["id"])
+        self.assertEqual(create["account"]["email"], projection["email"])
+        self.assertEqual("0", projection["tenantId"])
+        self.assertFalse(projection["enabled"])
+        self.assertTrue(projection["emailVerified"])
+        self.assertEqual([], projection["effectiveRoles"])
+        translated = {
+            "identity": {
+                "scope": {
+                    "tenantId": "0",
+                    "registrationKind": "PLATFORM_ADMIN",
+                    "initialGroup": "/protected-admins/platform-admins",
+                    "origin": {
+                        "kind": "INVITATION",
+                        "workflowId": scope["workflowId"],
+                        "provenance": "protected-approval-v1:" + approval,
+                        "humanIssuer": ISSUER,
+                        "humanSubject": HUMAN,
+                        "humanAuthority": "PLATFORM",
+                        "agencyIds": [],
+                    },
+                    "approvalBinding": {
+                        "approvalId": approval,
+                        "scopeDigest": create["scopeDigest"],
+                        "authorizationRevision": 1,
+                        "acceptanceClaim": create["acceptanceClaim"],
+                    },
+                },
+                "creationFingerprint": create["creationFingerprint"],
+            },
+            "execution": read["execution"],
+            "accountId": read["accountId"],
+            "creationProof": read["creationProof"],
+        }
+        controls = [
+            (
+                "wrong-purpose",
+                read,
+                {"claim_overrides": {"purpose": "INVITE_RESERVATIONS"}},
+            ),
+            ("translated-body-proof", read, {"proof_body": translated}),
+            (
+                "wrong-target",
+                read,
+                {
+                    "claim_overrides": {
+                        "target": "realm/"
+                        + self.realm_id
+                        + "/protected-invitation/"
+                        + str(uuid.uuid4())
+                        + "/account-attempt/"
+                        + attempt
+                    }
+                },
+            ),
+            (
+                "wrong-native-subject",
+                read,
+                {"claim_overrides": {"taskSubject": SUBJECTS["SETUP"]}},
+            ),
+            ("ordinary-proof-domain", read, {"proof_domain": "proof"}),
+            ("ordinary-payload-domain", read, {"payload_domain": "payload"}),
+            (
+                "expired-proof",
+                read,
+                {
+                    "claim_overrides": {
+                        "iat": int(time.time()) - 61,
+                        "exp": int(time.time()) - 1,
+                    }
+                },
+            ),
+        ]
+        for field, value in [
+            ("accountId", str(uuid.uuid4())),
+            (
+                "creationProof",
+                read["creationProof"][:-1]
+                + ("a" if read["creationProof"][-1] != "a" else "b"),
+            ),
+            ("scopeDigest", "0" * 64),
+        ]:
+            changed = copy.deepcopy(read)
+            changed[field] = value
+            controls.append(("changed-" + field, changed, {}))
+        changed = copy.deepcopy(read)
+        changed["approvalReceipt"]["issuerSubject"] = str(uuid.uuid4())
+        controls.append(("changed-human-receipt", changed, {}))
+        changed = copy.deepcopy(read)
+        changed["accountId"] = str(uuid.uuid4())
+        controls.append(
+            ("original-proof-different-wire-body", changed, {"proof_body": read})
+        )
+        for actor in ("ACCOUNT_ADMIN", "SETUP", "MAIL", "RUNTIME"):
+            controls.append(("wrong-native-actor-" + actor, read, {"actor": actor}))
+        self.assertEqual(16, len(controls))
+        for label, body, options in controls:
+            with self.subTest(control=label):
+                options = {"actor": "ACCOUNT_CREATE", **options}
+                status, _ = self.protected_machine_request(
+                    "owned-read", approval, body, attempt=attempt, **options
+                )
+                type(self).read_proof_controls.append(
+                    {"control": label, "status": status}
+                )
+                self.assertEqual(403, status)
+        self.assertEqual(before, self.admin("GET", "/users/" + opened["accountId"]))
+        self.assertEqual(count, self.admin("GET", "/users/count"))
 
     def test_installer_routine_and_unbound_human_cannot_authorize_protected_scope(self):
         for actor in ACTORS:
