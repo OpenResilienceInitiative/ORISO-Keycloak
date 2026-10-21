@@ -158,7 +158,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       String command, String attemptId, JsonNode neutralBody, String checkedActor,
       LifecyclePolicy policy) {
     // Each protected command is enabled only with its own public HTTP tracer.
-    if (policy == null || !Set.of("create", "owned-read").contains(command)
+    if (policy == null || !Set.of("create", "owned-read", "commit").contains(command)
         || !"ACCOUNT_CREATE".equals(checkedActor)) deny();
     return guarded(() -> execute(command, attemptId, neutralBody, checkedActor, policy));
   }
@@ -213,7 +213,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
         commit ? "localCommit" : "localCleanup");
     outcome(body.path(commit ? "localCommit" : "localCleanup"));
     owned(body, row);
-    String digest = auth.mac("payload", body);
+    String digest = policy == null ? auth.mac("payload", body) : policy.commandDigest();
     if (row.terminalOperation != null) {
       if (command.equals(row.terminalOperation)
           && LifecycleAuthorization.equal(digest, row.terminalDigest)) return result(row, 200);
@@ -221,11 +221,13 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     }
     if (commit) {
       if (!"OPEN".equals(row.state)) conflict();
-      var group = approvedGroup(realm, scope);
+      if (policy != null) policy.before("commit", row, em);
+      var group = policy == null ? approvedGroup(realm, scope) : policy.approvedGroup(realm);
       var pending = LifecycleGroups.pending(session, realm);
       var roles = mappings.get(scope.path("initialGroup").asText());
       if (!group.getId().equals(row.groupId)
-          || !auth.mac("initial-roles", JSON.valueToTree(new TreeSet<>(roles)))
+          || !(binding == null ? auth.mac("initial-roles", JSON.valueToTree(new TreeSet<>(roles)))
+                  : binding.roleFingerprint())
               .equals(row.roleFingerprint)) conflict();
       var user = integrity(row, realm, pending);
       if (user == null) conflict();
@@ -256,6 +258,10 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     row.terminalDigest = digest;
     if (row.terminalReceipt == null)
       row.terminalReceipt = auth.receipt("terminal-receipt", receipt(row, command, digest));
+    if (policy != null) {
+      if (row.terminalReceipt.getBytes(StandardCharsets.UTF_8).length > 16000) bad();
+      policy.after(command, row, em);
+    }
     em.flush();
     return result(row, 200);
   }

@@ -51,13 +51,22 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     return guarded(() -> accountCommand("owned-read", approval, attempt, raw, proof));
   }
 
+  @POST
+  @Path("v1/approvals/{approval}/attempts/{attempt}/commit")
+  public Response commit(@PathParam("approval") String approval, @PathParam("attempt") String attempt,
+      byte[] raw, @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> accountCommand("commit", approval, attempt, raw, proof));
+  }
+
   private Response accountCommand(String command, String approval, String attempt, byte[] raw, String proof) {
-    if (!Set.of("create", "owned-read").contains(command)) deny();
+    if (!Set.of("create", "owned-read", "commit").contains(command)) deny();
     boolean create = "create".equals(command);
     uuid(approval); uuid(attempt);
     var body = parse(raw);
     if (create) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "acceptanceClaim",
         "execution", "account", "creationFingerprint");
+    else if ("commit".equals(command)) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
+        "execution", "accountId", "creationProof", "localCommit");
     else fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
         "execution", "accountId", "creationProof");
     var em = lockedRealm();
@@ -124,6 +133,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     else {
       translated.set("accountId", body.path("accountId").deepCopy());
       translated.set("creationProof", body.path("creationProof").deepCopy());
+      if ("commit".equals(command)) translated.set("localCommit", body.path("localCommit").deepCopy());
     }
     var binding = new AccountLifecycleResource.LifecycleBinding(attemptKey, machine.clientId(), machine.subject(),
         internalScope, fingerprint, text(frozenProfile, "groupId", 255, false),
@@ -168,7 +178,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     public String commandDigest() { return originalCommandDigest; }
 
     public void before(String command, AccountLifecycleAttempt current, EntityManager em) {
-      if (!Set.of("create", "owned-read").contains(command)
+      if (!Set.of("create", "owned-read", "commit").contains(command)
           || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if (current == null) {
         if (!"create".equals(command) || !"AUTHORIZED".equals(approval.state) || approval.boundAttemptId != null) conflict();
@@ -176,11 +186,28 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     }
 
     public void after(String command, AccountLifecycleAttempt current, EntityManager em) {
-      if (!"create".equals(command) || current == null || !"OPEN".equals(current.state)
-          || current.accountId == null || !"AUTHORIZED".equals(approval.state)
-          || approval.boundAttemptId != null || !attempt.equals(current.attemptId)
+      if (current == null || current.accountId == null || !attempt.equals(current.attemptId)
+          || !binding.rowId().equals(current.id) || !binding.ownerClient().equals(current.ownerClient)
+          || !binding.ownerSubject().equals(current.ownerSubject)
           || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
-      approval.boundAttemptId = attempt; approval.state = "BOUND";
+      if ("create".equals(command)) {
+        if (!"OPEN".equals(current.state) || !"AUTHORIZED".equals(approval.state)
+            || approval.boundAttemptId != null) conflict();
+        approval.boundAttemptId = attempt; approval.state = "BOUND";
+      } else if ("commit".equals(command)) {
+        if (!"COMMITTED".equals(current.state) || !"commit".equals(current.terminalOperation)
+            || current.terminalReceipt == null || !"BOUND".equals(approval.state)
+            || !attempt.equals(approval.boundAttemptId) || approval.transitionReceipt != null) conflict();
+        var consumed = JSON.createObjectNode();
+        consumed.put("operation", "protected-invitation.consume"); consumed.put("state", "CONSUMED");
+        consumed.put("approvalId", approval.approvalId); consumed.put("scopeDigest", approval.scopeDigest);
+        consumed.put("boundAttemptId", attempt); consumed.put("accountId", current.accountId);
+        consumed.put("terminalReceipt", current.terminalReceipt);
+        consumed.put("receipt", crypto.receipt("protected-approval-consume/v1", consumed.deepCopy()));
+        String immutable = canonical(consumed);
+        if (immutable.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
+        approval.state = "CONSUMED"; approval.transitionReceipt = immutable;
+      } else deny();
       // Same request/JPA transaction as the native user, proof and attempt. A
       // callback/flush failure rolls every effect back; no separate transaction.
       em.flush();
