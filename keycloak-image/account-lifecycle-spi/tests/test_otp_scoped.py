@@ -124,30 +124,31 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
     def scoped_app_setup(self, human, body):
         return self.scoped_mutation(human, body, "otp.app-setup", "PUT", "setup-otp", 201)
 
-    def scoped_mutation(self, human, body, operation, method, route, expected):
+    def scoped_mutation(self, human, body, operation, method, route, expected, actor="ACCOUNT_ADMIN"):
         username = self.creation_input["account"]["username"]
         materialized = {**body, "username": username}
         now = int(time.time())
         claims = {
             "iss": "userservice", "aud": "oriso-otp", "purpose": "OTP",
-            "operation": operation, "method": method, "actor": "ACCOUNT_ADMIN",
+            "operation": operation, "method": method, "actor": actor,
             "realm": REALM,
             "target": "realm/" + self.realm_id + "/account/" + self.account_id,
-            "taskClient": ACTORS["ACCOUNT_ADMIN"][0], "taskSubject": SUBJECTS["ACCOUNT_ADMIN"],
+            "taskClient": ACTORS[actor][0], "taskSubject": SUBJECTS[actor],
             "payloadDigest": mac("payload", materialized), "jti": str(uuid.uuid4()),
             "nonce": uuid.uuid4().hex, "iat": now, "exp": now + 60,
         }
         encoded = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
         signature = base64.urlsafe_b64encode(hmac.new(
             CONTEXT_KEY, ("proof\n" + encoded).encode(), hashlib.sha256).digest()).decode().rstrip("=")
+        headers = {
+            "Content-Type": "application/json", "Authorization": "Bearer " + self.token(actor),
+            "X-ORISO-Task-Context": encoded + "." + signature,
+        }
+        if human is not None:
+            headers["X-ORISO-Human-Authorization"] = "Bearer " + human
         request = Request(
             self.base + "/realms/" + REALM + "/otp-config/" + route + "/" + quote(username, safe=""),
-            data=canonical(body), method=method, headers={
-                "Content-Type": "application/json",
-                "Authorization": "Bearer " + self.token("ACCOUNT_ADMIN"),
-                "X-ORISO-Task-Context": encoded + "." + signature,
-                "X-ORISO-Human-Authorization": "Bearer " + human,
-            },
+            data=canonical(body), method=method, headers=headers,
         )
         try:
             with urlopen(request, timeout=30) as response:
@@ -212,6 +213,65 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertFalse(self.scoped_read(human, self.target(), 200)[1]["otpSetup"])
         self.phase("scoped-otp-app-exact-retry", admin_receipt_owner=True,
                    saved_receipt_equal=True, no_reenrollment=True)
+
+    def test_invalid_app_code_commits_terminal_receipt_before_later_native_state_changes(self):
+        import struct
+        human, target = self.human(), self.target()
+        body = self.app_enrollment_body(human, target)
+        realm = self.admin("GET", "")
+        self.assertEqual("HmacSHA1", realm["otpPolicyAlgorithm"])
+        self.assertEqual(6, realm["otpPolicyDigits"])
+        self.assertEqual(30, realm["otpPolicyPeriod"])
+        window = realm["otpPolicyLookAheadWindow"]
+        self.assertTrue(isinstance(window, int) and 0 <= window <= 10)
+        excluded = set()
+        for step in range(-window - 1, window + 2):
+            digest = hmac.new(body["otp"]["secret"].encode(), struct.pack(
+                ">Q", int(time.time()) // 30 + step), hashlib.sha1).digest()
+            offset = digest[-1] & 15
+            excluded.add(str((struct.unpack(">I", digest[offset:offset + 4])[0]
+                              & 0x7FFFFFFF) % 1000000).zfill(6))
+        body["otp"]["initialCode"] = next(str(number).zfill(6) for number in range(100)
+                                             if str(number).zfill(6) not in excluded)
+        status, refused = self.scoped_mutation(human, body, "otp.app-setup", "PUT", "setup-otp", 401)
+        self.assertEqual(401, status)
+        self.assertEqual(401, refused["status"])
+        self.assertEqual("invalid_grant", refused["result"]["error"])
+        encoded, signature = refused["receipt"].split(".")
+        expected = hmac.new(CONTEXT_KEY, ("otp-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest()
+        self.assertTrue(hmac.compare_digest(expected, signature))
+        payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual(401, payload["status"])
+        self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], payload["ownerSubject"])
+        native = self.admin("GET", "/users/" + self.account_id)
+        attributes = dict(native["attributes"])
+        attributes["locale"] = ["it" if attributes.get("locale") == ["fr"] else "fr"]
+        self.replace_native_attributes(attributes)
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        self.assertNotEqual(body["expectedState"], current["state"])
+        status, retried = self.scoped_mutation(human, body, "otp.app-setup", "PUT", "setup-otp", 401)
+        self.assertEqual(401, status)
+        self.assertEqual(refused, retried)
+        self.assertFalse(self.scoped_read(human, target, 200)[1]["otpSetup"])
+        self.phase("scoped-otp-app-terminal-refusal", native_receipt_verified=True,
+                   saved_receipt_equal=True, returned_before_changed_cas=True, no_enrollment=True)
+
+    def test_app_mutation_checks_origin_actor_session_and_fresh_state_before_effect(self):
+        human, target = self.human(), self.target()
+        body = self.app_enrollment_body(human, target)
+        mixed = json.loads(json.dumps(body))
+        mixed["target"]["origin"]["humanIssuer"] = "https://foreign.invalid/realms/other"
+        self.assertEqual(403, self.scoped_mutation(human, mixed, "otp.app-setup", "PUT", "setup-otp", 403)[0])
+        self.assertEqual(403, self.scoped_mutation(human, body, "otp.app-setup", "PUT", "setup-otp", 403,
+                                                 actor="ACCOUNT_CREATE")[0])
+        self.assertEqual(401, self.scoped_mutation(None, body, "otp.app-setup", "PUT", "setup-otp", 401)[0])
+        stale = json.loads(json.dumps(body))
+        stale["expectedState"] = "0" * 64 if body["expectedState"] != "0" * 64 else "1" * 64
+        self.assertEqual(409, self.scoped_mutation(human, stale, "otp.app-setup", "PUT", "setup-otp", 409)[0])
+        self.assertFalse(self.scoped_read(human, target, 200)[1]["otpSetup"])
+        self.phase("scoped-otp-app-denials", origin_mix_denied=True, create_actor_denied=True,
+                   missing_human_denied=True, stale_cas_denied=True, no_enrollment=True)
 
     def app_enrollment_body(self, human, target):
         import struct
