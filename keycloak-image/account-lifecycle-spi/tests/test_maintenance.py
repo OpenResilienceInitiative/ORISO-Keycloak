@@ -11,6 +11,8 @@ import time
 import unittest
 import uuid
 
+from maintenance_human_fixture import HumanMaintenance
+
 from lifecycle_fixture import (
     ACTORS, SUBJECTS, REALM, CONTEXT_KEY, LifecycleFixture, call, canonical, mac,
 )

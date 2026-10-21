@@ -17,7 +17,7 @@ EXPECTED_UNITS = {
     "org.oriso.keycloak.lifecycle.LifecycleJsonTest": 13,
     "org.oriso.keycloak.lifecycle.MaintenanceRequestTest": 8,
 }
-NATIVE_FLOOR = 5
+NATIVE_FLOOR = 6
 
 
 def source_manifest(module):
@@ -104,12 +104,12 @@ def native(report, workflow):
     suite = unittest.defaultTestLoader.loadTestsFromModule(imported)
     discovered = suite.countTestCases()
     if discovered < NATIVE_FLOOR:
-        missing_native(report, "BELOW_FIVE_CASE_FLOOR_NOT_BEHAVIOR_RED")
+        missing_native(report, "BELOW_SIX_CASE_FLOOR_NOT_BEHAVIOR_RED")
         return 1
     result = unittest.TextTestRunner(verbosity=2, resultclass=XmlResult).run(suite)
     report.parent.mkdir(parents=True, exist_ok=True)
     result.write_xml(report.with_suffix(".xml"), "maintenance")
-    phases = imported.MaintenancePermissions.phase_receipts
+    phases = imported.MaintenancePermissions.phase_receipts + imported.HumanMaintenance.phase_receipts
     committed = {item["case"] for item in phases if item["phase"] == "ordinary-committed"}
     requests = [item for item in phases if item["phase"] == "maintenance-http"]
     stock_denials = [item for item in phases if item["phase"] == "stock-native-denied"]
@@ -125,6 +125,15 @@ def native(report, workflow):
         return any(item["command"] == command and item["actor"] == "ACCOUNT_ADMIN"
                    and item["expected_status"] == 200 and item["status"] == 404
                    and item["case"] in committed and item["case"] in failures for item in requests)
+    native_humans = {item["case"] for item in phases if item["phase"] == "human-native-preconditions"
+                     and all(item.get(key) is True for key in ["exact_subject", "exact_issuer", "exact_client", "current_tenant", "current_roles", "live_session"])}
+    human_requests = [item for item in phases if item["phase"] == "human-maintenance-http"]
+    human_read_red = not result.errors and not result.skipped and any(
+        item["case"] in native_humans & committed & failures and item["command"] == "read"
+        and item["expected_status"] == 200 and item["status"] in {403, 404} for item in human_requests)
+    human_locale_red = not result.errors and not result.skipped and any(
+        item["case"] in native_humans & committed & failures and item["command"] == "locale"
+        and item["expected_status"] == 200 and item["status"] == 404 for item in human_requests)
     after = source_manifest(module_root)
     summary = {
         "suite": "maintenance", "floor": NATIVE_FLOOR, "discovered": discovered,
@@ -140,12 +149,13 @@ def native(report, workflow):
         "phase_receipts": phases, "stock_native_denials": stock_denials,
         "same_bearer_stock_denial_cases": sorted(verified_denial_cases),
         "genuine_read_red": red("read"), "genuine_delete_red": red("delete"),
-        "diagnostic_boundary": "Receiver first read/delete source diagnostic; domain caller, OTP, MariaDB and full Scenario C remain open",
+        "genuine_human_read_red": bool(human_read_red), "genuine_human_locale_red": bool(human_locale_red),
+        "diagnostic_boundary": "Receiver bounded read/delete and first native human locale diagnostic; domain caller, OTP, MariaDB and full Scenario C remain open",
     }
     summary["accepted"] = bool(result.wasSuccessful() and result.testsRun == discovered
         and not result.skipped and summary["jar_stable"] and summary["source_stable"] and summary["workflow_stable"])
     summary["status"] = "GREEN" if summary["accepted"] else (
-        "BEHAVIOR_RED" if summary["genuine_read_red"] or summary["genuine_delete_red"]
+        "BEHAVIOR_RED" if summary["genuine_read_red"] or summary["genuine_delete_red"] or human_read_red or human_locale_red
         else "FAILED_WITHOUT_CONFIRMED_READ_OR_DELETE_RED")
     write_json(report, summary)
     print(json.dumps({key: value for key, value in summary.items() if key != "source_manifest"}, sort_keys=True))
