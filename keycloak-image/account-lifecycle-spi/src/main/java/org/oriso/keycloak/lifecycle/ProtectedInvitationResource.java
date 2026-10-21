@@ -214,6 +214,38 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       if (!internalJson.equals(canonical(internalBody))) deny();
     }
 
+    public void verifyExistingCreation(AccountLifecycleAttempt current) {
+      if (current == null || current.accountId == null || current.creationProof == null
+          || current.createExecution == null || current.executionId == null || current.generation < 0
+          || !config.realmId.equals(current.realmId) || !attempt.equals(current.attemptId)
+          || !binding.rowId().equals(current.id) || !binding.ownerClient().equals(current.ownerClient)
+          || !binding.ownerSubject().equals(current.ownerSubject)
+          || !canonical(binding.scope()).equals(current.scope)
+          || !binding.creationFingerprint().equals(current.creationFingerprint)
+          || !binding.groupId().equals(current.groupId)
+          || !binding.roleFingerprint().equals(current.roleFingerprint)
+          || !attempt.equals(approval.boundAttemptId)) conflict();
+      switch (current.state) {
+        case "OPEN", "RECOVERY_CLAIMED" -> {
+          if (!Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+              || current.terminalOperation != null) conflict();
+          if ("OPEN".equals(current.state)
+              && (current.generation != 0 || !current.createExecution.equals(current.executionId))) conflict();
+          if ("RECOVERY_CLAIMED".equals(current.state) && current.generation == 0) conflict();
+        }
+        case "COMMITTED" -> {
+          if (!"CONSUMED".equals(approval.state) || !"commit".equals(current.terminalOperation)
+              || current.terminalReceipt == null || current.generation != 0
+              || !current.createExecution.equals(current.executionId)) conflict();
+        }
+        case "COMPENSATED" -> {
+          if (!Set.of("CANCELLED", "EXPIRED").contains(approval.state)
+              || !"compensate".equals(current.terminalOperation) || current.terminalReceipt == null) conflict();
+        }
+        default -> conflict(); // ABANDONED has never created an account.
+      }
+    }
+
     public String commandDigest() { return originalCommandDigest; }
 
     public boolean restrictExpiredCommit(AccountLifecycleAttempt current, EntityManager em) {
@@ -262,7 +294,12 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
             || !attempt.equals(approval.boundAttemptId)) conflict();
         return;
       }
-      if (!Set.of("create", "owned-read").contains(command)
+      if ("owned-read".equals(command)) {
+        verifyExistingCreation(current);
+        if (!Set.of("OPEN", "RECOVERY_CLAIMED").contains(current.state)) conflict();
+        return;
+      }
+      if (!"create".equals(command)
           || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if (current == null) {
         if (!"create".equals(command) || !"AUTHORIZED".equals(approval.state) || approval.boundAttemptId != null) conflict();

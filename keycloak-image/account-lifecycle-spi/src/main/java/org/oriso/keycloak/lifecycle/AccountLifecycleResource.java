@@ -42,6 +42,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     LifecycleBinding binding();
     GroupModel approvedGroup(RealmModel realm);
     void verifyCreate(JsonNode internalBody);
+    void verifyExistingCreation(AccountLifecycleAttempt attempt);
     String commandDigest();
     void before(String command, AccountLifecycleAttempt attempt, EntityManager em);
     void after(String command, AccountLifecycleAttempt attempt, EntityManager em);
@@ -199,7 +200,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     if ("owned-read".equals(command)) {
       fields(body, "identity", "execution", "accountId", "creationProof");
       owned(body, row);
-      if (!"OPEN".equals(row.state)) conflict();
+      if (policy == null && !"OPEN".equals(row.state)) conflict();
       if (policy != null) policy.before("owned-read", row, em);
       var user = integrity(row, realm, LifecycleGroups.pending(session, realm));
       if (user == null) conflict();
@@ -312,6 +313,14 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
           fingerprint, body.path("identity").path("creationFingerprint").asText())) deny();
     } else policy.verifyCreate(body);
     if (row != null) {
+      if (policy != null) {
+        policy.verifyExistingCreation(row);
+        if (!Objects.equals(row.createExecution, body.path("execution").path("executionId").asText()))
+          conflict();
+        // Reconcile the actual saved outcome, including a later restriction or
+        // terminal state. This does not renew activation or look up a native user.
+        return result(row, 200);
+      }
       if (!"OPEN".equals(row.state)
           || !row.executionId.equals(body.path("execution").path("executionId").asText())
           || row.generation != 0) conflict();
