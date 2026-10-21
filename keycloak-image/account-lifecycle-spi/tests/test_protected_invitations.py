@@ -47,6 +47,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.proof_controls = []
         cls.absent_cancel_observation = None
         cls.expiry_observation = None
+        cls.create_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -625,6 +626,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         proof_domain="protected-invitation-proof/v1",
         payload_domain="protected-invitation-payload/v1",
         proof_body=None,
+        attempt=None,
     ):
         bearer = self.token(actor)
         payload = bearer.split(".")[1]
@@ -652,6 +654,19 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             }[actor],
             set([audiences] if isinstance(audiences, str) else audiences),
         )
+        method = "PUT" if attempt is not None and operation == "create" else "POST"
+        target = "realm/" + self.realm_id + "/protected-invitation/" + approval
+        suffix = "/" + operation
+        operation_claim = "protected-invitation." + operation
+        if attempt is not None:
+            self.assertEqual(attempt, str(uuid.UUID(attempt)))
+            target += "/account-attempt/" + attempt
+            suffix = "/attempts/" + attempt
+            if operation != "create":
+                suffix += "/" + operation
+            operation_claim = "protected-account." + (
+                "creation-recover" if operation == "recover" else operation
+            )
         now = int(time.time())
         claims = {
             "iss": "userservice",
@@ -663,11 +678,11 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
                 "MAIL": "SYSTEM_EMAIL_DELIVERY",
                 "RUNTIME": "RUNTIME_POLICY",
             }[actor],
-            "operation": "protected-invitation." + operation,
-            "method": "POST",
+            "operation": operation_claim,
+            "method": method,
             "actor": actor,
             "realm": REALM,
-            "target": "realm/" + self.realm_id + "/protected-invitation/" + approval,
+            "target": target,
             "taskClient": ACTORS[actor][0],
             "taskSubject": SUBJECTS[actor],
             "payloadDigest": mac(
@@ -693,12 +708,115 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         )
         return call(
             self.base,
-            "POST",
-            self.endpoint(approval, "/" + operation),
+            method,
+            self.endpoint(approval, suffix),
             body,
             bearer,
             proof=encoded + "." + signature,
         )
+
+    def test_protected_create_binds_live_approval_to_one_disabled_pending_account(self):
+        approval, attempt = str(uuid.uuid4()), str(uuid.uuid4())
+        scope = self.scope()
+        status, approved = call(
+            self.base,
+            "PUT",
+            self.endpoint(approval),
+            {"scope": scope},
+            self.human(record=False),
+        )
+        self.assertEqual(201, status)
+        self.assertEqual("AUTHORIZED", approved["state"])
+        receipt = approved["approvalReceipt"]
+        self.assertEqual(approval, receipt["approvalId"])
+        self.assertEqual(HUMAN, receipt["issuerSubject"])
+        self.assertEqual(approved["scopeDigest"], receipt["scopeDigest"])
+        account = self.creation()["account"]
+        account["email"] = scope["recipient"]
+        account["username"] = "enc." + base64.b32encode(
+            scope["recipient"].encode("utf-8")
+        ).decode("ascii").replace("=", ".")
+        create = {
+            "approvalReceipt": receipt,
+            "scopeDigest": approved["scopeDigest"],
+            "authorizationRevision": scope["authorizationRevision"],
+            "acceptanceClaim": {
+                "workflowId": scope["workflowId"],
+                "inviteId": scope["inviteId"],
+                "authorizationRevision": scope["authorizationRevision"],
+                "claimId": str(uuid.uuid4()),
+                "journalVersion": 1,
+            },
+            "execution": {"executionId": str(uuid.uuid4()), "generation": 0},
+            "account": account,
+        }
+        create["creationFingerprint"] = mac("protected-account-creation/v1", create)
+        before = self.admin("GET", "/users/count")
+        self.assertEqual(
+            [],
+            self.admin("GET", "/users?username=" + account["username"] + "&exact=true"),
+        )
+        status, opened = self.protected_machine_request(
+            "create", approval, create, actor="ACCOUNT_CREATE", attempt=attempt
+        )
+        after = self.admin("GET", "/users/count")
+        type(self).create_observation = {
+            "actualStatus": status,
+            "expectedStatus": 201,
+            "sourceLiveApprovalCreated": True,
+            "exactHumanReceiptBound": True,
+            "originalAcceptanceAndAccountFingerprintPredispatch": True,
+            "nativeCreatorSubjectRolesAndAudiencesMatched": True,
+            "nativeConfigurationChecked": self.configuration_checked,
+            "noAccountBeforeDispatch": True,
+            "noAccountCreated": before == after,
+            "oneAccountCreated": after == before + 1,
+        }
+        self.assertEqual(201, status)
+        self.assertEqual(before + 1, after)
+        self.assertEqual("OPEN", opened["state"])
+        self.assertEqual(create["execution"], opened["execution"])
+        account_id = opened["accountId"]
+        self.assertEqual(account_id, str(uuid.UUID(account_id)))
+        self.assertTrue(opened["creationProof"])
+        self.assertIsNone(opened["terminalReceipt"])
+        native = self.admin("GET", "/users/" + account_id)
+        self.assertFalse(native["enabled"])
+        self.assertTrue(native["emailVerified"])
+        self.assertEqual(account["email"], native["email"])
+        self.assertEqual(account["username"].lower(), native["username"])
+        self.assertEqual(
+            ["/pending-provisioning"],
+            [v["path"] for v in self.admin("GET", "/users/" + account_id + "/groups")],
+        )
+        self.assertEqual(
+            [], self.admin("GET", "/users/" + account_id + "/role-mappings/realm")
+        )
+        credentials = self.admin("GET", "/users/" + account_id + "/credentials")
+        self.assertEqual(["password"], [v["type"] for v in credentials])
+        status, retry = self.protected_machine_request(
+            "create", approval, create, actor="ACCOUNT_CREATE", attempt=attempt
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(opened, retry)
+        self.assertEqual(native, self.admin("GET", "/users/" + account_id))
+        self.assertEqual(
+            credentials, self.admin("GET", "/users/" + account_id + "/credentials")
+        )
+        query = {
+            "scopeDigest": approved["scopeDigest"],
+            "workflowId": scope["workflowId"],
+            "inviteId": scope["inviteId"],
+            "authorizationRevision": scope["authorizationRevision"],
+            "attemptId": attempt,
+            "approvalRequestDigest": approved["approvalRequestDigest"],
+        }
+        status, bound = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual("BOUND", bound["state"])
+        self.assertEqual(attempt, bound["boundAttemptId"])
+        self.assertEqual(receipt, bound["approvalReceipt"])
+        self.assertEqual(after, self.admin("GET", "/users/count"))
 
     def test_installer_routine_and_unbound_human_cannot_authorize_protected_scope(self):
         for actor in ACTORS:

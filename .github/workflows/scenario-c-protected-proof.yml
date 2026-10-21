@@ -51,7 +51,7 @@ jobs:
         env:
           MAVEN_OPTS: -Xmx512m -XX:MaxMetaspaceSize=256m -XX:ActiveProcessorCount=2
         run: mvn -B -q clean package '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2'
-      - name: Run protected approval cancellation and SETUP status cases
+      - name: Run protected approval and account creation cases
         env:
           PROTECTED_PROOF_RESOURCE_PROFILE: github-ubuntu-24-amd64-v1
         shell: bash

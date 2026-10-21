@@ -275,7 +275,7 @@ def main():
     workflow_before = digest(workflow)
     summary = {
         "schema": 1,
-        "suite": "protected-approval-cancel-authority-and-setup-status",
+        "suite": "protected-approval-lifecycle-create-and-authority",
         "classification": "INPUT_OR_FIXTURE_ERROR",
         "sourceManifest": before,
         "workflowSHA256": workflow_before,
@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 7:
+        if discovered != 8:
             raise AssertionError(
-                "Exactly seven protected HTTP approval/authority/cancel/status/proof/tombstone/expiry cases required"
+                "Exactly eight protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create cases required"
             )
 
         def deadline(signum, frame):
@@ -343,6 +343,7 @@ def main():
                     fixture, "absent_cancel_observation", None
                 ),
                 "expiryObservation": getattr(fixture, "expiry_observation", None),
+                "createObservation": getattr(fixture, "create_observation", None),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -402,8 +403,49 @@ def main():
             and valid_proof_controls
             and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
             and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
+            and (summary["createObservation"] or {}).get("actualStatus") == 201
+            and summary["createObservation"].get("oneAccountCreated") is True
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and observation.get("actualStatus") == 201
+            and observation.get("noAccountCreated") is True
+            and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["createObservation"] or {}).get("actualStatus") in (404, 405)
+            and summary["createObservation"].get("expectedStatus") == 201
+            and all(
+                summary["createObservation"].get(key) is True
+                for key in (
+                    "sourceLiveApprovalCreated",
+                    "exactHumanReceiptBound",
+                    "originalAcceptanceAndAccountFingerprintPredispatch",
+                    "nativeCreatorSubjectRolesAndAudiencesMatched",
+                    "nativeConfigurationChecked",
+                    "noAccountBeforeDispatch",
+                    "noAccountCreated",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_protected_create_binds_live_approval_to_one_disabled_pending_account"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = "GENUINE_PROTECTED_CREATE_COUNTERFACTUAL_RED"
         elif (
             valid_preconditions
             and valid_controls
