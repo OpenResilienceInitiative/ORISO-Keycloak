@@ -4,7 +4,7 @@ import base64
 import copy
 import time
 import uuid
-from lifecycle_fixture import ACTORS, SUBJECTS, mac
+from lifecycle_fixture import ACTORS, SUBJECTS, call, mac
 
 
 class ProtectedCreationCases:
