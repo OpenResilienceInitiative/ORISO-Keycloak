@@ -23,6 +23,9 @@ public class ProtectedInvitationApproval {
   @Column(name = "VALID_UNTIL", length = 30, nullable = false, updatable = false) String validUntil;
   @Column(name = "STATE", length = 30, nullable = false) String state;
   @Column(name = "BOUND_ATTEMPT_ID", length = 36) String boundAttemptId;
+  @Column(name = "CANCELLATION_ID", length = 36) String cancellationId;
+  @Column(name = "CANCELLATION_REQUEST", length = 16000) String cancellationRequest;
+  @Column(name = "TRANSITION_RECEIPT", length = 24000) String transitionReceipt;
   // Set only by the atomic first protected COMMIT/CONSUME; never by approval/create.
   @Column(name = "DELEGATED_SUBJECT", length = 36) String delegatedSubject;
   @Column(name = "DELEGATION_SNAPSHOT", length = 16000) String delegationSnapshot;

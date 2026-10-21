@@ -25,4 +25,11 @@
     <addUniqueConstraint tableName="ORISO_PROTECTED_INVITATION_APPROVAL" columnNames="REALM_ID,DELEGATED_SUBJECT" constraintName="ORISO_PROTECTED_DELEGATED_SUBJECT"/>
     <addForeignKeyConstraint baseTableName="ORISO_PROTECTED_INVITATION_APPROVAL" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_PROTECTED_APPROVAL_REALM" onDelete="CASCADE"/>
   </changeSet>
+  <changeSet id="oriso-protected-invitations-cancel-v1" author="oriso">
+    <addColumn tableName="ORISO_PROTECTED_INVITATION_APPROVAL">
+      <column name="CANCELLATION_ID" type="VARCHAR(36)"/>
+      <column name="CANCELLATION_REQUEST" type="TEXT"/>
+      <column name="TRANSITION_RECEIPT" type="TEXT"/>
+    </addColumn>
+  </changeSet>
 </databaseChangeLog>
