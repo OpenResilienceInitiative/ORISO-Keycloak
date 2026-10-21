@@ -1,0 +1,82 @@
+package org.oriso.keycloak.lifecycle;
+
+import java.util.*;
+import org.keycloak.Config;
+import org.keycloak.models.*;
+import org.keycloak.services.resource.*;
+
+/** Standalone provider; absent/false enable flag does not register a resource. */
+public final class AccountLifecycleFactory implements RealmResourceProviderFactory {
+  private LifecycleAuthorization authorization;
+  private Map<String, Set<String>> groups;
+
+  public void init(Config.Scope scope) {
+    String enabled = System.getenv("ORISO_ACCOUNT_LIFECYCLE_ENABLED");
+    if (enabled == null || "false".equals(enabled)) return;
+    if (!"true".equals(enabled) || !"FIVE_ACTORS".equals(System.getenv("TASK_IDENTITY_MODEL")))
+      throw new IllegalStateException("Invalid lifecycle enable/model configuration");
+    String realm = required("ORISO_ACCOUNT_LIFECYCLE_REALM");
+    String creator = required("IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT");
+    String admin = required("IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT");
+    if (creator.equals(admin))
+      throw new IllegalStateException("Lifecycle actor subjects must differ");
+    String encoded = required("ORISO_TASK_CONTEXT_KEY");
+    byte[] key;
+    try {
+      key = Base64.getDecoder().decode(encoded);
+    } catch (IllegalArgumentException failure) {
+      throw new IllegalStateException("Lifecycle key must be base64");
+    }
+    if (key.length < 32)
+      throw new IllegalStateException("Lifecycle key must contain at least 32 bytes");
+    groups = new LinkedHashMap<>();
+    var config = LifecycleJson.parse(required("ORISO_ACCOUNT_LIFECYCLE_GROUPS"));
+    config
+        .fields()
+        .forEachRemaining(
+            entry -> {
+              if (!entry.getKey().matches("/human-roles/[a-z0-9-]{1,80}")
+                  || !entry.getValue().isArray()
+                  || entry.getValue().isEmpty()
+                  || entry.getValue().size() > 5)
+                throw new IllegalStateException("Invalid ordinary lifecycle mapping");
+              Set<String> roles = new HashSet<>();
+              entry
+                  .getValue()
+                  .forEach(
+                      role -> {
+                        if (!role.isTextual()
+                            || !LifecycleGroups.KNOWN.contains(role.asText())
+                            || !roles.add(role.asText()))
+                          throw new IllegalStateException(
+                              "Invalid ordinary lifecycle role mapping");
+                      });
+              if (LifecycleGroups.allowedKind(roles) == null)
+                throw new IllegalStateException("Unknown ordinary lifecycle combination");
+              groups.put(entry.getKey(), Set.copyOf(roles));
+            });
+    if (groups.isEmpty()) throw new IllegalStateException("Missing ordinary lifecycle mappings");
+    authorization = new LifecycleAuthorization(realm, creator, admin, key, encoded);
+  }
+
+  private static String required(String name) {
+    String value = System.getenv(name);
+    if (value == null || value.isBlank() || value.contains("${"))
+      throw new IllegalStateException("Missing lifecycle configuration: " + name);
+    return value;
+  }
+
+  public RealmResourceProvider create(KeycloakSession session) {
+    return authorization == null
+        ? null
+        : new AccountLifecycleResource(session, authorization, groups);
+  }
+
+  public String getId() {
+    return "oriso-account-lifecycle";
+  }
+
+  public void postInit(KeycloakSessionFactory factory) {}
+
+  public void close() {}
+}
