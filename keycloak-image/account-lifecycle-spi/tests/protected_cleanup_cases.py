@@ -193,6 +193,7 @@ class ProtectedCleanupCases:
             receipt = self.verified_receipt(
                 terminal["terminalReceipt"], "terminal-receipt", 16000, fields
             )
+            type(self).compensate_receipt_fields = []
             for key, value in {
                 "realmId": self.realm_id,
                 "attemptId": attempt,
@@ -211,6 +212,9 @@ class ProtectedCleanupCases:
                 "operation": "compensate",
                 "commandDigest": original_digest,
             }.items():
+                type(self).compensate_receipt_fields.append(
+                    {"field": key, "matched": value == receipt[key]}
+                )
                 self.assertEqual(value, receipt[key], key)
             status, restricted = self.protected_machine_request(
                 "status", approval, query
@@ -275,6 +279,14 @@ class ProtectedCleanupCases:
             )
             replacement = self.admin("GET", "/users/" + account)
             self.addCleanup(lambda: self.admin("DELETE", "/users/" + account))
+            type(self).compensate_replacement_observation = {
+                "actualNativeUUIDMatched": account == replacement["id"],
+                "wireUsernameMatched": create["account"]["username"]
+                == replacement["username"],
+                "nativeLowercaseUsernameMatched": create["account"]["username"].lower()
+                == replacement["username"],
+                "nativeEnabled": replacement["enabled"] is True,
+            }
             self.assertEqual(account, replacement["id"])
             self.assertEqual(create["account"]["username"], replacement["username"])
             self.assertTrue(replacement["enabled"])

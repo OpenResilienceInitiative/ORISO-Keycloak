@@ -47,13 +47,36 @@ class SanitizedResult(unittest.TestResult):
         if exception_type is not None:
             value["exceptionType"] = exception_type.__name__
 
+    def record_source_frames(self, test, err):
+        # Static fixture source coordinates only. Exception messages, values,
+        # frame locals and native response/request data never enter evidence.
+        allowed = {
+            "test_protected_invitations.py",
+            "protected_creation_cases.py",
+            "protected_terminal_cases.py",
+            "protected_cleanup_cases.py",
+            "lifecycle_fixture.py",
+            "protected_resources.py",
+        }
+        folder = Path(__file__).resolve().parent
+        frames = []
+        trace = err[2]
+        while trace is not None:
+            source = Path(trace.tb_frame.f_code.co_filename).resolve()
+            if source.parent == folder and source.name in allowed:
+                frames.append({"file": source.name, "line": trace.tb_lineno})
+            trace = trace.tb_next
+        self.cases[test.id()]["sourceFrames"] = frames[-6:]
+
     def addFailure(self, test, err):
         super().addFailure(test, err)
         self.record(test, "failure", err[0])
+        self.record_source_frames(test, err)
 
     def addError(self, test, err):
         super().addError(test, err)
         self.record(test, "error", err[0])
+        self.record_source_frames(test, err)
         if (
             err[0] is KeyError
             and len(err[1].args) == 1
@@ -91,6 +114,7 @@ class SanitizedResult(unittest.TestResult):
                 "failure" if issubclass(err[0], AssertionError) else "error",
                 err[0],
             )
+            self.record_source_frames(test, err)
 
 
 def digest(path):
@@ -357,6 +381,12 @@ def main():
                 ),
                 "compensateProofControls": getattr(
                     fixture, "compensate_proof_controls", []
+                ),
+                "compensateReceiptFields": getattr(
+                    fixture, "compensate_receipt_fields", []
+                ),
+                "compensateReplacementObservation": getattr(
+                    fixture, "compensate_replacement_observation", None
                 ),
             }
         )
