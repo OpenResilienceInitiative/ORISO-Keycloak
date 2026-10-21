@@ -72,7 +72,7 @@ jobs:
       - name: Require every source OTP unit suite with zero skips
         if: always()
         run: python keycloak-image/account-lifecycle-spi/tests/run_scoped_otp.py units --report proof-reports/scoped-otp-units.json
-      - name: Run prior eleven plus exact canonical three-to-four audience native case
+      - name: Run prior twelve plus exact invalid-email terminal-attempt native case
         shell: bash
         run: |
           set -euo pipefail
