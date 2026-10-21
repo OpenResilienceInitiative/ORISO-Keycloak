@@ -4,12 +4,12 @@ on:
   pull_request:
     branches: [dev]
     paths:
-      - keycloak-image/account-lifecycle-spi/**
+      - keycloak-image/**
       - .github/workflows/scenario-c-maintenance-proof.yml
   push:
-    branches: [codex/367-c-maintenance-keycloak-20261021]
+    branches: [codex/367-c-maintenance-keycloak-20261021, codex/367-c-receiver-finish-20261021]
     paths:
-      - keycloak-image/account-lifecycle-spi/**
+      - keycloak-image/**
       - .github/workflows/scenario-c-maintenance-proof.yml
 
 permissions:
