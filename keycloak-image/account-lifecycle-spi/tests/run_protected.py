@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 11:
+        if discovered != 12:
             raise AssertionError(
-                "Exactly eleven protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover cases required"
+                "Exactly twelve protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon cases required"
             )
 
         def deadline(signum, frame):
@@ -349,6 +349,9 @@ def main():
                 "commitObservation": getattr(fixture, "commit_observation", None),
                 "recoverObservation": getattr(fixture, "recover_observation", None),
                 "recoverProofControls": getattr(fixture, "recover_proof_controls", []),
+                "absentRecoveryObservation": getattr(
+                    fixture, "absent_recover_observation", None
+                ),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -418,8 +421,61 @@ def main():
             and (summary["recoverObservation"] or {}).get("actualStatus") == 200
             and len(summary["recoverProofControls"]) == 7
             and all(v["status"] == 403 for v in summary["recoverProofControls"])
+            and (summary["absentRecoveryObservation"] or {}).get("actualStatus") == 200
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and observation.get("actualStatus") == 201
+            and observation.get("noAccountCreated") is True
+            and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
+            and (summary["createObservation"] or {}).get("actualStatus") == 201
+            and summary["createObservation"].get("oneAccountCreated") is True
+            and (summary["ownedReadObservation"] or {}).get("actualStatus") == 200
+            and len(summary["ownedReadProofControls"]) == 16
+            and all(v["status"] == 403 for v in summary["ownedReadProofControls"])
+            and (summary["commitObservation"] or {}).get("actualStatus") == 200
+            and (summary["recoverObservation"] or {}).get("actualStatus") == 200
+            and len(summary["recoverProofControls"]) == 7
+            and all(v["status"] == 403 for v in summary["recoverProofControls"])
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["absentRecoveryObservation"] or {}).get("actualStatus") == 403
+            and summary["absentRecoveryObservation"].get("expectedStatus") == 200
+            and summary["absentRecoveryObservation"].get("expectedState") == "ABANDONED"
+            and all(
+                summary["absentRecoveryObservation"].get(key) is True
+                for key in (
+                    "sourceRealHumanApprovalUnbound",
+                    "noCreateDispatched",
+                    "nativeAdminSubjectRolesAndAudiencesMatched",
+                    "originalCreatorAcceptanceAndFingerprintPredispatch",
+                    "mutableProfileRenamedBeforeRestriction",
+                    "foreignNativeUserExistedBeforeRequest",
+                    "foreignNativeUserPreserved",
+                    "accountCountUnchanged",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_protected_absent_recovery_restricts_without_adopting_existing_username"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = (
+                "GENUINE_PROTECTED_ABSENT_RECOVER_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls
