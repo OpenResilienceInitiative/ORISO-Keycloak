@@ -230,10 +230,11 @@ class BindingReadiness(unittest.TestCase):
         )
         clients = helper.admin("GET", "/clients?clientId=protected-human-web")
         self.assertEqual(1, len(clients))
-        self.assertTrue(clients[0]["enabled"])
-        self.assertTrue(clients[0]["standardFlowEnabled"])
-        self.assertFalse(clients[0]["serviceAccountsEnabled"])
-        self.assertFalse(clients[0]["fullScopeAllowed"])
+        client = helper.admin("GET", "/clients/" + clients[0]["id"])
+        self.assertTrue(client["enabled"])
+        self.assertTrue(client["standardFlowEnabled"])
+        self.assertFalse(client["serviceAccountsEnabled"])
+        self.assertFalse(client["fullScopeAllowed"])
         self.observation["driftBootNativeUserinfoAndCurrentSessionVerified"] = True
 
     def test_binding_drift_keeps_native_login_and_protected_unavailable(self):

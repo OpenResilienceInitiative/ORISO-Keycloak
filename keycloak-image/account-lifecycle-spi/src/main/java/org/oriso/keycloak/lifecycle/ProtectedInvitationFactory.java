@@ -1,5 +1,7 @@
 package org.oriso.keycloak.lifecycle;
 
+import jakarta.ws.rs.ServiceUnavailableException;
+import jakarta.ws.rs.core.Response;
 import java.util.Base64;
 import org.keycloak.Config;
 import org.keycloak.models.*;
@@ -9,8 +11,10 @@ import org.keycloak.services.resource.*;
 
 /** Default off; exact native installation is checked before exposing approval. */
 public final class ProtectedInvitationFactory implements RealmResourceProviderFactory {
+  private static final java.util.logging.Logger LOG = java.util.logging.Logger.getLogger(ProtectedInvitationFactory.class.getName());
   private ProtectedInvitationConfiguration configuration;
   private LifecycleAuthorization authorization;
+  private volatile boolean installationReady;
 
   public void init(Config.Scope scope) {
     String enabled = System.getenv("ORISO_PROTECTED_INVITATIONS_ENABLED");
@@ -36,17 +40,28 @@ public final class ProtectedInvitationFactory implements RealmResourceProviderFa
   public void postInit(KeycloakSessionFactory factory) {
     if (configuration == null) return;
     factory.register(event -> {
-      if (event instanceof PostMigrationEvent) KeycloakModelUtils.runJobInTransaction(factory, session -> {
-        var realm = session.realms().getRealm(configuration.realmId);
-        if (realm == null) throw new IllegalStateException("Protected native realm is missing");
-        session.getContext().setRealm(realm);
-        configuration.validateInstallation(session);
-      });
+      if (!(event instanceof PostMigrationEvent)) return;
+      installationReady = false;
+      try {
+        KeycloakModelUtils.runJobInTransaction(factory, session -> {
+          var realm = session.realms().getRealm(configuration.realmId);
+          if (realm == null) throw new IllegalStateException("Protected native realm is missing");
+          session.getContext().setRealm(realm);
+          configuration.validateInstallation(session);
+        });
+      } catch (RuntimeException failure) {
+        LOG.warning("Protected invitation provider unavailable: native binding validation failed");
+        return;
+      }
+      // Publish only after the validation transaction has committed successfully.
+      installationReady = true;
     });
   }
 
   public RealmResourceProvider create(KeycloakSession session) {
-    return configuration == null ? null : new ProtectedInvitationResource(session, configuration, authorization);
+    if (configuration == null) return null;
+    if (!installationReady) throw new ServiceUnavailableException(Response.status(503).header("Cache-Control", "no-store").build());
+    return new ProtectedInvitationResource(session, configuration, authorization);
   }
   public String getId() { return "oriso-protected-invitations"; }
   public void close() {}
