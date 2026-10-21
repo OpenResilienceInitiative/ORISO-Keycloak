@@ -34,6 +34,13 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, setup));
   }
 
+  public static Response requireSelfDelete(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
+      Function<VerifiedOtpTarget, Response> delete) {
+    return guarded(session, () -> configuration(session).deleteOtpSelf(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, delete));
+  }
+
   private static AccountLifecycleFactory configuration(KeycloakSession session) {
     var factory = session.getKeycloakSessionFactory().getProviderFactory(
         RealmResourceProvider.class, "oriso-account-lifecycle");
@@ -85,8 +92,8 @@ public final class ScopedOtpAccess {
     return invoke(session, username, account, current, null, read);
   }
 
-  static Response checkedSelfAppSetup(KeycloakSession session, LifecycleAuthorization authorization,
-      Map<String, Set<String>> mappings, GeneralPolicy policy, String username,
+  static Response checkedSelfMutation(KeycloakSession session, LifecycleAuthorization authorization,
+      Map<String, Set<String>> mappings, GeneralPolicy policy, String operation, String method, String username,
       byte[] raw, String proofHeader, String humanHeader,
       Function<VerifiedOtpTarget, Response> setup) {
     var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
@@ -94,11 +101,11 @@ public final class ScopedOtpAccess {
         || username.chars().anyMatch(c -> c < 32 || c == 127)) bad();
     var body = parse(raw);
     String account = uuid(text(body.path("target"), "accountId", 36, false));
-    var request = ScopedOtpRequest.parse("otp.app-setup", account, body);
+    var request = ScopedOtpRequest.parse(operation, account, body);
     var materialized = body.deepCopy();
     ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("username", username);
     var realm = session.getContext().getRealm();
-    authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.app-setup", "PUT",
+    authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", operation, method,
         "realm/" + realm.getId() + "/account/" + account, materialized);
     var read = JSON.createObjectNode();
     read.set("target", request.target());
@@ -122,19 +129,24 @@ public final class ScopedOtpAccess {
         throw new jakarta.ws.rs.ClientErrorException("OTP operation conflicts", 409);
       // The immutable operation is retry provenance. Reauthorize the actual current human,
       // then return before mutable credential/CAS lookup or a second enrollment effect.
-      policy.requireSelfOtpAppSetup(session, target, humanHeader);
+      if ("otp.delete".equals(operation)) policy.requireSelfOtpDelete(session, target, humanHeader);
+      else policy.requireSelfOtpAppSetup(session, target, humanHeader);
       var saved = parse(prior.resultJson);
       int status = saved.path("status").asInt();
-      if (!Set.of(200, 201, 401).contains(status)) deny();
+      if (!("otp.delete".equals(operation) ? Set.of(200) : Set.of(200, 201, 401)).contains(status)) deny();
       return Response.status(status).entity(saved).header("Cache-Control", "no-store").build();
     }
-    var current = new MaintenanceTarget(session, authorization, mappings)
-        .readOtpSelfAppSetup(target, policy, humanHeader);
+    var targets = new MaintenanceTarget(session, authorization, mappings);
+    var current = "otp.delete".equals(operation)
+        ? targets.readOtpSelfDelete(target, policy, humanHeader)
+        : targets.readOtpSelfAppSetup(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
       throw new jakarta.ws.rs.ClientErrorException("Current OTP target state conflicts", 409);
     var nativeResponse = invoke(session, username, account, current, request, setup);
     int status = nativeResponse.getStatus();
     var nativeResult = JSON.valueToTree(nativeResponse.getEntity());
+    if ("otp.delete".equals(operation) && status != 200)
+      throw new IllegalStateException("Unsupported delete OTP outcome");
     if (status == 200 || status == 201) {
       fields(nativeResult, "info");
       text(nativeResult, "info", 512, false);
@@ -174,11 +186,12 @@ public final class ScopedOtpAccess {
     saved.expectedState = request.expectedState();
     saved.resultJson = canonical(result);
     em.persist(saved);
-    if (status == 201 && realm.isAdminEventsEnabled()) {
+    if ((status == 201 || "otp.delete".equals(operation)) && realm.isAdminEventsEnabled()) {
       var event = new org.keycloak.events.admin.AdminEvent();
       event.setTime(System.currentTimeMillis());
       event.setRealmId(realm.getId());
-      event.setOperationType(org.keycloak.events.admin.OperationType.CREATE);
+      event.setOperationType("otp.delete".equals(operation)
+          ? org.keycloak.events.admin.OperationType.DELETE : org.keycloak.events.admin.OperationType.CREATE);
       event.setResourceType(org.keycloak.events.admin.ResourceType.USER);
       event.setResourcePath("accounts/" + account + "/otp");
       var details = new org.keycloak.events.admin.AuthDetails();
@@ -232,8 +245,8 @@ public final class ScopedOtpAccess {
     public KeycloakSession session() { lifetime.check(); return lifetime.session; }
     public RealmModel realm() { lifetime.check(); return realm; }
     public UserModel user() { lifetime.check(); return user; }
-    public String initialCode() { lifetime.check(); if (request == null) deny(); return request.otp().path("initialCode").textValue(); }
-    public String secret() { lifetime.check(); if (request == null) deny(); return request.otp().path("secret").textValue(); }
+    public String initialCode() { lifetime.check(); if (request == null || !"otp.app-setup".equals(request.operation())) deny(); return request.otp().path("initialCode").textValue(); }
+    public String secret() { lifetime.check(); if (request == null || !"otp.app-setup".equals(request.operation())) deny(); return request.otp().path("secret").textValue(); }
     @Override public String toString() { return "VerifiedOtpTarget[redacted]"; }
   }
 

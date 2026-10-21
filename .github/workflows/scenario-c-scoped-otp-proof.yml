@@ -56,7 +56,7 @@ jobs:
         run: |
           python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_maintenance_ci.py -v
           python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_scoped_otp_ci.py -v
-      - name: Package default-off source and run thirteen ordinary plus twelve parser units
+      - name: Package default-off source and run all thirty-four current lifecycle Java units
         working-directory: keycloak-image/account-lifecycle-spi
         env:
           MAVEN_OPTS: -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2

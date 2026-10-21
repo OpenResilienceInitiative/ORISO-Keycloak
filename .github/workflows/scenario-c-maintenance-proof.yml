@@ -50,7 +50,7 @@ jobs:
           echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
       - name: Check evidence gates without starting a native fixture
         run: python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_maintenance_ci.py -v
-      - name: Package default-off source and run thirteen ordinary plus twelve parser units
+      - name: Package default-off source and run all thirty-four current lifecycle Java units
         working-directory: keycloak-image/account-lifecycle-spi
         env:
           MAVEN_OPTS: -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2

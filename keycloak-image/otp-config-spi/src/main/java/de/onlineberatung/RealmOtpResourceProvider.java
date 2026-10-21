@@ -177,7 +177,20 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @DELETE
   @Path("delete-otp/{username}")
   @Produces({MediaType.APPLICATION_JSON})
-  public Response deleteOtp(@PathParam("username") final String username) {
+  @Consumes({MediaType.APPLICATION_JSON})
+  public Response deleteOtpRequest(@PathParam("username") final String username, final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfDelete(
+          session, username, raw,
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          target -> deleteOtpForTarget(new CredentialContext(target.session(), target.realm(), target.user())));
+    }
+    return deleteOtp(username);
+  }
+
+  public Response deleteOtp(final String username) {
     verifyAuthentication();
 
     final RealmModel realm = this.session.getContext().getRealm();
@@ -188,8 +201,10 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
       return Response.status(Status.BAD_REQUEST).entity(new Error().error(MISSING_PARAMETER_ERROR)
           .errorDescription(MISSING_USERNAME_ERROR_DESCRIPTION)).build();
     }
-    var credentialContext = new CredentialContext(session, realm, user);
+    return deleteOtpForTarget(new CredentialContext(session, realm, user));
+  }
 
+  private Response deleteOtpForTarget(CredentialContext credentialContext) {
     appCredentialService.deleteCredentials(credentialContext);
     mailCredentialService.deleteCredential(credentialContext);
 

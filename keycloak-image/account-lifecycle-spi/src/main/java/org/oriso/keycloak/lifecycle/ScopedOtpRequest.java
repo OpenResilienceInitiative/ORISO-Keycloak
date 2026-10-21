@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 record ScopedOtpRequest(String operation, String accountId, String operationId,
     String expectedState, JsonNode target, JsonNode otp, JsonNode body) {
   static ScopedOtpRequest parse(String operation, String accountId, JsonNode body) {
-    if (!"otp.app-setup".equals(operation)) deny();
+    if (!java.util.Set.of("otp.app-setup", "otp.delete").contains(operation)) deny();
     uuid(accountId);
     fields(body, "target", "operationId", "expectedState", "otp");
     var read = JSON.createObjectNode();
@@ -18,6 +18,11 @@ record ScopedOtpRequest(String operation, String accountId, String operationId,
     String state = text(body, "expectedState", 64, false);
     hex(state);
     var otp = body.path("otp");
+    if ("otp.delete".equals(operation)) {
+      if (!otp.isNull()) bad();
+      return new ScopedOtpRequest(operation, accountId, operationId, state,
+          checkedTarget.deepCopy(), otp.deepCopy(), body.deepCopy());
+    }
     fields(otp, "initialCode", "secret", "email");
     String initialCode = text(otp, "initialCode", 8, false);
     String secret = text(otp, "secret", 512, false);

@@ -73,10 +73,20 @@ public class ScopedOtpRequestTest {
   }
 
   @Test
-  public void onlyTheExplicitFirstAppOperationIsImplemented() {
+  public void onlyTheExplicitImplementedOtpOperationsAreAccepted() {
     rejected("otp.native-proxy", ID, body());
     rejected("otp.*", ID, body());
     rejected("account.password", ID, body());
+  }
+
+  @Test
+  public void deleteHasExactlyANullOtpPayload() {
+    var exact = body();
+    exact.putNull("otp");
+    var decoded = ScopedOtpRequest.parse("otp.delete", ID, exact);
+    assertEquals(OPERATION, decoded.operationId());
+    assertTrue(decoded.otp().isNull());
+    rejected("otp.delete", ID, body());
   }
 
   @Test
