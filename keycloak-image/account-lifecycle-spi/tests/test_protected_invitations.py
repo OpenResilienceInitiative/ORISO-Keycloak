@@ -314,6 +314,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
                 }
             ],
         }
+        configuration = cls.prepare_installation(helper, configuration)
         original_run(
             ["docker", "stop", "-t", "5", cls.name], check=True, capture_output=True
         )
@@ -365,6 +366,11 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         )
         cls.configuration_checked = True
         cls.phase = "configured-native-ready"
+
+    @classmethod
+    def prepare_installation(cls, helper, configuration):
+        """Separate native installation suite supplies one explicit counterfactual."""
+        return configuration
 
     @classmethod
     def remove_owned_volume(cls):
