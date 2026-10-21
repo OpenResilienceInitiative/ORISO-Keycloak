@@ -58,6 +58,7 @@ class SanitizedResult(unittest.TestResult):
             "protected_fence_cases.py",
             "protected_expiry_cases.py",
             "protected_reconciliation_cases.py",
+            "protected_binding_readiness.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }

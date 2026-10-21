@@ -114,6 +114,7 @@ jobs:
           - unregistered-task-role-human
           - unregistered-inherited-task-human
           - allowlisted-denied-human
+          - binding-drift-login-available
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -153,9 +154,14 @@ jobs:
           set -euo pipefail
           docker info > /dev/null
           export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
-          python keycloak-image/account-lifecycle-spi/tests/run_protected_installation.py \
-            --case "$PROTECTED_INSTALLATION_CASE" \
-            --report keycloak-image/account-lifecycle-spi/proof-output/installation.json
+          if [ "$PROTECTED_INSTALLATION_CASE" = binding-drift-login-available ]; then
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_readiness.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/readiness.json
+          else
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_installation.py \
+              --case "$PROTECTED_INSTALLATION_CASE" \
+              --report keycloak-image/account-lifecycle-spi/proof-output/installation.json
+          fi
       - name: Clean up only this fresh job's labelled native resources
         if: always()
         shell: bash
