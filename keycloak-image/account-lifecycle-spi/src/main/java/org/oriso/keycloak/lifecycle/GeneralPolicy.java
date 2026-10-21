@@ -45,7 +45,7 @@ final class GeneralPolicy {
   }
 
   OrdinaryHuman requireSelf(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
-    if (!"read".equals(request.command())) deny();
+    if (!Set.of("read", "locale").contains(request.command())) deny();
     var origin = request.target().path("origin");
     if (!"SELF".equals(origin.path("kind").asText()) || !origin.path("humanAuthority").isNull()) deny();
     // Caller has acquired the realm and target-provenance locks before these fresh human locks.

@@ -121,6 +121,29 @@ final class MaintenanceTarget {
     if (user == null || !session.users().removeUser(realm, user)) conflict();
   }
 
+  void locale(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer) {
+    var current = read(request, policy, rawHumanBearer);
+    if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText())) conflict();
+    var realm = session.getContext().getRealm();
+    var user = session.users().getUserById(realm, request.accountId());
+    var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
+    if (cache != null && user != null) {
+      cache.evict(realm, user);
+      user = session.users().getUserById(realm, request.accountId());
+    }
+    if (user == null) conflict();
+    String locale = request.change().path("locale").asText();
+    user.setSingleAttribute("locale", locale);
+    var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
+    em.flush();
+    var values = em.createNativeQuery(
+        "select VALUE, LONG_VALUE from USER_ATTRIBUTE where USER_ID = :account and NAME = 'locale' for update")
+        .setParameter("account", request.accountId()).getResultList();
+    if (values.size() != 1) conflict();
+    var stored = (Object[]) values.get(0);
+    if (!locale.equals(scalarText(stored[0])) || stored[1] != null) conflict();
+  }
+
   private JsonNode lockedSnapshot(EntityManager em, String id) {
     // Current locking reads must supply the values we validate. A normal model read
     // can retain an older MariaDB REPEATABLE READ view after these locks are acquired.

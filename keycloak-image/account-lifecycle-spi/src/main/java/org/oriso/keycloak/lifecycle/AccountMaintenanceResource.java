@@ -13,7 +13,7 @@ import java.util.Set;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.resource.RealmResourceProvider;
 
-/** Finite bounded read and receipt-backed deletion; other effects remain closed. */
+/** Finite reads, current-human self locale and receipt-backed deletion. */
 @jakarta.ws.rs.ext.Provider
 @jakarta.enterprise.inject.Vetoed
 @Consumes(MediaType.APPLICATION_JSON)
@@ -112,6 +112,88 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
         event.setTime(System.currentTimeMillis());
         event.setRealmId(realm.getId());
         event.setOperationType(org.keycloak.events.admin.OperationType.DELETE);
+        event.setResourceType(org.keycloak.events.admin.ResourceType.USER);
+        event.setResourcePath("accounts/" + account);
+        var details = new org.keycloak.events.admin.AuthDetails();
+        details.setRealmId(realm.getId());
+        details.setClientId(machine.clientId());
+        details.setUserId(machine.subject());
+        event.setAuthDetails(details);
+        session.getProvider(org.keycloak.events.EventStoreProvider.class).onEvent(event, false);
+      }
+      em.flush();
+      return Response.ok(result).header("Cache-Control", "no-store").build();
+    });
+  }
+
+  @POST
+  @Path("v1/accounts/{account}/locale")
+  public Response locale(@PathParam("account") String account, byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String rawHumanBearer) {
+    return guarded(() -> {
+      var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
+      var body = parse(raw);
+      var realm = session.getContext().getRealm();
+      auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
+          "account.locale", "POST", "realm/" + realm.getId() + "/account/" + account, body);
+      var request = MaintenanceRequest.parse("locale", account, body);
+      if (humanPolicy == null || !"SELF".equals(request.target().path("origin").path("kind").asText())) deny();
+      var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
+      var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
+      if (lockedRealm == null) deny();
+      em.refresh(lockedRealm);
+      String id = realm.getId() + ":" + request.operationId();
+      var prior = em.find(AccountMaintenanceOperation.class, id, LockModeType.PESSIMISTIC_WRITE);
+      String digest = auth.mac("maintenance-intent", body);
+      if (prior != null) {
+        em.refresh(prior);
+        if (!realm.getId().equals(prior.realmId) || !account.equals(prior.accountId)
+            || !"locale".equals(prior.command) || !machine.clientId().equals(prior.ownerClient)
+            || !machine.subject().equals(prior.ownerSubject)
+            || !LifecycleAuthorization.equal(digest, prior.intentDigest)
+            || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState))
+          throw new ClientErrorException("Maintenance operation conflicts", 409);
+        // The immutable operation is the retry provenance; verify the current actual human,
+        // then return before mutable target/CAS resolution or any second native effect.
+        humanPolicy.requireSelf(session, request, rawHumanBearer);
+        return Response.ok(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
+      }
+      targets.locale(request, humanPolicy, rawHumanBearer);
+      var outcome = JSON.createObjectNode();
+      outcome.put("realmId", realm.getId());
+      outcome.put("accountId", account);
+      outcome.put("operationId", request.operationId());
+      outcome.put("command", "locale");
+      outcome.put("ownerClient", machine.clientId());
+      outcome.put("ownerSubject", machine.subject());
+      outcome.put("intentDigest", digest);
+      outcome.put("previousState", request.expectedState());
+      outcome.set("tenantId", request.target().path("tenantId"));
+      outcome.put("originDigest", auth.mac("maintenance-origin", request.target().path("origin")));
+      outcome.put("result", "UPDATED");
+      var result = JSON.createObjectNode();
+      result.put("operationId", request.operationId());
+      result.put("accountId", account);
+      result.put("result", "UPDATED");
+      result.put("receipt", auth.receipt("maintenance-operation-receipt", outcome));
+      var saved = new AccountMaintenanceOperation();
+      saved.id = id;
+      saved.realmId = realm.getId();
+      saved.operationId = request.operationId();
+      saved.accountId = account;
+      saved.command = "locale";
+      saved.ownerClient = machine.clientId();
+      saved.ownerSubject = machine.subject();
+      saved.intentDigest = digest;
+      saved.expectedState = request.expectedState();
+      saved.resultJson = canonical(result);
+      em.persist(saved);
+      if (realm.isAdminEventsEnabled()) {
+        var event = new org.keycloak.events.admin.AdminEvent();
+        event.setTime(System.currentTimeMillis());
+        event.setRealmId(realm.getId());
+        event.setOperationType(org.keycloak.events.admin.OperationType.UPDATE);
         event.setResourceType(org.keycloak.events.admin.ResourceType.USER);
         event.setResourcePath("accounts/" + account);
         var details = new org.keycloak.events.admin.AuthDetails();
