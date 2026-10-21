@@ -19,7 +19,7 @@ EXPECTED_UNITS = {
     "org.oriso.keycloak.lifecycle.GeneralPolicyTest": 4,
     "org.oriso.keycloak.lifecycle.ScopedOtpRequestTest": 10,
 }
-NATIVE_FLOOR = 7
+NATIVE_FLOOR = 8
 
 
 def source_manifest(module):
@@ -136,6 +136,16 @@ def native(report, workflow):
     human_locale_red = not result.errors and not result.skipped and any(
         item["case"] in native_humans & committed & failures and item["command"] == "locale"
         and item["expected_status"] == 200 and item["status"] == 404 for item in human_requests)
+    availability_case = "test_maintenance.MaintenancePermissions.test_creator_exact_username_availability_exposes_only_a_boolean"
+    availability_preconditions = any(item.get("case") == availability_case
+        and item.get("phase") == "username-availability-preconditions"
+        and all(item.get(key) is True for key in ("canonical_creator", "exact_two_audiences",
+            "stock_native_denied", "exact_committed_native_username")) for item in phases)
+    availability_red = bool(availability_preconditions and failures == {availability_case}
+        and len(result.failures) == 1 and not result.errors and not result.skipped
+        and result.testsRun == NATIVE_FLOOR and any(item.get("case") == availability_case
+            and item.get("phase") == "username-availability-http"
+            and item.get("actor") == "ACCOUNT_CREATE" and item.get("status") == 404 for item in phases))
     after = source_manifest(module_root)
     summary = {
         "suite": "maintenance", "floor": NATIVE_FLOOR, "discovered": discovered,
@@ -152,12 +162,13 @@ def native(report, workflow):
         "same_bearer_stock_denial_cases": sorted(verified_denial_cases),
         "genuine_read_red": red("read"), "genuine_delete_red": red("delete"),
         "genuine_human_read_red": bool(human_read_red), "genuine_human_locale_red": bool(human_locale_red),
+        "genuine_username_availability_red": availability_red,
         "diagnostic_boundary": "Receiver bounded read/delete and first native human locale diagnostic; domain caller, OTP, MariaDB and full Scenario C remain open",
     }
     summary["accepted"] = bool(result.wasSuccessful() and result.testsRun == discovered
         and not result.skipped and summary["jar_stable"] and summary["source_stable"] and summary["workflow_stable"])
     summary["status"] = "GREEN" if summary["accepted"] else (
-        "BEHAVIOR_RED" if summary["genuine_read_red"] or summary["genuine_delete_red"] or human_read_red or human_locale_red
+        "BEHAVIOR_RED" if summary["genuine_read_red"] or summary["genuine_delete_red"] or human_read_red or human_locale_red or availability_red
         else "FAILED_WITHOUT_CONFIRMED_READ_OR_DELETE_RED")
     write_json(report, summary)
     print(json.dumps({key: value for key, value in summary.items() if key != "source_manifest"}, sort_keys=True))

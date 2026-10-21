@@ -100,6 +100,57 @@ class MaintenancePermissions(LifecycleFixture, unittest.TestCase):
         self.assertRegex(result["state"], r"^[a-f0-9]{64}$")
         self.assertFalse({"attributes", "credentials", "serviceAccountClientLink"} & set(result))
 
+    def availability(self, value, actor="ACCOUNT_CREATE", body_override=None, bearer=None):
+        body = {"selector": "username", "value": value} if body_override is None else body_override
+        now = int(time.time())
+        claims = {"iss": "userservice", "aud": "oriso-account-maintenance",
+                  "purpose": "ACCOUNT_AVAILABILITY", "operation": "account.username-availability",
+                  "method": "POST", "actor": actor, "realm": REALM,
+                  "target": "realm/" + self.realm_id + "/availability/username",
+                  "taskClient": ACTORS[actor][0], "taskSubject": SUBJECTS[actor],
+                  "payloadDigest": mac("payload", body), "jti": str(uuid.uuid4()),
+                  "nonce": uuid.uuid4().hex, "iat": now, "exp": now + 60}
+        encoded = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
+        signature = base64.urlsafe_b64encode(hmac.new(CONTEXT_KEY,
+            ("proof\n" + encoded).encode(), hashlib.sha256).digest()).decode().rstrip("=")
+        status, response = call(self.base, "POST", "/realms/" + REALM
+            + "/oriso-account-maintenance/v1/availability", body, bearer or self.token(actor),
+            proof=encoded + "." + signature)
+        self.phase("username-availability-http", actor=actor, status=status)
+        return status, response
+
+    def test_creator_exact_username_availability_exposes_only_a_boolean(self):
+        account, creation = self.committed()
+        username = creation["account"]["username"]
+        bearer = self.token("ACCOUNT_CREATE")
+        encoded = bearer.split(".")[1]
+        import json
+        claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        audience = claims["aud"]
+        self.assertEqual({"userservice", "oriso-account-lifecycle"},
+                         set([audience] if isinstance(audience, str) else audience))
+        self.assertEqual(403, call(self.base, "GET", "/admin/realms/" + REALM
+                                  + "/users/" + account, token=bearer)[0])
+        self.assertEqual(username, self.admin("GET", "/users/" + account)["username"])
+        self.phase("username-availability-preconditions", canonical_creator=True,
+                   exact_two_audiences=True, stock_native_denied=True,
+                   exact_committed_native_username=True)
+        status, response = self.availability(username, bearer=bearer)
+        self.assertEqual(200, status)
+        self.assertEqual({"available": False}, response)
+        status, response = self.availability("absent-" + uuid.uuid4().hex)
+        self.assertEqual(200, status)
+        self.assertEqual({"available": True}, response)
+        for actor in ACTORS:
+            if actor != "ACCOUNT_CREATE":
+                self.assertEqual(403, self.availability(username, actor=actor)[0])
+        self.assertEqual(400, self.availability(username,
+            body_override={"selector": "username", "value": username, "query": "*"})[0])
+        self.assertEqual(403, self.availability(username,
+            body_override={"selector": "email", "value": "private@fixture.invalid"})[0])
+        self.phase("username-availability-finite-result", exact_boolean_only=True,
+                   other_four_actors_denied=True, generic_query_denied=True, email_selector_denied=True)
+
     def test_delete_retry_returns_saved_receipt_and_never_removes_reused_identity(self):
         account_id, create = self.committed()
         target = self.target(account_id, create)

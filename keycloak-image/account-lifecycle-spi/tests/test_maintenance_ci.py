@@ -69,12 +69,12 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         with self.assertRaises(ValueError):
             sanitize_units(self.reports, self.root / "safe.xml")
 
-    def test_native_source_contains_all_five_prepared_methods(self):
+    def test_native_source_contains_all_six_prepared_methods(self):
         tree = ast.parse(Path(__file__).with_name("test_maintenance.py").read_text())
         methods = [item for node in tree.body if isinstance(node, ast.ClassDef)
                    and node.name == "MaintenancePermissions" for item in node.body
                    if isinstance(item, ast.FunctionDef) and item.name.startswith("test_")]
-        self.assertEqual(5, len(methods))
+        self.assertEqual(6, len(methods))
 
     def test_manifests_exclude_compiled_outputs_but_bind_real_source(self):
         (self.root / "target").mkdir()
