@@ -52,6 +52,8 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.read_observation = None
         cls.read_proof_controls = []
         cls.commit_observation = None
+        cls.recover_observation = None
+        cls.recover_proof_controls = []
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -1238,6 +1240,235 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         )
         self.assertEqual(count, self.admin("GET", "/users/count"))
         self.assertFalse(self.admin("GET", "/users/" + account)["enabled"])
+
+    def test_protected_recovery_fences_cleanup_without_adopting_original_ownership(
+        self,
+    ):
+        approval, attempt, scope, approved, create = self.approved_creation()
+        status, opened = self.protected_machine_request(
+            "create", approval, create, actor="ACCOUNT_CREATE", attempt=attempt
+        )
+        self.assertEqual(201, status)
+        self.assertEqual("OPEN", opened["state"])
+        account = opened["accountId"]
+        encoded, signature = opened["creationProof"].split(".")
+        self.assertEqual(
+            base64.urlsafe_b64encode(
+                hmac.new(
+                    CONTEXT_KEY, ("creation-proof\n" + encoded).encode(), hashlib.sha256
+                ).digest()
+            )
+            .decode()
+            .rstrip("="),
+            signature,
+        )
+        origin = json.loads(
+            base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        )
+        self.assertEqual(self.realm_id, origin["realmId"])
+        self.assertEqual(ACTORS["ACCOUNT_CREATE"][0], origin["ownerClient"])
+        self.assertEqual(SUBJECTS["ACCOUNT_CREATE"], origin["ownerSubject"])
+        self.assertEqual(account, origin["accountId"])
+        self.assertEqual(create["creationFingerprint"], origin["creationFingerprint"])
+        self.assertEqual(
+            create["acceptanceClaim"],
+            origin["scope"]["approvalBinding"]["acceptanceClaim"],
+        )
+        before = self.admin("GET", "/users/" + account)
+        self.assertFalse(before["enabled"])
+        groups = self.admin("GET", "/users/" + account + "/groups")
+        self.assertEqual(["/pending-provisioning"], [v["path"] for v in groups])
+        count = self.admin("GET", "/users/count")
+        recover = {
+            key: create[key]
+            for key in (
+                "approvalReceipt",
+                "scopeDigest",
+                "authorizationRevision",
+                "creationFingerprint",
+                "acceptanceClaim",
+            )
+        }
+        recover.update(expectedGeneration=0, recoveryId=str(uuid.uuid4()))
+        original_digest = mac("protected-invitation-payload/v1", recover)
+        type(self).phase = "protected-owned-admin-recover-http"
+        status, claimed = self.protected_machine_request(
+            "recover", approval, recover, actor="ACCOUNT_ADMIN", attempt=attempt
+        )
+        type(self).recover_observation = {
+            "actualStatus": status,
+            "expectedStatus": 200,
+            "sourceLiveApprovalAndCreateSucceeded": True,
+            "nativePendingAccountValidated": True,
+            "nativeAdminSubjectRolesAndAudiencesMatched": True,
+            "originalCreatorAndAcceptanceBound": True,
+            "originalRecoverDigestPredispatch": True,
+            "accountCountUnchanged": count == self.admin("GET", "/users/count"),
+            "nativeAccountUnchanged": before == self.admin("GET", "/users/" + account),
+            "nativeMembershipUnchanged": groups
+            == self.admin("GET", "/users/" + account + "/groups"),
+        }
+        self.assertEqual(200, status)
+        self.assertEqual("RECOVERY_CLAIMED", claimed["state"])
+        self.assertEqual(account, claimed["accountId"])
+        self.assertEqual(opened["creationProof"], claimed["creationProof"])
+        self.assertEqual(
+            {"executionId": recover["recoveryId"], "generation": 1},
+            claimed["execution"],
+        )
+        self.assertIsNone(claimed["terminalReceipt"])
+        receipt = self.verified_receipt(
+            claimed["recoveryReceipt"],
+            "recovery-receipt",
+            16000,
+            {
+                "realmId",
+                "attemptId",
+                "accountId",
+                "ownerClient",
+                "ownerSubject",
+                "scope",
+                "creationFingerprint",
+                "groupId",
+                "roleFingerprint",
+                "state",
+                "generation",
+                "executionId",
+                "operation",
+                "commandDigest",
+            },
+        )
+        self.assertEqual(self.realm_id, receipt["realmId"])
+        self.assertEqual(attempt, receipt["attemptId"])
+        self.assertEqual(account, receipt["accountId"])
+        self.assertEqual(ACTORS["ACCOUNT_CREATE"][0], receipt["ownerClient"])
+        self.assertEqual(SUBJECTS["ACCOUNT_CREATE"], receipt["ownerSubject"])
+        self.assertEqual("RECOVERY_CLAIMED", receipt["state"])
+        self.assertEqual("recover", receipt["operation"])
+        self.assertEqual(1, receipt["generation"])
+        self.assertEqual(recover["recoveryId"], receipt["executionId"])
+        self.assertEqual(original_digest, receipt["commandDigest"])
+        nested = json.loads(receipt["scope"])
+        self.assertEqual(
+            {
+                "approvalId": approval,
+                "scopeDigest": approved["scopeDigest"],
+                "authorizationRevision": 1,
+                "acceptanceClaim": create["acceptanceClaim"],
+            },
+            nested["approvalBinding"],
+        )
+        self.assertEqual(
+            (200, claimed),
+            self.protected_machine_request(
+                "recover", approval, recover, actor="ACCOUNT_ADMIN", attempt=attempt
+            ),
+        )
+        later = copy.deepcopy(recover)
+        later.update(expectedGeneration=1, recoveryId=str(uuid.uuid4()))
+        # A cleanup-only claim does not consult or grant mutable profile state.
+        self.admin(
+            "PUT",
+            "/groups/" + self.protected_group_id,
+            {"name": "temporarily-renamed-profile"},
+        )
+        try:
+            status, second = self.protected_machine_request(
+                "recover", approval, later, actor="ACCOUNT_CREATE", attempt=attempt
+            )
+            self.assertEqual(200, status)
+            self.assertEqual(
+                {"executionId": later["recoveryId"], "generation": 2},
+                second["execution"],
+            )
+        finally:
+            self.admin(
+                "PUT", "/groups/" + self.protected_group_id, {"name": "platform-admins"}
+            )
+        self.assertEqual(
+            409,
+            self.protected_machine_request(
+                "recover", approval, recover, actor="ACCOUNT_ADMIN", attempt=attempt
+            )[0],
+        )
+        finish = {
+            key: create[key]
+            for key in (
+                "approvalReceipt",
+                "scopeDigest",
+                "authorizationRevision",
+                "creationFingerprint",
+                "execution",
+            )
+        }
+        finish.update(
+            accountId=account,
+            creationProof=opened["creationProof"],
+            localCommit={
+                "journalVersion": 1,
+                "outboxId": str(uuid.uuid4()),
+                "effectsDigest": "b" * 64,
+            },
+        )
+        self.assertEqual(
+            409,
+            self.protected_machine_request(
+                "commit", approval, finish, actor="ACCOUNT_CREATE", attempt=attempt
+            )[0],
+        )
+        finish["execution"] = second["execution"]
+        self.assertEqual(
+            409,
+            self.protected_machine_request(
+                "commit", approval, finish, actor="ACCOUNT_CREATE", attempt=attempt
+            )[0],
+        )
+        translated = {
+            "identity": {
+                "scope": nested,
+                "creationFingerprint": create["creationFingerprint"],
+            },
+            "expectedGeneration": 1,
+            "recoveryId": later["recoveryId"],
+        }
+        controls = [
+            ("wrong-purpose", {"claim_overrides": {"purpose": "INVITE_RESERVATIONS"}}),
+            ("ordinary-proof-domain", {"proof_domain": "proof"}),
+            ("ordinary-payload-domain", {"payload_domain": "payload"}),
+            ("translated-body-proof", {"proof_body": translated}),
+            ("setup-native-bearer", {"actor": "SETUP"}),
+            ("mail-native-bearer", {"actor": "MAIL"}),
+            ("runtime-native-bearer", {"actor": "RUNTIME"}),
+        ]
+        for label, options in controls:
+            with self.subTest(control=label):
+                status, _ = self.protected_machine_request(
+                    "recover",
+                    approval,
+                    later,
+                    attempt=attempt,
+                    **{"actor": "ACCOUNT_ADMIN", **options},
+                )
+                type(self).recover_proof_controls.append(
+                    {"control": label, "status": status}
+                )
+                self.assertEqual(403, status)
+        query = {
+            "scopeDigest": approved["scopeDigest"],
+            "workflowId": scope["workflowId"],
+            "inviteId": scope["inviteId"],
+            "authorizationRevision": 1,
+            "attemptId": attempt,
+            "approvalRequestDigest": approved["approvalRequestDigest"],
+        }
+        status, bound = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual("BOUND", bound["state"])
+        self.assertEqual(attempt, bound["boundAttemptId"])
+        self.assertEqual(approved["approvalReceipt"], bound["approvalReceipt"])
+        self.assertEqual(before, self.admin("GET", "/users/" + account))
+        self.assertEqual(groups, self.admin("GET", "/users/" + account + "/groups"))
+        self.assertEqual(count, self.admin("GET", "/users/count"))
 
     def test_installer_routine_and_unbound_human_cannot_authorize_protected_scope(self):
         for actor in ACTORS:

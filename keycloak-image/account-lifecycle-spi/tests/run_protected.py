@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 10:
+        if discovered != 11:
             raise AssertionError(
-                "Exactly ten protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit cases required"
+                "Exactly eleven protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover cases required"
             )
 
         def deadline(signum, frame):
@@ -347,6 +347,8 @@ def main():
                 "ownedReadObservation": getattr(fixture, "read_observation", None),
                 "ownedReadProofControls": getattr(fixture, "read_proof_controls", []),
                 "commitObservation": getattr(fixture, "commit_observation", None),
+                "recoverObservation": getattr(fixture, "recover_observation", None),
+                "recoverProofControls": getattr(fixture, "recover_proof_controls", []),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -413,8 +415,59 @@ def main():
             and len({v["control"] for v in summary["ownedReadProofControls"]}) == 16
             and all(v["status"] == 403 for v in summary["ownedReadProofControls"])
             and (summary["commitObservation"] or {}).get("actualStatus") == 200
+            and (summary["recoverObservation"] or {}).get("actualStatus") == 200
+            and len(summary["recoverProofControls"]) == 7
+            and all(v["status"] == 403 for v in summary["recoverProofControls"])
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and observation.get("actualStatus") == 201
+            and observation.get("noAccountCreated") is True
+            and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
+            and (summary["createObservation"] or {}).get("actualStatus") == 201
+            and summary["createObservation"].get("oneAccountCreated") is True
+            and (summary["ownedReadObservation"] or {}).get("actualStatus") == 200
+            and len(summary["ownedReadProofControls"]) == 16
+            and all(v["status"] == 403 for v in summary["ownedReadProofControls"])
+            and (summary["commitObservation"] or {}).get("actualStatus") == 200
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["recoverObservation"] or {}).get("actualStatus") in (404, 405)
+            and summary["recoverObservation"].get("expectedStatus") == 200
+            and all(
+                summary["recoverObservation"].get(key) is True
+                for key in (
+                    "sourceLiveApprovalAndCreateSucceeded",
+                    "nativePendingAccountValidated",
+                    "nativeAdminSubjectRolesAndAudiencesMatched",
+                    "originalCreatorAndAcceptanceBound",
+                    "originalRecoverDigestPredispatch",
+                    "accountCountUnchanged",
+                    "nativeAccountUnchanged",
+                    "nativeMembershipUnchanged",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_protected_recovery_fences_cleanup_without_adopting_original_ownership"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = (
+                "GENUINE_PROTECTED_OWNED_RECOVER_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls
