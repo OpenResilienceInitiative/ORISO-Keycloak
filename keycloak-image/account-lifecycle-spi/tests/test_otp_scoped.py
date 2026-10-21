@@ -362,12 +362,31 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual(201, status)
         self.assertEqual(201, result["status"])
         self.assertEqual(body["operationId"], result["operationId"])
+        self.assertEqual({"info": "OTP setup created"}, result["result"])
+        encoded, signature = result["receipt"].split(".")
+        expected = hmac.new(CONTEXT_KEY, ("otp-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest()
+        self.assertTrue(hmac.compare_digest(expected, signature))
+        receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual(ACTORS["ACCOUNT_ADMIN"][0], receipt["ownerClient"])
+        self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], receipt["ownerSubject"])
+        self.assertEqual("otp.email-finish", receipt["operation"])
+        binding = receipt["emailCredential"]
+        self.assertEqual({"credentialId", "generation", "destinationDigest"}, set(binding))
+        self.assertEqual(credential_id, binding["credentialId"])
+        self.assertRegex(binding["generation"], r"^[a-f0-9]{64}$")
+        destination = hmac.new(CONTEXT_KEY, b"otp-email-destination\n" + canonical("pending@fixture.invalid"), hashlib.sha256).hexdigest()
+        self.assertEqual(destination, binding["destinationDigest"])
+        serialized = canonical(result) + canonical(receipt)
+        self.assertNotIn(b"pending@fixture.invalid", serialized)
+        self.assertNotIn(canonical(code), serialized)
         mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials")
                 if c["type"] == "MAIL_OTP_CM"]
         self.assertEqual(1, len(mail))
         self.assertEqual(credential_id, mail[0]["id"])
         self.assertTrue(json.loads(mail[0]["credentialData"])["active"])
-        self.phase("scoped-otp-email-finish-effect", exact_native_credential_activated=True)
+        self.phase("scoped-otp-email-finish-effect", exact_native_credential_activated=True,
+                   actual_admin_receipt=True, credential_generation_destination_bound=True,
+                   plaintext_recipient_code_absent=True)
 
     def remove_exact_mail_seed(self, credential_id):
         status, _ = call(self.base, "DELETE", "/admin/realms/" + REALM + "/users/"

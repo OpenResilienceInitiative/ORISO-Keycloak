@@ -96,7 +96,7 @@ public final class ScopedOtpAccess {
     // Realm -> committed provenance -> current human -> native user/credential locks.
     var current = new MaintenanceTarget(session, authorization, mappings)
         .readOtpSelf(request, policy, humanHeader);
-    return invoke(session, username, account, current, null, read);
+    return invoke(session, authorization, username, account, current, null, read).response();
   }
 
   static Response checkedSelfMutation(KeycloakSession session, LifecycleAuthorization authorization,
@@ -151,7 +151,8 @@ public final class ScopedOtpAccess {
         : targets.readOtpSelfAppSetup(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
       throw new jakarta.ws.rs.ClientErrorException("Current OTP target state conflicts", 409);
-    var nativeResponse = invoke(session, username, account, current, request, setup);
+    var invocation = invoke(session, authorization, username, account, current, request, setup);
+    var nativeResponse = invocation.response();
     int status = nativeResponse.getStatus();
     var nativeResult = JSON.valueToTree(nativeResponse.getEntity());
     if ("otp.delete".equals(operation) && status != 200)
@@ -177,6 +178,10 @@ public final class ScopedOtpAccess {
     outcome.put("originDigest", authorization.mac("otp-origin", request.target().path("origin")));
     outcome.put("status", status);
     outcome.put("resultDigest", authorization.mac("otp-result", nativeResult));
+    if ("otp.email-finish".equals(operation)) {
+      if (invocation.emailCredential() == null) deny();
+      outcome.set("emailCredential", invocation.emailCredential());
+    }
     var result = JSON.createObjectNode();
     result.put("operationId", request.operationId());
     result.put("accountId", account);
@@ -215,7 +220,10 @@ public final class ScopedOtpAccess {
     return Response.status(status).entity(result).header("Cache-Control", "no-store").build();
   }
 
-  private static Response invoke(KeycloakSession session, String username, String account,
+  private record Invocation(Response response, com.fasterxml.jackson.databind.JsonNode emailCredential) {}
+
+  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+      String username, String account,
       com.fasterxml.jackson.databind.JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action) {
     var realm = session.getContext().getRealm();
@@ -229,11 +237,12 @@ public final class ScopedOtpAccess {
     if (user == null || !username.equals(user.getUsername())) deny();
     var lifetime = new Lifetime(session);
     try {
-      var checked = new VerifiedOtpTarget(lifetime, realm, user, request);
+      var checked = new VerifiedOtpTarget(lifetime, authorization, realm, user, request);
       var response = action.apply(checked);
       lifetime.check();
       if (response == null) throw new IllegalStateException("OTP callback did not return a response");
-      return Response.fromResponse(response).header("Cache-Control", "no-store").build();
+      return new Invocation(Response.fromResponse(response).header("Cache-Control", "no-store").build(),
+          checked.emailCredential == null ? null : checked.emailCredential.deepCopy());
     } finally {
       lifetime.open = false;
     }
@@ -242,11 +251,15 @@ public final class ScopedOtpAccess {
   /** Same live request and transaction only. It contains no human bearer or transferable authority. */
   public static final class VerifiedOtpTarget {
     private final Lifetime lifetime;
+    private final LifecycleAuthorization authorization;
     private final RealmModel realm;
     private final UserModel user;
     private final ScopedOtpRequest request;
-    private VerifiedOtpTarget(Lifetime lifetime, RealmModel realm, UserModel user, ScopedOtpRequest request) {
+    private com.fasterxml.jackson.databind.JsonNode emailCredential;
+    private VerifiedOtpTarget(Lifetime lifetime, LifecycleAuthorization authorization,
+        RealmModel realm, UserModel user, ScopedOtpRequest request) {
       this.lifetime = lifetime;
+      this.authorization = authorization;
       this.realm = realm;
       this.user = user;
       this.request = request;
@@ -256,6 +269,32 @@ public final class ScopedOtpAccess {
     public UserModel user() { lifetime.check(); return user; }
     public String initialCode() { lifetime.check(); if (request == null || !Set.of("otp.app-setup", "otp.email-finish").contains(request.operation())) deny(); return request.otp().path("initialCode").textValue(); }
     public String secret() { lifetime.check(); if (request == null || !"otp.app-setup".equals(request.operation())) deny(); return request.otp().path("secret").textValue(); }
+    /** Binds a current native-owned credential before its effect; never accepts DTO authority. */
+    public void bindEmailFinishCredential(org.keycloak.credential.CredentialModel selected) {
+      lifetime.check();
+      if (request == null || !"otp.email-finish".equals(request.operation())
+          || emailCredential != null || selected == null) deny();
+      String id = uuid(selected.getId());
+      var owned = user.credentialManager().getStoredCredentialById(id);
+      if (owned == null || !"MAIL_OTP_CM".equals(owned.getType())
+          || !java.util.Objects.equals(owned.getType(), selected.getType())
+          || !java.util.Objects.equals(owned.getCreatedDate(), selected.getCreatedDate())
+          || !java.util.Objects.equals(owned.getCredentialData(), selected.getCredentialData())
+          || !java.util.Objects.equals(owned.getSecretData(), selected.getSecretData())
+          || owned.getCreatedDate() == null || owned.getCreatedDate() <= 0) deny();
+      var generation = JSON.createObjectNode();
+      generation.put("credentialId", id);
+      generation.put("createdDate", owned.getCreatedDate());
+      generation.put("credentialData", owned.getCredentialData());
+      generation.put("secretData", owned.getSecretData());
+      String destination = text(parse(owned.getCredentialData()), "email", 320, false);
+      var binding = JSON.createObjectNode();
+      binding.put("credentialId", id);
+      binding.put("generation", authorization.mac("otp-email-credential-generation", generation));
+      binding.put("destinationDigest", authorization.mac("otp-email-destination", JSON.valueToTree(destination)));
+      emailCredential = binding;
+      lifetime.check();
+    }
     @Override public String toString() { return "VerifiedOtpTarget[redacted]"; }
   }
 
