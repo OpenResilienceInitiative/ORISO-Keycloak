@@ -436,6 +436,12 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
             "expectedState": before["state"],
             "change": {"locale": "fr"},
         }
+        before_audits = [
+            event
+            for event in self.admin("GET", "/admin-events?max=100")
+            if event.get("resourcePath") == "accounts/" + self.account_id
+            and event.get("operationType") == "UPDATE"
+        ]
         status, result = self.invoke("locale", body, human, 200)
         self.assertEqual(200, status)
         encoded = result["receipt"].split(".")[0]
@@ -468,10 +474,14 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
             if event.get("resourcePath") == "accounts/" + self.account_id
             and event.get("operationType") == "UPDATE"
         ]
-        self.assertTrue(audits, "Native maintenance must retain actual ADMIN audit ownership")
-        for event in audits:
-            self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], event["authDetails"]["userId"])
-            self.assertEqual(ACTORS["ACCOUNT_ADMIN"][0], event["authDetails"]["clientId"])
+        # The earlier ordinary COMMIT legitimately has a CREATE-owned UPDATE at the same path.
+        # Bind this one maintenance call by its exact added audit row, retaining all older rows.
+        self.assertEqual(len(before_audits) + 1, len(audits))
+        older = {canonical(event) for event in before_audits}
+        added = [event for event in audits if canonical(event) not in older]
+        self.assertEqual(1, len(added))
+        self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], added[0]["authDetails"]["userId"])
+        self.assertEqual(ACTORS["ACCOUNT_ADMIN"][0], added[0]["authDetails"]["clientId"])
         self.phase("human-maintenance-admin-audit", actual_admin_owner=True)
         self.assertEqual(
             ["fr"],
