@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 12:
+        if discovered != 13:
             raise AssertionError(
-                "Exactly twelve protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon cases required"
+                "Exactly thirteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate cases required"
             )
 
         def deadline(signum, frame):
@@ -351,6 +351,12 @@ def main():
                 "recoverProofControls": getattr(fixture, "recover_proof_controls", []),
                 "absentRecoveryObservation": getattr(
                     fixture, "absent_recover_observation", None
+                ),
+                "compensateObservation": getattr(
+                    fixture, "compensate_observation", None
+                ),
+                "compensateProofControls": getattr(
+                    fixture, "compensate_proof_controls", []
                 ),
             }
         )
@@ -422,8 +428,51 @@ def main():
             and len(summary["recoverProofControls"]) == 7
             and all(v["status"] == 403 for v in summary["recoverProofControls"])
             and (summary["absentRecoveryObservation"] or {}).get("actualStatus") == 200
+            and (summary["compensateObservation"] or {}).get("actualStatus") == 200
+            and len(summary["compensateProofControls"]) == 7
+            and all(v["status"] == 403 for v in summary["compensateProofControls"])
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["compensateObservation"] or {}).get("actualStatus")
+            in (404, 405)
+            and summary["compensateObservation"].get("expectedStatus") == 200
+            and all(
+                summary["compensateObservation"].get(key) is True
+                for key in (
+                    "sourceLiveHumanApprovalAndCreateSucceeded",
+                    "nativePendingAccountAndMembershipValidated",
+                    "nativeAdminSubjectRolesAndAudiencesMatched",
+                    "currentCleanupRecoveryClaimValidated",
+                    "originalCreatorAcceptanceProofAndDigestPredispatch",
+                    "boundApprovalAndOriginalHumanReceiptValidated",
+                    "mutableProfileRenamedBeforeCleanup",
+                    "accountCountUnchanged",
+                    "originalPendingAccountPreserved",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_protected_compensation_deletes_only_owned_pending_account_and_retries_without_effects"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = (
+                "GENUINE_PROTECTED_COMPENSATE_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls

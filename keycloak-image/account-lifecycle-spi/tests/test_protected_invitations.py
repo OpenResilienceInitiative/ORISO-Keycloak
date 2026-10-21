@@ -28,6 +28,7 @@ from lifecycle_fixture import (
 from protected_resources import HOSTED_PROFILE, require_start, require_active
 from protected_creation_cases import ProtectedCreationCases
 from protected_terminal_cases import ProtectedTerminalCases
+from protected_cleanup_cases import ProtectedCleanupCases
 
 HUMAN = None  # Set only from the actual native user lookup, never a proposed UUID.
 ISSUER = "http://protected-fixture.invalid/realms/" + REALM
@@ -35,7 +36,11 @@ HUMAN_PASSWORD = "synthetic-human-password-0001"
 
 
 class ProtectedInvitations(
-    ProtectedCreationCases, ProtectedTerminalCases, LifecycleFixture, unittest.TestCase
+    ProtectedCreationCases,
+    ProtectedTerminalCases,
+    ProtectedCleanupCases,
+    LifecycleFixture,
+    unittest.TestCase,
 ):
     @classmethod
     def setUpClass(cls):
@@ -59,6 +64,8 @@ class ProtectedInvitations(
         cls.recover_observation = None
         cls.recover_proof_controls = []
         cls.absent_recover_observation = None
+        cls.compensate_observation = None
+        cls.compensate_proof_controls = []
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
