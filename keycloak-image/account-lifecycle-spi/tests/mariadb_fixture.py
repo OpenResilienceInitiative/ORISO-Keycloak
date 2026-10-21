@@ -339,9 +339,16 @@ class MariaDbFixture(LifecycleFixture):
                 self.assertEqual("keycloak", account)
                 self.assertEqual("REPEATABLE READ", isolation)
                 status = self.sql("SHOW ENGINE INNODB STATUS").replace("\\n", "\n")
+                current = re.findall(
+                    r"(?ms)^-+\nTRANSACTIONS\n-+\n(.*?)^-+\nFILE I/O\n-+\n",
+                    status,
+                )
+                self.assertEqual(
+                    1, len(current), "Current InnoDB transaction section is required"
+                )
                 blocks = [
                     block
-                    for block in status.split("---TRANSACTION")
+                    for block in current[0].split("---TRANSACTION")[1:]
                     if re.search(r"thread id " + connection + r"\b", block)
                 ]
                 self.assertEqual(

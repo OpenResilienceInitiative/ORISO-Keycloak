@@ -64,6 +64,8 @@ jobs:
         env:
           MAVEN_OPTS: -Xmx512m -XX:ActiveProcessorCount=2
         run: mvn -B -q clean package
+      - name: Verify current-transaction witness excludes historical deadlocks
+        run: python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_innodb_witness.py
       - name: Run complete native matrix with exact-source receipts
         env:
           PROOF_SUITE: ${{ matrix.suite }}
