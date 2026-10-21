@@ -33,6 +33,25 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   }
 
   @POST
+  @Path("v1/availability")
+  public Response usernameAvailability(byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> {
+      var machine = auth.requireMachine(session, "ACCOUNT_CREATE");
+      var body = parse(raw);
+      var realm = session.getContext().getRealm();
+      auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_AVAILABILITY",
+          "account.username-availability", "POST",
+          "realm/" + realm.getId() + "/availability/username", body);
+      var selector = MaintenanceRequest.availability(body);
+      if (!"username".equals(selector.path("selector").textValue())) deny();
+      String username = text(selector, "value", 255, false);
+      return Response.ok(Map.of("available", session.users().getUserByUsername(realm, username) == null))
+          .header("Cache-Control", "no-store").build();
+    });
+  }
+
+  @POST
   @Path("v1/accounts/{account}/read")
   public Response read(@PathParam("account") String account, byte[] raw,
       @HeaderParam("X-ORISO-Task-Context") String proof,
