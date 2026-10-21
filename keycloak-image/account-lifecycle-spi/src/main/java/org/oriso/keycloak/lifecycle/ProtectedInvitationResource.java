@@ -136,21 +136,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         && !LifecycleAuthorization.equal(fingerprint, currentAttempt.creationFingerprint)) deny();
     var enriched = parse(row.scope);
     var frozenProfile = enriched.path("profile");
-    var internalScope = JSON.createObjectNode();
-    internalScope.put("tenantId", Long.toString(HumanPolicyJson.tenants(scope.path("targetTenantIds")).iterator().next()));
-    internalScope.put("registrationKind", scope.path("protectedKind").asText());
-    internalScope.put("initialGroup", frozenProfile.path("groupPath").asText());
-    var origin = internalScope.putObject("origin");
-    origin.put("kind", "INVITATION"); origin.put("workflowId", row.workflowId);
-    origin.put("provenance", "protected-approval-v1:" + approval);
-    origin.put("humanIssuer", enriched.path("issuer").asText());
-    origin.put("humanSubject", row.issuerSubject); origin.put("humanAuthority", enriched.path("authority").asText());
-    var agencies = origin.putArray("agencyIds");
-    if (!scope.path("agencyBinding").isNull()) agencies.add(Long.toString(number(scope.path("agencyBinding"), "agencyId", true)));
-    var approvalBinding = internalScope.putObject("approvalBinding");
-    approvalBinding.put("approvalId", approval); approvalBinding.put("scopeDigest", row.scopeDigest);
-    approvalBinding.put("authorizationRevision", row.authorizationRevision);
-    approvalBinding.set("acceptanceClaim", acceptance.deepCopy());
+    var internalScope = internalScope(row, scope, enriched, acceptance);
     var translated = JSON.createObjectNode();
     var identity = translated.putObject("identity");
     identity.set("scope", internalScope); identity.put("creationFingerprint", fingerprint);
@@ -175,6 +161,27 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         crypto.mac("protected-invitation-payload/v1", body));
     return new AccountLifecycleResource(session, crypto, Map.of())
         .executeProtected(command, attempt, translated, machine.actor(), policy);
+  }
+
+  private JsonNode internalScope(ProtectedInvitationApproval row, JsonNode scope,
+      JsonNode enriched, JsonNode acceptance) {
+    var frozenProfile = enriched.path("profile");
+    var internalScope = JSON.createObjectNode();
+    internalScope.put("tenantId", Long.toString(HumanPolicyJson.tenants(scope.path("targetTenantIds")).iterator().next()));
+    internalScope.put("registrationKind", scope.path("protectedKind").asText());
+    internalScope.put("initialGroup", frozenProfile.path("groupPath").asText());
+    var origin = internalScope.putObject("origin");
+    origin.put("kind", "INVITATION"); origin.put("workflowId", row.workflowId);
+    origin.put("provenance", "protected-approval-v1:" + row.approvalId);
+    origin.put("humanIssuer", enriched.path("issuer").asText());
+    origin.put("humanSubject", row.issuerSubject); origin.put("humanAuthority", enriched.path("authority").asText());
+    var agencies = origin.putArray("agencyIds");
+    if (!scope.path("agencyBinding").isNull()) agencies.add(Long.toString(number(scope.path("agencyBinding"), "agencyId", true)));
+    var approvalBinding = internalScope.putObject("approvalBinding");
+    approvalBinding.put("approvalId", row.approvalId); approvalBinding.put("scopeDigest", row.scopeDigest);
+    approvalBinding.put("authorizationRevision", row.authorizationRevision);
+    approvalBinding.set("acceptanceClaim", acceptance.deepCopy());
+    return internalScope;
   }
 
   private final class ProtectedLifecyclePolicy implements AccountLifecycleResource.LifecyclePolicy {
@@ -218,6 +225,11 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
             || !Set.of("OPEN", "RECOVERY_CLAIMED").contains(current.state)
             || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
             || !attempt.equals(approval.boundAttemptId)) conflict();
+        if ("RECOVERY_CLAIMED".equals(current.state)
+            && (current.recoveryReceipt == null || current.recoveryId == null
+                || !current.recoveryId.equals(current.executionId)
+                || current.recoveryExpected == null || current.recoveryExpected == Long.MAX_VALUE
+                || current.recoveryExpected + 1 != current.generation)) conflict();
         return;
       }
       if ("recover".equals(command)) {
@@ -443,6 +455,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var em = lockedRealm();
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
+    var boundAttempt = lockedBoundAttempt(row, em);
     LifecycleAuthorization.CheckedMachine machine = null;
     CurrentHumanAuthorization.VerifiedHuman human = null;
     ProtectedInvitationConfiguration.Binding binding = null;
@@ -494,7 +507,11 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       }
       return result(row, 200);
     }
-    if (!absent && (!"AUTHORIZED".equals(row.state) || !Instant.parse(row.validUntil).isAfter(Instant.now()))) conflict();
+    if (!absent && (!Set.of("AUTHORIZED", "BOUND").contains(row.state)
+        || !Instant.parse(row.validUntil).isAfter(Instant.now()))) conflict();
+    JsonNode fence = null;
+    if ("BOUND".equals(row.state)) fence = fenceBoundAttempt(boundAttempt);
+    else if (row.boundAttemptId != null) conflict();
     row.state = "CANCELLED";
     row.cancellationId = cancellationId;
     row.cancellationRequest = request;
@@ -511,11 +528,58 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     transition.put("actorClient", machine == null ? human.clientId() : machine.clientId());
     if (machine == null) transition.put("actorBindingVersion", human.policyVersion());
     else transition.putNull("actorBindingVersion");
+    if (fence != null) {
+      transition.put("boundAttemptId", row.boundAttemptId);
+      transition.set("fencedExecution", fence);
+    }
     transition.put("receipt", crypto.receipt("protected-approval-cancel/v1", transition.deepCopy()));
     row.transitionReceipt = canonical(transition);
+    if (row.transitionReceipt.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
     if (absent) em.persist(row);
     em.flush();
     return result(row, 200);
+  }
+
+  private AccountLifecycleAttempt lockedBoundAttempt(ProtectedInvitationApproval row, EntityManager em) {
+    if (row == null || row.boundAttemptId == null) return null;
+    String attempt = uuid(row.boundAttemptId);
+    String id = protectedAttemptKey(config.realmId, row.approvalId, attempt);
+    var current = em.find(AccountLifecycleAttempt.class, id, LockModeType.PESSIMISTIC_WRITE);
+    if (current == null) conflict();
+    em.refresh(current);
+    var scope = parse(row.request).path("scope");
+    var enriched = parse(row.scope);
+    var profile = enriched.path("profile");
+    var acceptance = parse(current.scope).path("approvalBinding").path("acceptanceClaim");
+    fields(acceptance, "workflowId", "inviteId", "authorizationRevision", "claimId", "journalVersion");
+    if (!row.workflowId.equals(uuid(text(acceptance, "workflowId", 36, false)))
+        || !row.inviteId.equals(text(acceptance, "inviteId", 255, false))
+        || row.authorizationRevision != number(acceptance, "authorizationRevision", true)) conflict();
+    uuid(text(acceptance, "claimId", 36, false));
+    number(acceptance, "journalVersion", true);
+    hex(current.creationFingerprint);
+    if (!config.realmId.equals(row.realmId) || !key(config.realmId, row.approvalId).equals(row.id)
+        || !id.equals(current.id) || !attempt.equals(current.attemptId)
+        || !config.realmId.equals(current.realmId)
+        || !scope.path("creatorClient").asText().equals(current.ownerClient)
+        || !scope.path("creatorSubject").asText().equals(current.ownerSubject)
+        || !text(profile, "groupId", 255, false).equals(current.groupId)
+        || !crypto.mac("protected-initial-profile/v1", profile).equals(current.roleFingerprint)
+        || !canonical(internalScope(row, scope, enriched, acceptance)).equals(current.scope)) conflict();
+    return current;
+  }
+
+  private JsonNode fenceBoundAttempt(AccountLifecycleAttempt current) {
+    if (current == null || !Set.of("OPEN", "RECOVERY_CLAIMED").contains(current.state)
+        || current.accountId == null || current.creationProof == null
+        || current.terminalOperation != null || current.generation == Long.MAX_VALUE) conflict();
+    current.generation++;
+    current.executionId = UUID.randomUUID().toString();
+    current.state = "RECOVERY_CLAIMED";
+    // Historical recovery metadata remains intact; a server fence is not a claim.
+    var execution = JSON.createObjectNode();
+    execution.put("executionId", current.executionId); execution.put("generation", current.generation);
+    return execution;
   }
 
   private ProtectedInvitationApproval restrictiveTombstone(String approval, JsonNode cancellation,
@@ -704,7 +768,11 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     if (row.approvalReceipt == null) result.putNull("approvalReceipt");
     else result.set("approvalReceipt", parse(row.approvalReceipt));
     if (row.transitionReceipt == null) result.putNull("transitionReceipt");
-    else result.set("transitionReceipt", parse(row.transitionReceipt));
+    else {
+      var transition = parse(row.transitionReceipt);
+      result.set("transitionReceipt", transition);
+      if (transition.has("fencedExecution")) result.set("fencedExecution", transition.path("fencedExecution").deepCopy());
+    }
     result.put("approvalRequestDigest", row.requestDigest);
     return Response.status(status).entity(result).header("Cache-Control", "no-store").build();
   }
