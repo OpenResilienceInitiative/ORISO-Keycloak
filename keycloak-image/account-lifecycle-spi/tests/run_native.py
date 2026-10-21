@@ -126,6 +126,11 @@ def main():
         "driver_latches": getattr(
             getattr(module, "MariaDbLifecycleProof", None), "driver_latches", []
         ),
+        "metadata_cache_cadence": getattr(
+            getattr(module, "MariaDbLifecycleProof", None),
+            "metadata_cache_cadence",
+            None,
+        ),
         "jar_stable": initial_jar_hash == final_jar_hash,
         "source_stable": source_before == source_after,
         "source_manifest": source_before,

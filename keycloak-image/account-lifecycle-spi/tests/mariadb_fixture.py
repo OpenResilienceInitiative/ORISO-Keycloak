@@ -49,6 +49,15 @@ class MariaDbFixture(LifecycleFixture):
     def setUpClass(cls):
         cls.lock_wait_receipts = []
         cls.driver_latches = []
+        cls.metadata_last_read_finished = None
+        cls.metadata_cache_cadence = {
+            "requiredIdleSeconds": 0.125,
+            "minimumMeasuredGapSeconds": None,
+            "measuredGaps": 0,
+            "selectorQueries": 0,
+            "diagnosticQueries": 0,
+            "postReleaseQueries": 0,
+        }
         jar = Path(os.environ.get("LIFECYCLE_C_TEST_JAR", ""))
         if not jar.is_file():
             raise AssertionError(
@@ -385,6 +394,33 @@ class MariaDbFixture(LifecycleFixture):
                     result["httpStatus"] = status
         return result
 
+    def metadata_cache_query(self, statement, phase, *, deadline=None):
+        # Both pinned Maria engines refresh this shared I_S cache only after
+        # >100ms since its latest READ (trx0i_s.cc CACHE_MIN_IDLE_TIME_NS).
+        # Rapid polling otherwise keeps its old snapshot alive indefinitely.
+        cls = type(self)
+        previous = cls.metadata_last_read_finished
+        quiet = 0.125 if previous is None else 0.125 - (time.monotonic() - previous)
+        if quiet > 0:
+            time.sleep(quiet)
+        now = time.monotonic()
+        if previous is not None:
+            gap = now - previous
+            metrics = cls.metadata_cache_cadence
+            minimum = metrics["minimumMeasuredGapSeconds"]
+            metrics["minimumMeasuredGapSeconds"] = (
+                gap if minimum is None else min(minimum, gap)
+            )
+            metrics["measuredGaps"] += 1
+        cls.metadata_cache_cadence[phase + "Queries"] += 1
+        try:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError()
+            return self.sql(statement, timeout=remaining)
+        finally:
+            cls.metadata_last_read_finished = time.monotonic()
+
     def missing_wait_observation(self, user, receiver, phase, editor):
         receipt = {
             **self.receiver_state(receiver),
@@ -407,10 +443,7 @@ class MariaDbFixture(LifecycleFixture):
         deadline = time.monotonic() + 5
 
         def query(statement):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError()
-            return self.sql(statement, timeout=remaining)
+            return self.metadata_cache_query(statement, "diagnostic", deadline=deadline)
 
         try:
             self.assertEqual(user, str(uuid.UUID(user)))
@@ -550,10 +583,11 @@ class MariaDbFixture(LifecycleFixture):
             self.stop_locked_editor(editor)
         if receipt is not None:
             try:
-                owner = self.sql(
+                owner = self.metadata_cache_query(
                     "SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id="
                     + str(editor.oriso_connection),
-                    timeout=2,
+                    "postRelease",
+                    deadline=time.monotonic() + 2,
                 )
                 receipt["driverTransactionReleased"] = owner == "0"
             except Exception as error:
@@ -576,10 +610,11 @@ class MariaDbFixture(LifecycleFixture):
         self.current_wait_receipt = None
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            rows = self.sql(
+            rows = self.metadata_cache_query(
                 "SELECT t.trx_mysql_thread_id, p.USER, t.trx_isolation_level FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id JOIN information_schema.INNODB_TRX t ON w.requesting_trx_id=t.trx_id JOIN information_schema.PROCESSLIST p ON p.ID=t.trx_mysql_thread_id WHERE l.lock_table LIKE '%USER_ENTITY%' AND l.lock_data LIKE '%"
                 + user
-                + "%'"
+                + "%'",
+                "selector",
             )
             if rows:
                 connection, account, isolation = rows.splitlines()[0].split("\t")
@@ -609,6 +644,6 @@ class MariaDbFixture(LifecycleFixture):
                     "Actual receiver must hold an established consistent-read view before acquiring the target lock",
                 )
                 return
-            time.sleep(0.05)
+            time.sleep(0.125)
         self.missing_wait_observation(user, receiver, phase, editor)
         self.fail("Receiver did not reach the actual target-user InnoDB wait")
