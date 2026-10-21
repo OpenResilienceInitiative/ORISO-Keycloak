@@ -45,6 +45,8 @@ if MARIADB_IMAGE not in {
 
 
 class MariaDbFixture(LifecycleFixture):
+    lock_wait_receipts = []
+
     @classmethod
     def setUpClass(cls):
         jar = Path(os.environ.get("LIFECYCLE_C_TEST_JAR", ""))
@@ -240,6 +242,24 @@ class MariaDbFixture(LifecycleFixture):
         type(self).ready()
         super().setUp()
 
+    def admin(self, method, path="", body=None):
+        # Only the fixture installer token may refresh. Tested actor JWTs/proofs
+        # and their negative expiry cases pass through unchanged.
+        try:
+            encoded = self.installer.split(".")[1]
+            expiry = json.loads(
+                base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+            )["exp"]
+            if not isinstance(expiry, int) or isinstance(expiry, bool):
+                raise ValueError()
+        except (ValueError, KeyError, IndexError, TypeError):
+            raise AssertionError(
+                "Fixture installer token must have its actual expiry"
+            ) from None
+        if expiry <= time.time() + 5:
+            type(self).ready()
+        return super().admin(method, path, body)
+
     def sql(self, statement):
         result = subprocess.run(
             [
@@ -326,7 +346,9 @@ class MariaDbFixture(LifecycleFixture):
             editor.terminate()
             editor.communicate(timeout=10)
 
-    def wait_for_receiver_user_lock_and_read_view(self, user):
+    def wait_for_receiver_user_lock_and_read_view(
+        self, user, receiver=None, phase=None
+    ):
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             rows = self.sql(
@@ -363,4 +385,23 @@ class MariaDbFixture(LifecycleFixture):
                 )
                 return
             time.sleep(0.05)
+        receipt = {
+            "phase": (
+                phase
+                if phase in {"commit", "compensate", "owned-read"}
+                else "unspecified"
+            ),
+            "receiverCompleted": receiver.done() if receiver is not None else False,
+            "httpStatus": None,
+            "receiverException": False,
+        }
+        if receiver is not None and receiver.done():
+            if receiver.exception() is not None:
+                receipt["receiverException"] = True
+            else:
+                status, _ = receiver.result()
+                if isinstance(status, int) and not isinstance(status, bool):
+                    receipt["httpStatus"] = status
+        type(self).lock_wait_receipts.append(receipt)
+        print("Receiver missing lock witness:", json.dumps(receipt, sort_keys=True))
         self.fail("Receiver did not reach the actual target-user InnoDB wait")
