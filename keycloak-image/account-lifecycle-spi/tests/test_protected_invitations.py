@@ -2,6 +2,8 @@
 """Protected receiving HTTP seam. Synthetic fixture; missing setup is an error."""
 
 import base64
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -17,6 +19,9 @@ from lifecycle_fixture import (
     SUBJECTS,
     REALM,
     INSTALLER,
+    CONTEXT_KEY,
+    canonical,
+    mac,
     call,
 )
 from protected_resources import HOSTED_PROFILE, require_start, require_active
@@ -38,6 +43,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.fixture_diagnostic = None
         cls.authorization_controls = []
         cls.cancel_observation = None
+        cls.status_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -599,6 +605,57 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             + suffix
         )
 
+    def protected_machine_request(self, operation, approval, body, actor="SETUP"):
+        bearer = self.token(actor)
+        payload = bearer.split(".")[1]
+        native = json.loads(
+            base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        )
+        self.assertEqual(ISSUER, native["iss"])
+        audiences = native["aud"]
+        self.assertEqual(
+            {"agencyservice", "consultingtypeservice", "tenantservice", "userservice"},
+            set([audiences] if isinstance(audiences, str) else audiences),
+        )
+        now = int(time.time())
+        claims = {
+            "iss": "userservice",
+            "aud": "oriso-protected-invitations",
+            "purpose": "INVITE_RESERVATIONS",
+            "operation": "protected-invitation." + operation,
+            "method": "POST",
+            "actor": actor,
+            "realm": REALM,
+            "target": "realm/" + self.realm_id + "/protected-invitation/" + approval,
+            "taskClient": ACTORS[actor][0],
+            "taskSubject": SUBJECTS[actor],
+            "payloadDigest": mac("protected-invitation-payload/v1", body),
+            "jti": str(uuid.uuid4()),
+            "nonce": uuid.uuid4().hex,
+            "iat": now,
+            "exp": now + 60,
+        }
+        encoded = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
+        signature = (
+            base64.urlsafe_b64encode(
+                hmac.new(
+                    CONTEXT_KEY,
+                    ("protected-invitation-proof/v1\n" + encoded).encode(),
+                    hashlib.sha256,
+                ).digest()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        return call(
+            self.base,
+            "POST",
+            self.endpoint(approval, "/" + operation),
+            body,
+            bearer,
+            proof=encoded + "." + signature,
+        )
+
     def test_installer_routine_and_unbound_human_cannot_authorize_protected_scope(self):
         for actor in ACTORS:
             with self.subTest(actor=actor):
@@ -775,6 +832,58 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         request["scope"]["recipient"] = "changed@fixture.invalid"
         self.assertEqual(
             409, call(self.base, "PUT", self.endpoint(approval), request, token)[0]
+        )
+
+    def test_setup_status_reconciles_lost_approval_reply_without_human_bearer(self):
+        approval, request = str(uuid.uuid4()), {"scope": self.scope()}
+        request_digest = mac(
+            "protected-approval-request/v1",
+            {
+                "request": request,
+                "issuerRealm": self.realm_id,
+                "issuerSubject": HUMAN,
+            },
+        )
+        bearer = self.human(record=False)
+        before = self.admin("GET", "/users/count")
+        status, reference = call(
+            self.base, "PUT", self.endpoint(approval), request, bearer
+        )
+        self.assertEqual(201, status)
+        del bearer  # Reconciliation dispatch has no human bearer or approval reply input.
+        query = {
+            "scopeDigest": None,
+            "workflowId": request["scope"]["workflowId"],
+            "inviteId": request["scope"]["inviteId"],
+            "authorizationRevision": 1,
+            "attemptId": None,
+            "approvalRequestDigest": request_digest,
+        }
+        type(self).phase = "setup-lost-reply-status-http"
+        status, reconciled = self.protected_machine_request("status", approval, query)
+        after = self.admin("GET", "/users/count")
+        type(self).status_observation = {
+            "actualStatus": status,
+            "expectedStatus": 200,
+            "sourceApprovalCreated": True,
+            "requestDigestComputedBeforeDispatch": True,
+            "humanBearerNotForwarded": True,
+            "nativeSetupCanonicalAudiencesMatched": True,
+            "noAccountCreated": before == after,
+        }
+        self.assertEqual(before, after)
+        self.assertEqual(200, status)
+        self.assertEqual("AUTHORIZED", reconciled["state"])
+        self.assertEqual(request_digest, reconciled["approvalRequestDigest"])
+        self.assertEqual(reference["approvalReceipt"], reconciled["approvalReceipt"])
+        self.assertNotIn(request["scope"]["recipient"], json.dumps(reconciled))
+        self.assertNotIn("accountId", reconciled)
+        status, retry = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual(reconciled, retry)
+        query["workflowId"] = str(uuid.uuid4())
+        self.assertEqual(
+            403, self.protected_machine_request("status", approval, query)[0]
         )
 
 

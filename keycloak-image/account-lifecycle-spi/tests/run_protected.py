@@ -275,7 +275,7 @@ def main():
     workflow_before = digest(workflow)
     summary = {
         "schema": 1,
-        "suite": "protected-human-approval-authority-and-cancel",
+        "suite": "protected-approval-cancel-authority-and-setup-status",
         "classification": "INPUT_OR_FIXTURE_ERROR",
         "sourceManifest": before,
         "workflowSHA256": workflow_before,
@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 3:
+        if discovered != 4:
             raise AssertionError(
-                "Exactly three protected HTTP approval/authority/cancel cases required"
+                "Exactly four protected HTTP approval/authority/cancel/status cases required"
             )
 
         def deadline(signum, frame):
@@ -337,6 +337,7 @@ def main():
                 "setupNativePrecondition": getattr(fixture, "setup_precondition", None),
                 "authorizationControls": getattr(fixture, "authorization_controls", []),
                 "cancelObservation": getattr(fixture, "cancel_observation", None),
+                "setupStatusObservation": getattr(fixture, "status_observation", None),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -390,6 +391,40 @@ def main():
             and valid_controls
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["cancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["setupStatusObservation"] or {}).get("actualStatus")
+            in (404, 405)
+            and summary["setupStatusObservation"].get("expectedStatus") == 200
+            and all(
+                summary["setupStatusObservation"].get(key) is True
+                for key in (
+                    "sourceApprovalCreated",
+                    "requestDigestComputedBeforeDispatch",
+                    "humanBearerNotForwarded",
+                    "nativeSetupCanonicalAudiencesMatched",
+                    "noAccountCreated",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_setup_status_reconciles_lost_approval_reply_without_human_bearer"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = "GENUINE_SETUP_STATUS_COUNTERFACTUAL_RED"
         elif (
             valid_preconditions
             and valid_controls
