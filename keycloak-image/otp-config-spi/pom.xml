@@ -17,6 +17,12 @@
 
   <dependencies>
     <dependency>
+      <groupId>org.oriso.keycloak</groupId>
+      <artifactId>account-lifecycle-spi</artifactId>
+      <version>1.0-SNAPSHOT</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
       <groupId>org.openapitools</groupId>
       <artifactId>openapi-generator-maven-plugin</artifactId>
       <version>6.2.0</version>

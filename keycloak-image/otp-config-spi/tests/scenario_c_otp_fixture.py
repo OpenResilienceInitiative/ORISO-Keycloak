@@ -2,7 +2,9 @@
 """Real, isolated Keycloak HTTP proof of the opt-in C OTP receiver.
 
 OTP_C_TEST_JAR must identify the locally packaged OTP SPI. Credentials and OTP
-bodies are synthetic/in-memory only. Output contains test/status/hash evidence.
+bodies are synthetic/in-memory only. LIFECYCLE_C_TEST_JAR supplies the actual
+provided dependency; old native-power cases are negative contract controls.
+Output contains test/status/hash evidence.
 """
 
 import base64
@@ -92,6 +94,7 @@ class MailSink(socketserver.ThreadingTCPServer):
 
 class ScenarioCOtpFixture:
     MODEL = "FIVE_ACTORS"
+    phase_receipts = []
 
     @classmethod
     def setUpClass(cls):
@@ -100,6 +103,10 @@ class ScenarioCOtpFixture:
             raise AssertionError(
                 "OTP_C_TEST_JAR must identify an existing packaged OTP SPI"
             )
+        lifecycle = Path(os.environ.get("LIFECYCLE_C_TEST_JAR", ""))
+        if not lifecycle.is_file():
+            raise AssertionError("Actual provided lifecycle JAR is required")
+        cls.phase_receipts = []
         cls.mail = MailSink(("0.0.0.0", 0), MailSink.Handler)
         cls.mail.messages = []
         threading.Thread(target=cls.mail.serve_forever, daemon=True).start()
@@ -115,6 +122,7 @@ class ScenarioCOtpFixture:
             cls.name,
             "--label",
             "oriso-c-otp-test=true",
+            "--memory", "1g", "--cpus", "2",
             "-p",
             "127.0.0.1::8080",
             "-e",
@@ -135,6 +143,12 @@ class ScenarioCOtpFixture:
             "IDENTITY_ACCOUNT_ADMIN_CLIENT_ID=" + CLIENT,
             "-e",
             "IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT=" + SUBJECT,
+            "-e", "ORISO_ACCOUNT_LIFECYCLE_ENABLED=" + ("true" if cls.MODEL else "false"),
+            "-e", "ORISO_ACCOUNT_LIFECYCLE_REALM=" + REALM,
+            "-e", "IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT=00000000-0000-4000-8000-000000000001",
+            "-e", "ORISO_TASK_CONTEXT_KEY=" + base64.b64encode(b"public-fixture-context-key-000001").decode(),
+            "-e", "ORISO_ACCOUNT_LIFECYCLE_GROUPS=" + json.dumps({"/human-roles/consultant": ["consultant", "group-chat-consultant"]}),
+            "-v", str(lifecycle.resolve()) + ":/opt/keycloak/providers/account-lifecycle-spi.jar:ro",
             "-v",
             str(jar.resolve()) + ":/opt/keycloak/providers/otp-config-spi.jar:ro",
             "-v",
@@ -432,13 +446,18 @@ class ScenarioCOtpFixture:
         return token
 
     def otp(self, token, method, route, target, body=None):
-        return call(
+        status, result = call(
             self.base,
             method,
             "/realms/" + REALM + "/otp-config/" + route + "/" + quote(target, safe=""),
             body,
             token,
         )
+        self.phase_receipts.append({"case": self.id(), "phase": "original-otp-http",
+                                    "method": method, "route": route, "status": status,
+                                    "code_validation_rejected": status == 401 and isinstance(result, dict)
+                                    and result.get("error") == "invalid_grant"})
+        return status, result
 
     def credentials(self, user_id):
         return sorted(
@@ -481,6 +500,38 @@ class ScenarioCOtpFixture:
             {"firstName": "Native permitted"},
             token,
         )[0]
+
+    def denied_prior_native_powers(self, target, user_id):
+        token = self.token()
+        encoded = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual(set(AUDIENCES), set(claims["aud"]))
+        self.assertEqual(204, self.native_manage(token, user_id))
+        self.phase_receipts.append({"case": self.id(), "phase": "prior-native-power-preconditions",
+                                    "actual_two_audiences": True, "native_manage_status": 204,
+                                    "no_scoped_proof_or_human_header": True})
+        before, sent = self.credentials(user_id), len(self.mail.messages)
+        seed = "JBSWY3DPEHPK3PXP"
+        digest = hmac.new(seed.encode(), struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
+        offset = digest[-1] & 15
+        code = str((struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1000000).zfill(6)
+        for method, route, body in [
+            ("GET", "fetch-otp-setup-info", None),
+            ("PUT", "setup-otp", {"secret": seed, "initialCode": code}),
+            ("DELETE", "delete-otp", None),
+            ("PUT", "send-verification-mail", {"email": "synthetic-target@oriso.org"}),
+            ("POST", "setup-otp-mail", {"initialCode": "000000"}),
+        ]:
+            status, _ = self.otp(token, method, route, target, body)
+            self.phase_receipts.append({"case": self.id(), "phase": "prior-native-power-http",
+                                        "route": route, "method": method,
+                                        "status": status, "expected_status": 403})
+            with self.subTest(route=route):
+                self.assertEqual(403, status)
+        with self.subTest(postcondition="no-credential-effect"):
+            self.assertEqual(before, self.credentials(user_id))
+        with self.subTest(postcondition="no-mail-effect"):
+            self.assertEqual(sent, len(self.mail.messages))
 
     def positive_protocol(self, target, user_id):
         token = self.token()

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.6.xsd">
+  <changeSet id="oriso-account-maintenance-v1" author="oriso">
+    <createTable tableName="ORISO_ACCOUNT_MAINTENANCE_OP">
+      <column name="ID" type="VARCHAR(255)"><constraints primaryKey="true" nullable="false"/></column>
+      <column name="REALM_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="OPERATION_ID" type="VARCHAR(36)"><constraints nullable="false"/></column>
+      <column name="ACCOUNT_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="COMMAND" type="VARCHAR(40)"><constraints nullable="false"/></column>
+      <column name="OWNER_CLIENT" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="OWNER_SUBJECT" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="INTENT_DIGEST" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="EXPECTED_STATE" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="RESULT_JSON" type="TEXT"><constraints nullable="false"/></column>
+    </createTable>
+    <addForeignKeyConstraint baseTableName="ORISO_ACCOUNT_MAINTENANCE_OP" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_ACCOUNT_MAINT_REALM" onDelete="CASCADE"/>
+    <createIndex tableName="ORISO_ACCOUNT_MAINTENANCE_OP" indexName="ORISO_ACCOUNT_MAINT_TARGET">
+      <column name="REALM_ID"/><column name="ACCOUNT_ID"/>
+    </createIndex>
+  </changeSet>
+</databaseChangeLog>

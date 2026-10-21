@@ -66,6 +66,15 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("fetch-otp-setup-info/{username}")
   @Produces({MediaType.APPLICATION_JSON})
   public Response getOtpSetupInfo(@PathParam("username") final String username) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfRead(
+          session, username,
+          headers.getHeaderString("X-ORISO-Account-Target"),
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          target -> otpSetupInfo(new CredentialContext(target.session(), target.realm(), target.user())));
+    }
     verifyAuthentication();
 
     final RealmModel realm = this.session.getContext().getRealm();
@@ -78,9 +87,11 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
               .errorDescription(MISSING_USERNAME_ERROR_DESCRIPTION)).build();
     }
 
-    var otpInfoDTO = new OtpInfoDTO();
+    return otpSetupInfo(new CredentialContext(session, realm, user));
+  }
 
-    var credentialContext = new CredentialContext(session, realm, user);
+  private Response otpSetupInfo(CredentialContext credentialContext) {
+    var otpInfoDTO = new OtpInfoDTO();
     if (appCredentialService.is2FAConfigured(credentialContext)) {
       otpInfoDTO.setOtpSetup(true);
       otpInfoDTO.setOtpType(OtpType.APP);
@@ -106,7 +117,27 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("setup-otp/{username}")
   @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
-  public Response setupOtp(@PathParam("username") final String username, final OtpSetupDTO dto) {
+  public Response setupOtpRequest(@PathParam("username") final String username, final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfAppSetup(
+          session, username, raw,
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+            var dto = new OtpSetupDTO();
+            dto.setInitialCode(target.initialCode());
+            dto.setSecret(target.secret());
+            return setupOtpForTarget(new CredentialContext(target.session(), target.realm(), target.user()), dto);
+          });
+    }
+    try {
+      return setupOtp(username, org.keycloak.util.JsonSerialization.readValue(raw, OtpSetupDTO.class));
+    } catch (java.io.IOException rejected) {
+      throw new jakarta.ws.rs.BadRequestException("Invalid OTP request");
+    }
+  }
+
+  public Response setupOtp(final String username, final OtpSetupDTO dto) {
     verifyAuthentication();
 
     final RealmModel realm = this.session.getContext().getRealm();
@@ -118,7 +149,10 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
           .entity(new Error().error(MISSING_PARAMETER_ERROR)
               .errorDescription(MISSING_USERNAME_ERROR_DESCRIPTION)).build();
     }
-    var credentialContext = new CredentialContext(session, realm, user);
+    return setupOtpForTarget(new CredentialContext(session, realm, user), dto);
+  }
+
+  private Response setupOtpForTarget(CredentialContext credentialContext, OtpSetupDTO dto) {
     if (appCredentialService.is2FAConfigured(credentialContext)) {
       return Response.ok(new Success().info("OTP credential is already configured for this user"))
           .build();
@@ -143,7 +177,20 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @DELETE
   @Path("delete-otp/{username}")
   @Produces({MediaType.APPLICATION_JSON})
-  public Response deleteOtp(@PathParam("username") final String username) {
+  @Consumes({MediaType.APPLICATION_JSON})
+  public Response deleteOtpRequest(@PathParam("username") final String username, final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfDelete(
+          session, username, raw,
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          target -> deleteOtpForTarget(new CredentialContext(target.session(), target.realm(), target.user())));
+    }
+    return deleteOtp(username);
+  }
+
+  public Response deleteOtp(final String username) {
     verifyAuthentication();
 
     final RealmModel realm = this.session.getContext().getRealm();
@@ -154,8 +201,10 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
       return Response.status(Status.BAD_REQUEST).entity(new Error().error(MISSING_PARAMETER_ERROR)
           .errorDescription(MISSING_USERNAME_ERROR_DESCRIPTION)).build();
     }
-    var credentialContext = new CredentialContext(session, realm, user);
+    return deleteOtpForTarget(new CredentialContext(session, realm, user));
+  }
 
+  private Response deleteOtpForTarget(CredentialContext credentialContext) {
     appCredentialService.deleteCredentials(credentialContext);
     mailCredentialService.deleteCredential(credentialContext);
 
@@ -194,8 +243,27 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("setup-otp-mail/{username}")
   @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
-  public Response setupOtpMail(@PathParam("username") final String username,
-      final OtpSetupDTO mailSetup) {
+  public Response setupOtpMailRequest(@PathParam("username") final String username, final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfEmailFinish(
+          session, username, raw,
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+            var dto = new OtpSetupDTO();
+            dto.setInitialCode(target.initialCode());
+            // Wire-only: retain the original native-power barrier until its actual HTTP RED.
+            return setupOtpMail(username, dto);
+          });
+    }
+    try {
+      return setupOtpMail(username, org.keycloak.util.JsonSerialization.readValue(raw, OtpSetupDTO.class));
+    } catch (java.io.IOException rejected) {
+      throw new jakarta.ws.rs.BadRequestException("Invalid OTP request");
+    }
+  }
+
+  public Response setupOtpMail(final String username, final OtpSetupDTO mailSetup) {
     verifyAuthentication();
 
     final var realm = this.session.getContext().getRealm();

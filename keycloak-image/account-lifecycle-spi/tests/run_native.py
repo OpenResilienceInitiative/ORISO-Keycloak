@@ -120,6 +120,9 @@ def main():
         if p.is_file() and "target" not in p.parts and "__pycache__" not in p.parts
     }
     summary = {
+        "lock_wait_receipts": getattr(
+            getattr(module, "MariaDbLifecycleProof", None), "lock_wait_receipts", []
+        ),
         "jar_stable": initial_jar_hash == final_jar_hash,
         "source_stable": source_before == source_after,
         "source_manifest": source_before,

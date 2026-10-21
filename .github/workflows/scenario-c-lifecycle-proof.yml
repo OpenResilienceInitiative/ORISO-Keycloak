@@ -7,7 +7,7 @@ on:
       - keycloak-image/account-lifecycle-spi/**
       - .github/workflows/scenario-c-lifecycle-proof.yml
   push:
-    branches: [codex/367-c-receiver-finish-20261021]
+    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021]
     paths:
       - keycloak-image/account-lifecycle-spi/**
       - .github/workflows/scenario-c-lifecycle-proof.yml
