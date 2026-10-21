@@ -66,6 +66,7 @@ class ProtectedInvitations(
         cls.absent_recover_observation = None
         cls.compensate_observation = None
         cls.compensate_proof_controls = []
+        cls.abandoned_compensate_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.

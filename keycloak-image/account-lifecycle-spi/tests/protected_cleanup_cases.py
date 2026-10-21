@@ -385,3 +385,283 @@ class ProtectedCleanupCases:
             self.admin(
                 "PUT", "/groups/" + self.protected_group_id, {"name": "platform-admins"}
             )
+
+    def test_protected_abandoned_compensation_preserves_restriction_without_user_lookup(
+        self,
+    ):
+        original_count = self.admin("GET", "/users/count")
+        approval, attempt, scope, approved, create = self.approved_creation()
+        recover = {
+            key: create[key]
+            for key in (
+                "approvalReceipt",
+                "scopeDigest",
+                "authorizationRevision",
+                "creationFingerprint",
+                "acceptanceClaim",
+            )
+        }
+        recover.update(expectedGeneration=0, recoveryId=str(uuid.uuid4()))
+        status, abandoned = self.protected_machine_request(
+            "recover", approval, recover, actor="ACCOUNT_ADMIN", attempt=attempt
+        )
+        self.assertEqual(200, status)
+        self.assertEqual("ABANDONED", abandoned["state"])
+        self.assertIsNone(abandoned["accountId"])
+        self.assertIsNone(abandoned["creationProof"])
+        self.assertEqual(
+            {"executionId": recover["recoveryId"], "generation": 1},
+            abandoned["execution"],
+        )
+        fields = {
+            "realmId",
+            "attemptId",
+            "accountId",
+            "ownerClient",
+            "ownerSubject",
+            "scope",
+            "creationFingerprint",
+            "groupId",
+            "roleFingerprint",
+            "state",
+            "generation",
+            "executionId",
+            "operation",
+            "commandDigest",
+        }
+        values = []
+        for key, domain, operation in (
+            ("recoveryReceipt", "recovery-receipt", "recover"),
+            ("terminalReceipt", "terminal-receipt", "abandon"),
+        ):
+            value = self.verified_receipt(abandoned[key], domain, 16000, fields)
+            for field, expected in {
+                "realmId": self.realm_id,
+                "attemptId": attempt,
+                "accountId": None,
+                "ownerClient": ACTORS["ACCOUNT_CREATE"][0],
+                "ownerSubject": SUBJECTS["ACCOUNT_CREATE"],
+                "creationFingerprint": create["creationFingerprint"],
+                "groupId": self.protected_group_id,
+                "roleFingerprint": mac(
+                    "protected-initial-profile/v1", self.native_configured_profiles[0]
+                ),
+                "state": "ABANDONED",
+                "generation": 1,
+                "executionId": recover["recoveryId"],
+                "operation": operation,
+                "commandDigest": mac("protected-invitation-payload/v1", recover),
+            }.items():
+                self.assertEqual(expected, value[field], field)
+            nested = json.loads(value["scope"])
+            self.assertEqual(canonical(nested).decode(), value["scope"])
+            self.assertEqual(
+                {
+                    "approvalId": approval,
+                    "scopeDigest": approved["scopeDigest"],
+                    "authorizationRevision": 1,
+                    "acceptanceClaim": create["acceptanceClaim"],
+                },
+                nested["approvalBinding"],
+            )
+            self.assertEqual(self.human_subject, nested["origin"]["humanSubject"])
+            self.assertEqual(self.native_issuer, nested["origin"]["humanIssuer"])
+            self.assertEqual("0", nested["tenantId"])
+            self.assertEqual(scope["protectedKind"], nested["registrationKind"])
+            self.assertEqual(
+                self.native_configured_profiles[0]["groupPath"], nested["initialGroup"]
+            )
+            self.assertEqual(scope["workflowId"], nested["origin"]["workflowId"])
+            self.assertEqual("INVITATION", nested["origin"]["kind"])
+            self.assertEqual("PLATFORM", nested["origin"]["humanAuthority"])
+            self.assertEqual([], nested["origin"]["agencyIds"])
+            values.append(value)
+        self.assertEqual(values[0]["scope"], values[1]["scope"])
+        query = {
+            "scopeDigest": approved["scopeDigest"],
+            "workflowId": scope["workflowId"],
+            "inviteId": scope["inviteId"],
+            "authorizationRevision": 1,
+            "attemptId": attempt,
+            "approvalRequestDigest": approved["approvalRequestDigest"],
+        }
+        status, restricted = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual("CANCELLED", restricted["state"])
+        self.assertEqual(approved["approvalReceipt"], restricted["approvalReceipt"])
+        self.assertEqual(attempt, restricted["boundAttemptId"])
+        self.assertIsNone(restricted["fencedExecution"])
+        wrapper = restricted["transitionReceipt"]
+        self.assertLessEqual(len(canonical(wrapper)), 24000)
+        outer = self.verified_receipt(
+            wrapper["receipt"],
+            "protected-approval-cleanup/v1",
+            24000,
+            {
+                "operation",
+                "state",
+                "approvalId",
+                "scopeDigest",
+                "boundAttemptId",
+                "accountId",
+                "terminalReceipt",
+            },
+        )
+        self.assertEqual({k: v for k, v in wrapper.items() if k != "receipt"}, outer)
+        self.assertEqual("protected-invitation.cleanup", outer["operation"])
+        self.assertEqual("CANCELLED", outer["state"])
+        self.assertEqual(approval, outer["approvalId"])
+        self.assertEqual(approved["scopeDigest"], outer["scopeDigest"])
+        self.assertEqual(attempt, outer["boundAttemptId"])
+        self.assertIsNone(outer["accountId"])
+        self.assertEqual(abandoned["terminalReceipt"], outer["terminalReceipt"])
+        self.assertEqual(original_count, self.admin("GET", "/users/count"))
+        self.admin(
+            "POST",
+            "/users",
+            {
+                "username": create["account"]["username"],
+                "enabled": True,
+                "email": "independent-" + uuid.uuid4().hex + "@fixture.invalid",
+            },
+        )
+        foreign = self.admin(
+            "GET", "/users?username=" + create["account"]["username"] + "&exact=true"
+        )
+        self.assertEqual(1, len(foreign))
+        foreign_id = foreign[0]["id"]
+        self.assertEqual(foreign_id, str(uuid.UUID(foreign_id)))
+        before = self.admin("GET", "/users/" + foreign_id)
+        self.assertEqual(create["account"]["username"].lower(), before["username"])
+        present = [True]
+
+        def remove_foreign():
+            if present[0]:
+                self.admin("DELETE", "/users/" + foreign_id)
+                present[0] = False
+
+        self.addCleanup(remove_foreign)
+        cleanup = {
+            key: create[key]
+            for key in (
+                "approvalReceipt",
+                "scopeDigest",
+                "authorizationRevision",
+                "creationFingerprint",
+            )
+        }
+        cleanup.update(
+            execution=abandoned["execution"],
+            accountId=None,
+            creationProof=None,
+            localCleanup={
+                "journalVersion": 1,
+                "outboxId": str(uuid.uuid4()),
+                "effectsDigest": "d" * 64,
+            },
+        )
+        self.admin(
+            "PUT",
+            "/groups/" + self.protected_group_id,
+            {"name": "temporarily-renamed-profile"},
+        )
+        try:
+            self.assertEqual(
+                "temporarily-renamed-profile",
+                self.admin("GET", "/groups/" + self.protected_group_id)["name"],
+            )
+            type(self).phase = "protected-abandoned-admin-compensate-http"
+            status, terminal = self.protected_machine_request(
+                "compensate", approval, cleanup, actor="ACCOUNT_ADMIN", attempt=attempt
+            )
+            type(self).abandoned_compensate_observation = {
+                "actualStatus": status,
+                "expectedStatus": 200,
+                "sourceRealHumanApprovalAndOwnedAbandonmentValidated": True,
+                "bothNative14DomainsOriginalCreatorScopeAndRecoverDigestValidated": True,
+                "immutableCleanup8AndCancelledApprovalValidated": True,
+                "nativeAdminSubjectRolesAndAudiencesMatched": True,
+                "exactNullAccountAndProofCurrentExecutionPredispatch": True,
+                "mutableProfileRenamedBeforeCleanup": True,
+                "independentNativeUsernameAndUUIDValidated": True,
+                "independentNativeUserPreserved": before
+                == self.admin("GET", "/users/" + foreign_id),
+                "accountCountUnchanged": original_count + 1
+                == self.admin("GET", "/users/count"),
+            }
+            self.assertEqual(200, status)
+            self.assertEqual(abandoned, terminal)
+            self.assertEqual(
+                (200, restricted),
+                self.protected_machine_request("status", approval, query),
+            )
+            for actor in ("ACCOUNT_ADMIN", "ACCOUNT_CREATE"):
+                self.assertEqual(
+                    (200, abandoned),
+                    self.protected_machine_request(
+                        "compensate", approval, cleanup, actor=actor, attempt=attempt
+                    ),
+                )
+            changed = copy.deepcopy(cleanup)
+            changed["localCleanup"]["journalVersion"] = 2
+            self.assertEqual(
+                409,
+                self.protected_machine_request(
+                    "compensate",
+                    approval,
+                    changed,
+                    actor="ACCOUNT_ADMIN",
+                    attempt=attempt,
+                )[0],
+            )
+            for key, value in (
+                ("accountId", foreign_id),
+                ("creationProof", "foreign.proof"),
+            ):
+                changed = copy.deepcopy(cleanup)
+                changed[key] = value
+                self.assertEqual(
+                    403,
+                    self.protected_machine_request(
+                        "compensate",
+                        approval,
+                        changed,
+                        actor="ACCOUNT_ADMIN",
+                        attempt=attempt,
+                    )[0],
+                )
+            self.assertEqual(
+                (200, abandoned),
+                self.protected_machine_request(
+                    "recover", approval, recover, actor="ACCOUNT_ADMIN", attempt=attempt
+                ),
+            )
+            self.assertEqual(
+                (200, restricted),
+                self.protected_machine_request("status", approval, query),
+            )
+            self.assertEqual(before, self.admin("GET", "/users/" + foreign_id))
+            self.assertEqual(original_count + 1, self.admin("GET", "/users/count"))
+        finally:
+            self.admin(
+                "PUT", "/groups/" + self.protected_group_id, {"name": "platform-admins"}
+            )
+        remove_foreign()
+        self.assertEqual(
+            [],
+            self.admin(
+                "GET",
+                "/users?username=" + create["account"]["username"] + "&exact=true",
+            ),
+        )
+        self.assertEqual(
+            409,
+            self.protected_machine_request(
+                "create",
+                approval,
+                create,
+                actor="ACCOUNT_CREATE",
+                attempt=str(uuid.uuid4()),
+            )[0],
+        )
+        self.assertEqual(original_count, self.admin("GET", "/users/count"))

@@ -323,9 +323,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 13:
+        if discovered != 14:
             raise AssertionError(
-                "Exactly thirteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate cases required"
+                "Exactly fourteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate cases required"
             )
 
         def deadline(signum, frame):
@@ -387,6 +387,9 @@ def main():
                 ),
                 "compensateReplacementObservation": getattr(
                     fixture, "compensate_replacement_observation", None
+                ),
+                "abandonedCompensateObservation": getattr(
+                    fixture, "abandoned_compensate_observation", None
                 ),
             }
         )
@@ -461,8 +464,50 @@ def main():
             and (summary["compensateObservation"] or {}).get("actualStatus") == 200
             and len(summary["compensateProofControls"]) == 7
             and all(v["status"] == 403 for v in summary["compensateProofControls"])
+            and (summary["abandonedCompensateObservation"] or {}).get("actualStatus")
+            == 200
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["abandonedCompensateObservation"] or {}).get("actualStatus")
+            == 409
+            and summary["abandonedCompensateObservation"].get("expectedStatus") == 200
+            and all(
+                summary["abandonedCompensateObservation"].get(key) is True
+                for key in (
+                    "sourceRealHumanApprovalAndOwnedAbandonmentValidated",
+                    "bothNative14DomainsOriginalCreatorScopeAndRecoverDigestValidated",
+                    "immutableCleanup8AndCancelledApprovalValidated",
+                    "nativeAdminSubjectRolesAndAudiencesMatched",
+                    "exactNullAccountAndProofCurrentExecutionPredispatch",
+                    "mutableProfileRenamedBeforeCleanup",
+                    "independentNativeUsernameAndUUIDValidated",
+                    "independentNativeUserPreserved",
+                    "accountCountUnchanged",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_protected_abandoned_compensation_preserves_restriction_without_user_lookup"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = (
+                "GENUINE_PROTECTED_ABANDONED_COMPENSATE_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls
