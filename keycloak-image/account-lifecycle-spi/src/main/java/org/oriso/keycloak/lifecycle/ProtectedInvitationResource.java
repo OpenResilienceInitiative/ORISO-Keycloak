@@ -24,9 +24,11 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
   private final KeycloakSession session;
   private final ProtectedInvitationConfiguration config;
   private final LifecycleAuthorization crypto;
+  private final ProtectedInvitationAuthorization machineAuthorization;
 
   ProtectedInvitationResource(KeycloakSession session, ProtectedInvitationConfiguration config, LifecycleAuthorization crypto) {
     this.session = session; this.config = config; this.crypto = crypto;
+    this.machineAuthorization = new ProtectedInvitationAuthorization(config, crypto);
   }
 
   @PUT
@@ -168,6 +170,46 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     transition.put("receipt", crypto.receipt("protected-approval-cancel/v1", transition.deepCopy()));
     row.transitionReceipt = canonical(transition);
     em.flush();
+    return result(row, 200);
+  }
+
+  @POST
+  @Path("v1/approvals/{approval}/status")
+  public Response status(@PathParam("approval") String approval, byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> setupStatus(approval, raw, proof));
+  }
+
+  private Response setupStatus(String approval, byte[] raw, String proof) {
+    uuid(approval);
+    var body = parse(raw);
+    fields(body, "scopeDigest", "workflowId", "inviteId", "authorizationRevision", "attemptId", "approvalRequestDigest");
+    uuid(text(body, "workflowId", 36, false));
+    text(body, "inviteId", 255, false);
+    number(body, "authorizationRevision", true);
+    hex(text(body, "approvalRequestDigest", 64, false));
+    String scopeDigest = text(body, "scopeDigest", 64, true);
+    if (scopeDigest != null) hex(scopeDigest);
+    String attempt = text(body, "attemptId", 36, true);
+    if (attempt != null) uuid(attempt);
+    var em = lockedRealm();
+    var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
+    if (row != null) em.refresh(row);
+    var machine = machineAuthorization.requireMachine(session, Set.of("SETUP"));
+    // The route selects the protected MAC domains and binds the original wire
+    // bytes semantically before any future internal lifecycle translation.
+    crypto.verifyProtectedCommand(proof, machine, "protected-invitation.status", "POST",
+        "realm/" + config.realmId + "/protected-invitation/" + approval, body);
+    if (row == null) throw new NotFoundException();
+    var scope = parse(row.request).path("scope");
+    if (!machine.clientId().equals(scope.path("setupClient").asText())
+        || !machine.subject().equals(scope.path("setupSubject").asText())
+        || !row.workflowId.equals(body.path("workflowId").asText())
+        || !row.inviteId.equals(body.path("inviteId").asText())
+        || row.authorizationRevision != body.path("authorizationRevision").asLong()
+        || !LifecycleAuthorization.equal(row.requestDigest, body.path("approvalRequestDigest").asText())
+        || scopeDigest != null && !LifecycleAuthorization.equal(row.scopeDigest, scopeDigest)
+        || attempt != null && !attempt.equals(row.boundAttemptId)) deny();
     return result(row, 200);
   }
 

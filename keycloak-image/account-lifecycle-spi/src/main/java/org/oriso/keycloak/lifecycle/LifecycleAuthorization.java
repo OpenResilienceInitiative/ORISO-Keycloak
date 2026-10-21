@@ -175,6 +175,30 @@ final class LifecycleAuthorization {
       String method,
       String target,
       JsonNode body) {
+    verifyCommand(proof, machine, proofAudience, purpose, operation, method, target, body,
+        "proof", "payload");
+  }
+
+  void verifyProtectedCommand(String proof, CheckedMachine machine, String operation,
+      String method, String target, JsonNode originalHttpBody) {
+    String purpose = switch (machine.actor()) {
+      case "SETUP" -> "INVITE_RESERVATIONS";
+      case "ACCOUNT_CREATE" -> "ACCOUNT_PROVISIONING";
+      case "ACCOUNT_ADMIN" -> "ACCOUNT_MAINTENANCE";
+      default -> throw new ForbiddenException();
+    };
+    verifyCommand(proof, machine, "oriso-protected-invitations", purpose, operation, method,
+        target, originalHttpBody, "protected-invitation-proof/v1", "protected-invitation-payload/v1");
+  }
+
+  void requireDistinctNativeSecret(String secret) {
+    if (secret == null || MessageDigest.isEqual(key, secret.getBytes(StandardCharsets.UTF_8))
+        || MessageDigest.isEqual(encodedKey.getBytes(StandardCharsets.UTF_8), secret.getBytes(StandardCharsets.UTF_8))) deny();
+  }
+
+  private void verifyCommand(String proof, CheckedMachine machine, String proofAudience,
+      String purpose, String operation, String method, String target, JsonNode body,
+      String proofDomain, String payloadDomain) {
     String actor = machine.actor(), client = machine.clientId(), subject = machine.subject();
     try {
       if (proof == null || proof.length() > 8192) deny();
@@ -183,7 +207,7 @@ final class LifecycleAuthorization {
           || !parts[0].matches("[A-Za-z0-9_-]+")
           || !parts[1].matches("[A-Za-z0-9_-]+")
           || !MessageDigest.isEqual(
-              bytes("proof\n" + parts[0]), Base64.getUrlDecoder().decode(parts[1]))) deny();
+              bytes(proofDomain + "\n" + parts[0]), Base64.getUrlDecoder().decode(parts[1]))) deny();
       var claims = JSON.readTree(Base64.getUrlDecoder().decode(parts[0]));
       fields(claims, CLAIMS.toArray(String[]::new));
       for (var name : CLAIMS)
@@ -205,7 +229,7 @@ final class LifecycleAuthorization {
           || !target.equals(claims.path("target").asText())
           || !client.equals(claims.path("taskClient").asText())
           || !subject.equals(claims.path("taskSubject").asText())
-          || !equal(mac("payload", body), claims.path("payloadDigest").asText())
+          || !equal(mac(payloadDomain, body), claims.path("payloadDigest").asText())
           || issued < now - 60
           || issued > now + 5
           || expires <= now
