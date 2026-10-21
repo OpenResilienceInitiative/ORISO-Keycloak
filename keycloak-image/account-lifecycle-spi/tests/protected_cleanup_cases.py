@@ -285,10 +285,12 @@ class ProtectedCleanupCases:
                 == replacement["username"],
                 "nativeLowercaseUsernameMatched": create["account"]["username"].lower()
                 == replacement["username"],
+                "originalNativeUsernameMatched": before["username"]
+                == replacement["username"],
                 "nativeEnabled": replacement["enabled"] is True,
             }
             self.assertEqual(account, replacement["id"])
-            self.assertEqual(create["account"]["username"], replacement["username"])
+            self.assertEqual(before["username"], replacement["username"])
             self.assertTrue(replacement["enabled"])
             self.assertEqual(
                 (200, terminal),
