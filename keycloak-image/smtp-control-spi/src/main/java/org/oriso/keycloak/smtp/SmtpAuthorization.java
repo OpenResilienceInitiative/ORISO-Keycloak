@@ -70,8 +70,8 @@ final class SmtpAuthorization {
         || user == null || !user.isEnabled() || !subject.equals(user.getId())
         || !subject.equals(token.getSubject()) || !client.getId().equals(user.getServiceAccountClientLink())
         || token.getAudience() == null
-        || !Arrays.asList(token.getAudience()).contains("oriso-task-commands")
-        || !AUDIENCES.containsAll(Arrays.asList(token.getAudience()))) denied();
+        || token.getAudience().length != AUDIENCES.size()
+        || !AUDIENCES.equals(new HashSet<>(Arrays.asList(token.getAudience())))) denied();
     var expected = session.users().getServiceAccount(client);
     if (expected == null || !subject.equals(expected.getId())) denied();
     var memberships = user.getGroupsStream().limit(2).collect(Collectors.toList());
