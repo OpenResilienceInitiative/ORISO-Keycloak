@@ -27,8 +27,16 @@ ISSUER = "http://maintenance-human-fixture.invalid/realms/" + REALM
 CLIENT = "ordinary-human-web"
 
 
-class HumanMaintenance(LifecycleFixture, unittest.TestCase):
+class HumanMaintenanceFixture(LifecycleFixture):
     phase_receipts = []
+
+    @classmethod
+    def extra_launch_arguments(cls):
+        return []
+
+    @classmethod
+    def reviewed_self_operations(cls):
+        return ["account.read", "account.locale"]
 
     @classmethod
     def setUpClass(cls):
@@ -75,7 +83,9 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
         def launch(args, *a, **kw):
             if isinstance(args, list) and args[:2] == ["docker", "run"]:
                 index = args.index(IMAGE)
-                args[index:index] = ["-v", cls.volume + ":/opt/keycloak/data"]
+                args[index:index] = [
+                    "-v", cls.volume + ":/opt/keycloak/data", *cls.extra_launch_arguments()
+                ]
                 args.extend(["--hostname=http://maintenance-human-fixture.invalid"])
             return original(args, *a, **kw)
 
@@ -215,7 +225,7 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
                     "realmRoles": ["consultant", "group-chat-consultant"],
                     "clientRoles": {},
                     "allowUnassignedTenant": False,
-                    "selfOperations": ["account.read", "account.locale"],
+                    "selfOperations": cls.reviewed_self_operations(),
                 }
             ],
         }
@@ -414,6 +424,7 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
         )
         return status, value
 
+class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
     def test_real_human_self_locale_keeps_admin_receipt_owner_and_rejects_origin_mix(
         self,
     ):
