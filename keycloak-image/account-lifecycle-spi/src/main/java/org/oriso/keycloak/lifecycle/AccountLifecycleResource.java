@@ -45,6 +45,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     String commandDigest();
     void before(String command, AccountLifecycleAttempt attempt, EntityManager em);
     void after(String command, AccountLifecycleAttempt attempt, EntityManager em);
+    default boolean restrictExpiredCommit(AccountLifecycleAttempt attempt, EntityManager em) { return false; }
   }
 
   AccountLifecycleResource(
@@ -232,6 +233,12 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
               .equals(row.roleFingerprint)) conflict();
       var user = integrity(row, realm, pending);
       if (user == null) conflict();
+      if (policy != null && policy.restrictExpiredCommit(row, em)) {
+        em.flush();
+        // A restriction is durable even though activation is refused. Returning
+        // normally lets the request transaction commit; throwing would roll it back.
+        return ok(JSON.valueToTree(Map.of("error", "Protected invitation rejected")), 409);
+      }
       user.user().leaveGroup(pending);
       user.user().joinGroup(group);
       user.user().setEnabled(true);
