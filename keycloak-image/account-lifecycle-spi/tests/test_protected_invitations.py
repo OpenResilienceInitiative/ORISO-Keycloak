@@ -30,6 +30,8 @@ from protected_creation_cases import ProtectedCreationCases
 from protected_terminal_cases import ProtectedTerminalCases
 from protected_cleanup_cases import ProtectedCleanupCases
 from protected_fence_cases import ProtectedFenceCases
+from protected_expiry_cases import ProtectedExpiryCases
+from protected_reconciliation_cases import ProtectedReconciliationCases
 
 HUMAN = None  # Set only from the actual native user lookup, never a proposed UUID.
 ISSUER = "http://protected-fixture.invalid/realms/" + REALM
@@ -41,6 +43,8 @@ class ProtectedInvitations(
     ProtectedTerminalCases,
     ProtectedCleanupCases,
     ProtectedFenceCases,
+    ProtectedExpiryCases,
+    ProtectedReconciliationCases,
     LifecycleFixture,
     unittest.TestCase,
 ):
@@ -70,6 +74,8 @@ class ProtectedInvitations(
         cls.compensate_proof_controls = []
         cls.abandoned_compensate_observation = None
         cls.bound_cancel_observation = None
+        cls.expired_commit_observation = None
+        cls.creation_reconciliation_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.

@@ -188,6 +188,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     private final ProtectedInvitationApproval approval;
     private final String attempt, profileJson, internalJson, originalCommandDigest;
     private final AccountLifecycleResource.LifecycleBinding binding;
+    private boolean commitClockChecked;
 
     private ProtectedLifecyclePolicy(ProtectedInvitationApproval approval, String attempt,
         AccountLifecycleResource.LifecycleBinding binding, JsonNode profile, JsonNode internalBody,
@@ -213,7 +214,53 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       if (!internalJson.equals(canonical(internalBody))) deny();
     }
 
+    public void verifyExistingCreation(AccountLifecycleAttempt current) {
+      if (current == null || current.accountId == null || current.creationProof == null
+          || current.createExecution == null || current.executionId == null || current.generation < 0
+          || !config.realmId.equals(current.realmId) || !attempt.equals(current.attemptId)
+          || !binding.rowId().equals(current.id) || !binding.ownerClient().equals(current.ownerClient)
+          || !binding.ownerSubject().equals(current.ownerSubject)
+          || !canonical(binding.scope()).equals(current.scope)
+          || !binding.creationFingerprint().equals(current.creationFingerprint)
+          || !binding.groupId().equals(current.groupId)
+          || !binding.roleFingerprint().equals(current.roleFingerprint)
+          || !attempt.equals(approval.boundAttemptId)) conflict();
+      switch (current.state) {
+        case "OPEN", "RECOVERY_CLAIMED" -> {
+          if (!Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+              || current.terminalOperation != null) conflict();
+          if ("OPEN".equals(current.state)
+              && (current.generation != 0 || !current.createExecution.equals(current.executionId))) conflict();
+          if ("RECOVERY_CLAIMED".equals(current.state) && current.generation == 0) conflict();
+        }
+        case "COMMITTED" -> {
+          if (!"CONSUMED".equals(approval.state) || !"commit".equals(current.terminalOperation)
+              || current.terminalReceipt == null || current.generation != 0
+              || !current.createExecution.equals(current.executionId)) conflict();
+        }
+        case "COMPENSATED" -> {
+          if (!Set.of("CANCELLED", "EXPIRED").contains(approval.state)
+              || !"compensate".equals(current.terminalOperation) || current.terminalReceipt == null) conflict();
+        }
+        default -> conflict(); // ABANDONED has never created an account.
+      }
+    }
+
     public String commandDigest() { return originalCommandDigest; }
+
+    public boolean restrictExpiredCommit(AccountLifecycleAttempt current, EntityManager em) {
+      if (current == null || !"OPEN".equals(current.state) || !"BOUND".equals(approval.state)
+          || !attempt.equals(approval.boundAttemptId) || approval.transitionReceipt != null) conflict();
+      // One locked receiver-clock decision after fresh pending-account integrity.
+      // A live commit may finish after the deadline; later callbacks reuse this fact.
+      var now = Instant.now();
+      if (Instant.parse(approval.validUntil).isAfter(now)) {
+        commitClockChecked = true;
+        return false;
+      }
+      persistExpiry(approval, current, now, em);
+      return true;
+    }
 
     public void before(String command, AccountLifecycleAttempt current, EntityManager em) {
       if ("compensate".equals(command)) {
@@ -242,7 +289,17 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
             || !attempt.equals(approval.boundAttemptId)) conflict();
         return;
       }
-      if (!Set.of("create", "owned-read", "commit").contains(command)
+      if ("commit".equals(command)) {
+        if (current == null || !"BOUND".equals(approval.state)
+            || !attempt.equals(approval.boundAttemptId)) conflict();
+        return;
+      }
+      if ("owned-read".equals(command)) {
+        verifyExistingCreation(current);
+        if (!Set.of("OPEN", "RECOVERY_CLAIMED").contains(current.state)) conflict();
+        return;
+      }
+      if (!"create".equals(command)
           || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if (current == null) {
         if (!"create".equals(command) || !"AUTHORIZED".equals(approval.state) || approval.boundAttemptId != null) conflict();
@@ -287,7 +344,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         em.flush();
         return;
       }
-      if (!Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
+      if ("commit".equals(command) ? !commitClockChecked
+          : !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if ("create".equals(command)) {
         if (!"OPEN".equals(current.state) || !"AUTHORIZED".equals(approval.state)
             || approval.boundAttemptId != null) conflict();
@@ -658,8 +716,20 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
   }
 
   private void materializeAuthorizedExpiry(ProtectedInvitationApproval row, EntityManager em) {
-    if (!"AUTHORIZED".equals(row.state) || Instant.parse(row.validUntil).isAfter(Instant.now())) return;
-    if (row.approvalReceipt == null || row.boundAttemptId != null || row.transitionReceipt != null) conflict();
+    var now = Instant.now();
+    if (!"AUTHORIZED".equals(row.state) || Instant.parse(row.validUntil).isAfter(now)) return;
+    persistExpiry(row, null, now, em);
+  }
+
+  private void persistExpiry(ProtectedInvitationApproval row, AccountLifecycleAttempt current,
+      Instant now, EntityManager em) {
+    if (row.approvalReceipt == null || row.transitionReceipt != null
+        || Instant.parse(row.validUntil).isAfter(now)) conflict();
+    JsonNode fence = null;
+    if ("BOUND".equals(row.state)) {
+      if (current == null || !row.boundAttemptId.equals(current.attemptId)) conflict();
+      fence = fenceBoundAttempt(current);
+    } else if (!"AUTHORIZED".equals(row.state) || row.boundAttemptId != null || current != null) conflict();
     row.state = "EXPIRED";
     var transition = JSON.createObjectNode();
     transition.put("realmId", row.realmId); transition.put("approvalId", row.approvalId);
@@ -669,9 +739,14 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     transition.put("operation", "protected-invitation.expire"); transition.put("reason", "EXPIRED");
     transition.put("state", "EXPIRED"); transition.put("actor", "RECEIVER");
     transition.put("expiryId", UUID.randomUUID().toString());
-    transition.put("validUntil", row.validUntil); transition.put("expiredAt", Instant.now().toString());
+    transition.put("validUntil", row.validUntil); transition.put("expiredAt", now.toString());
+    if (fence != null) {
+      transition.put("boundAttemptId", row.boundAttemptId);
+      transition.set("fencedExecution", fence);
+    }
     transition.put("receipt", crypto.receipt("protected-approval-expire/v1", transition.deepCopy()));
     row.transitionReceipt = canonical(transition);
+    if (row.transitionReceipt.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
     em.flush();
   }
 

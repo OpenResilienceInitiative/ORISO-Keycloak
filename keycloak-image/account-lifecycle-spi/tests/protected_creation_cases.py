@@ -8,9 +8,11 @@ from lifecycle_fixture import ACTORS, SUBJECTS, call, mac
 
 
 class ProtectedCreationCases:
-    def approved_creation(self):
+    def approved_creation(self, valid_until=None):
         approval, attempt = str(uuid.uuid4()), str(uuid.uuid4())
         scope = self.scope()
+        if valid_until is not None:
+            scope["validUntil"] = valid_until
         status, approved = call(
             self.base,
             "PUT",
