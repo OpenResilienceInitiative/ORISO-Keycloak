@@ -49,7 +49,10 @@ final class GeneralPolicy {
     var origin = request.target().path("origin");
     if (!"SELF".equals(origin.path("kind").asText()) || !origin.path("humanAuthority").isNull()) deny();
     // Caller has acquired the realm and target-provenance locks before these fresh human locks.
-    var human = CurrentNativeHumanIdentity.require(session, nativePolicy, rawHumanBearer);
+    if (rawHumanBearer == null || rawHumanBearer.length() > 32775
+        || !rawHumanBearer.regionMatches(true, 0, "Bearer ", 0, 7))
+      throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
+    var human = CurrentNativeHumanIdentity.require(session, nativePolicy, rawHumanBearer.substring(7));
     if (!request.accountId().equals(human.subject())
         || !human.subject().equals(origin.path("humanSubject").asText())
         || !human.issuer().equals(origin.path("humanIssuer").asText())
