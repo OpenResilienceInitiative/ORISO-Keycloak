@@ -261,6 +261,23 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
             },
             form=True,
         )
+        if status != 200:
+            native = self.admin("GET", "/users/" + self.account_id)
+            reasons = {
+                "Account is not fully set up": "required-actions",
+                "Invalid user credentials": "invalid-credentials",
+                "Account disabled": "disabled",
+            }
+            self.phase(
+                "human-login-failure",
+                status=status,
+                reason=reasons.get(result.get("error_description"), "other"),
+                enabled=native.get("enabled") is True,
+                profile_complete=all(
+                    native.get(field) for field in ["username", "email", "firstName", "lastName"]
+                ),
+                required_actions_present=bool(native.get("requiredActions")),
+            )
         self.assertEqual(200, status)
         bearer = result["access_token"]
         encoded = bearer.split(".")[1]
@@ -321,6 +338,16 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
             live_session=True,
         )
         return bearer
+
+    def replace_native_attributes(self, attributes):
+        before = self.admin("GET", "/users/" + self.account_id)
+        updated = dict(before)
+        updated["attributes"] = attributes
+        self.admin("PUT", "/users/" + self.account_id, updated)
+        after = self.admin("GET", "/users/" + self.account_id)
+        for field in ["username", "email", "firstName", "lastName", "enabled", "requiredActions"]:
+            self.assertEqual(before.get(field), after.get(field))
+        self.phase("installer-native-profile-preserved", profile_preserved=True)
 
     def invoke(self, command, body, human, expected):
         from urllib.error import HTTPError
@@ -450,11 +477,9 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
             ["fr"],
             self.admin("GET", "/users/" + self.account_id)["attributes"]["locale"],
         )
-        self.admin(
-            "PUT",
-            "/users/" + self.account_id,
-            {"attributes": {"tenantId": ["11"], "locale": ["it"]}},
-        )
+        attributes = self.admin("GET", "/users/" + self.account_id)["attributes"]
+        attributes["locale"] = ["it"]
+        self.replace_native_attributes(attributes)
         self.assertEqual((200, result), self.invoke("locale", body, human, 200))
         self.assertEqual(
             ["it"],
@@ -500,7 +525,7 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
         changed = json.loads(json.dumps(original))
         installer_locale = "it" if before["preferredLanguage"] != "it" else "de"
         changed["locale"] = [installer_locale]
-        self.admin("PUT", "/users/" + self.account_id, {"attributes": changed})
+        self.replace_native_attributes(changed)
         body = {
             "target": target,
             "operationId": str(uuid.uuid4()),
@@ -528,11 +553,11 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
         current = self.admin("GET", "/users/" + self.account_id)["attributes"]
         changed = json.loads(json.dumps(current))
         changed["tenantId"] = ["12"]
-        self.admin("PUT", "/users/" + self.account_id, {"attributes": changed})
+        self.replace_native_attributes(changed)
         try:
             self.assertEqual(403, self.invoke("read", {"target": target}, human, 403)[0])
         finally:
-            self.admin("PUT", "/users/" + self.account_id, {"attributes": current})
+            self.replace_native_attributes(current)
         group_path = "/users/" + self.account_id + "/groups/" + self.group["id"]
         self.admin("DELETE", group_path)
         try:
