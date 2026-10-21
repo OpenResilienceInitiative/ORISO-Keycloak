@@ -161,6 +161,7 @@ class RollbackReadiness(unittest.TestCase):
         status, inert = call(
             helper.base, "GET", "/realms/" + REALM + "/oriso-proof-readiness"
         )
+        o["inertCompanionHttpStatus"] = status
         self.assertEqual(200, status)
         self.assertEqual(STATUS_FIELDS, set(inert))
         self.assertFalse(inert["enabled"])
@@ -217,6 +218,7 @@ class RollbackReadiness(unittest.TestCase):
             status, observed = call(
                 helper.base, "GET", "/realms/" + REALM + "/oriso-proof-readiness"
             )
+            o["activeCompanionHttpStatus"] = status
             self.assertEqual(200, status)
             self.assertEqual(STATUS_FIELDS, set(observed))
             self.assertTrue(
@@ -300,7 +302,10 @@ def companion_evidence():
         if any(
             not n.startswith("org/oriso/keycloak/lifecycle/proof/")
             and n
-            != "META-INF/services/org.keycloak.services.resource.RealmResourceProviderFactory"
+            not in {
+                "META-INF/beans.xml",
+                "META-INF/services/org.keycloak.services.resource.RealmResourceProviderFactory",
+            }
             for n in names
         ):
             raise AssertionError("Unexpected proof companion archive entry")
@@ -341,6 +346,8 @@ def classify_rollback(summary):
         and len(set(images)) == 1
         and all(o.get(k) is True for k in required)
         and o.get("validBindingApproveStatus") == 201
+        and o.get("inertCompanionHttpStatus") == 200
+        and o.get("activeCompanionHttpStatus") == 200
         and summary.get("companionJarStable") is True
         and summary.get("companionAbsentFromMainJar") is True
         and 0 < o.get("thirdBootElapsedSeconds", 181) < 180

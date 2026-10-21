@@ -212,6 +212,8 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
     };
   }
 
+  @jakarta.ws.rs.ext.Provider
+  @jakarta.enterprise.inject.Vetoed
   public final class StatusResource {
     private StatusResource() {}
     @GET @Produces(MediaType.APPLICATION_JSON)

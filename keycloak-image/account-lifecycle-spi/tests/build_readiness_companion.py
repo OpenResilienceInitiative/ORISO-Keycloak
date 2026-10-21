@@ -94,6 +94,7 @@ def build(destination):
             for file in entries:
                 archive.write(file, str(file.relative_to(classes)))
             archive.write(fixture / service, service)
+            archive.write(fixture / "META-INF/beans.xml", "META-INF/beans.xml")
     if main_before != hashlib.sha256(main.read_bytes()).hexdigest():
         raise RuntimeError("Main provider changed during companion compilation")
     print("Proof-only companion compiled outside product artifacts")
