@@ -1343,12 +1343,20 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         self.assertEqual(account, receipt["accountId"])
         self.assertEqual(ACTORS["ACCOUNT_CREATE"][0], receipt["ownerClient"])
         self.assertEqual(SUBJECTS["ACCOUNT_CREATE"], receipt["ownerSubject"])
+        self.assertEqual(create["creationFingerprint"], receipt["creationFingerprint"])
+        self.assertEqual(self.protected_group_id, receipt["groupId"])
+        self.assertEqual(
+            mac("protected-initial-profile/v1", self.native_configured_profiles[0]),
+            receipt["roleFingerprint"],
+        )
         self.assertEqual("RECOVERY_CLAIMED", receipt["state"])
         self.assertEqual("recover", receipt["operation"])
         self.assertEqual(1, receipt["generation"])
         self.assertEqual(recover["recoveryId"], receipt["executionId"])
         self.assertEqual(original_digest, receipt["commandDigest"])
         nested = json.loads(receipt["scope"])
+        self.assertEqual(canonical(nested).decode(), receipt["scope"])
+        self.assertEqual(origin["scope"], nested)
         self.assertEqual(
             {
                 "approvalId": approval,

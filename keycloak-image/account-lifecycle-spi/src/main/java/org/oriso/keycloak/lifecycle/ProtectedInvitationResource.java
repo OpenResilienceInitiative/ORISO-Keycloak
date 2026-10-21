@@ -58,13 +58,23 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     return guarded(() -> accountCommand("commit", approval, attempt, raw, proof));
   }
 
+  @POST
+  @Path("v1/approvals/{approval}/attempts/{attempt}/recover")
+  public Response recover(@PathParam("approval") String approval, @PathParam("attempt") String attempt,
+      byte[] raw, @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> accountCommand("recover", approval, attempt, raw, proof));
+  }
+
   private Response accountCommand(String command, String approval, String attempt, byte[] raw, String proof) {
-    if (!Set.of("create", "owned-read", "commit").contains(command)) deny();
+    if (!Set.of("create", "owned-read", "commit", "recover").contains(command)) deny();
     boolean create = "create".equals(command);
+    boolean recover = "recover".equals(command);
     uuid(approval); uuid(attempt);
     var body = parse(raw);
     if (create) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "acceptanceClaim",
         "execution", "account", "creationFingerprint");
+    else if (recover) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
+        "acceptanceClaim", "expectedGeneration", "recoveryId");
     else if ("commit".equals(command)) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
         "execution", "accountId", "creationProof", "localCommit");
     else fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
@@ -76,18 +86,19 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var currentAttempt = em.find(AccountLifecycleAttempt.class, attemptKey, LockModeType.PESSIMISTIC_WRITE);
     if (currentAttempt != null) em.refresh(currentAttempt);
     // Current native grant checks run after the relevant provenance locks.
-    var machine = machineAuthorization.requireMachine(session, Set.of("ACCOUNT_CREATE"));
-    crypto.verifyProtectedCommand(proof, machine, "protected-account." + command, create ? "PUT" : "POST",
+    var machine = machineAuthorization.requireMachine(session,
+        recover ? Set.of("ACCOUNT_CREATE", "ACCOUNT_ADMIN") : Set.of("ACCOUNT_CREATE"));
+    crypto.verifyProtectedCommand(proof, machine, "protected-account." + (recover ? "creation-recover" : command), create ? "PUT" : "POST",
         "realm/" + config.realmId + "/protected-invitation/" + approval + "/account-attempt/" + attempt, body);
     if (row == null) deny();
     if (row.approvalReceipt == null || !canonical(body.path("approvalReceipt")).equals(row.approvalReceipt)
         || !LifecycleAuthorization.equal(row.scopeDigest, text(body, "scopeDigest", 64, false))
         || row.authorizationRevision != number(body, "authorizationRevision", true)) deny();
     var scope = parse(row.request).path("scope");
-    if (!machine.clientId().equals(scope.path("creatorClient").asText())
-        || !machine.subject().equals(scope.path("creatorSubject").asText())) deny();
+    if ("ACCOUNT_CREATE".equals(machine.actor()) && (!machine.clientId().equals(scope.path("creatorClient").asText())
+        || !machine.subject().equals(scope.path("creatorSubject").asText()))) deny();
     if (!create && currentAttempt == null) deny();
-    var acceptance = create ? body.path("acceptanceClaim")
+    var acceptance = create || recover ? body.path("acceptanceClaim")
         : parse(currentAttempt.scope).path("approvalBinding").path("acceptanceClaim");
     fields(acceptance, "workflowId", "inviteId", "authorizationRevision", "claimId", "journalVersion");
     if (!row.workflowId.equals(uuid(text(acceptance, "workflowId", 36, false)))
@@ -95,7 +106,13 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         || row.authorizationRevision != number(acceptance, "authorizationRevision", true)) deny();
     uuid(text(acceptance, "claimId", 36, false));
     number(acceptance, "journalVersion", true);
-    execution(body.path("execution"));
+    if (recover) {
+      number(body, "expectedGeneration", false);
+      String recoveryId = uuid(text(body, "recoveryId", 36, false));
+      // A saved recovery ID is not a claim on a later server cancellation fence.
+      if (recoveryId.equals(currentAttempt.recoveryId)
+          && !recoveryId.equals(currentAttempt.executionId)) conflict();
+    } else execution(body.path("execution"));
     if (create && number(body.path("execution"), "generation", false) != 0) conflict();
     String fingerprint = text(body, "creationFingerprint", 64, false);
     hex(fingerprint);
@@ -128,14 +145,18 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var translated = JSON.createObjectNode();
     var identity = translated.putObject("identity");
     identity.set("scope", internalScope); identity.put("creationFingerprint", fingerprint);
-    translated.set("execution", body.path("execution").deepCopy());
+    if (recover) {
+      translated.set("expectedGeneration", body.path("expectedGeneration").deepCopy());
+      translated.set("recoveryId", body.path("recoveryId").deepCopy());
+    } else translated.set("execution", body.path("execution").deepCopy());
     if (create) translated.set("account", body.path("account").deepCopy());
-    else {
+    else if (!recover) {
       translated.set("accountId", body.path("accountId").deepCopy());
       translated.set("creationProof", body.path("creationProof").deepCopy());
       if ("commit".equals(command)) translated.set("localCommit", body.path("localCommit").deepCopy());
     }
-    var binding = new AccountLifecycleResource.LifecycleBinding(attemptKey, machine.clientId(), machine.subject(),
+    var binding = new AccountLifecycleResource.LifecycleBinding(attemptKey,
+        scope.path("creatorClient").asText(), scope.path("creatorSubject").asText(),
         internalScope, fingerprint, text(frozenProfile, "groupId", 255, false),
         crypto.mac("protected-initial-profile/v1", frozenProfile));
     // The concrete policy is private and is minted only after original-wire proof
@@ -178,6 +199,11 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     public String commandDigest() { return originalCommandDigest; }
 
     public void before(String command, AccountLifecycleAttempt current, EntityManager em) {
+      if ("recover".equals(command)) {
+        if (current == null || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+            || !attempt.equals(approval.boundAttemptId)) conflict();
+        return;
+      }
       if (!Set.of("create", "owned-read", "commit").contains(command)
           || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if (current == null) {
@@ -188,8 +214,14 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     public void after(String command, AccountLifecycleAttempt current, EntityManager em) {
       if (current == null || current.accountId == null || !attempt.equals(current.attemptId)
           || !binding.rowId().equals(current.id) || !binding.ownerClient().equals(current.ownerClient)
-          || !binding.ownerSubject().equals(current.ownerSubject)
-          || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
+          || !binding.ownerSubject().equals(current.ownerSubject)) conflict();
+      if ("recover".equals(command)) {
+        if (!"RECOVERY_CLAIMED".equals(current.state)
+            || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+            || !attempt.equals(approval.boundAttemptId)) conflict();
+        return;
+      }
+      if (!Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if ("create".equals(command)) {
         if (!"OPEN".equals(current.state) || !"AUTHORIZED".equals(approval.state)
             || approval.boundAttemptId != null) conflict();

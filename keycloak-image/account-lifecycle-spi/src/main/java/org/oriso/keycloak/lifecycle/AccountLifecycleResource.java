@@ -158,8 +158,9 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       String command, String attemptId, JsonNode neutralBody, String checkedActor,
       LifecyclePolicy policy) {
     // Each protected command is enabled only with its own public HTTP tracer.
-    if (policy == null || !Set.of("create", "owned-read", "commit").contains(command)
-        || !"ACCOUNT_CREATE".equals(checkedActor)) deny();
+    if (policy == null || !Set.of("create", "owned-read", "commit", "recover").contains(command)
+        || !("ACCOUNT_CREATE".equals(checkedActor)
+            || "recover".equals(command) && "ACCOUNT_ADMIN".equals(checkedActor))) deny();
     return guarded(() -> execute(command, attemptId, neutralBody, checkedActor, policy));
   }
 
@@ -192,7 +193,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
               row.creationFingerprint, identity.path("creationFingerprint").asText())) deny();
     }
     if ("create".equals(command)) return create(body, realm, row, attemptId, em, policy);
-    if ("recover".equals(command)) return recover(body, realm, row, attemptId, em);
+    if ("recover".equals(command)) return recover(body, realm, row, attemptId, em, policy);
     if (row == null) deny();
     if ("owned-read".equals(command)) {
       fields(body, "identity", "execution", "accountId", "creationProof");
@@ -412,11 +413,12 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       RealmModel realm,
       AccountLifecycleAttempt row,
       String attempt,
-      EntityManager em) {
+      EntityManager em,
+      LifecyclePolicy policy) {
     fields(body, "identity", "expectedGeneration", "recoveryId");
     long expected = number(body, "expectedGeneration", false);
     String recovery = uuid(text(body, "recoveryId", 36, false));
-    String digest = auth.mac("payload", body);
+    String digest = policy == null ? auth.mac("payload", body) : policy.commandDigest();
     if (row != null && recovery.equals(row.recoveryId)) {
       if (!LifecycleAuthorization.equal(digest, row.recoveryDigest)
           || row.recoveryExpected == null
@@ -427,6 +429,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       if (expected != row.generation) conflict();
       return result(row, 200);
     }
+    if (policy != null) policy.before("recover", row, em);
     boolean absent = row == null;
     if (absent) {
       if (expected != 0) conflict();
@@ -451,6 +454,10 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     row.recoveryReceipt = auth.receipt("recovery-receipt", receipt(row, "recover", digest));
     if ("ABANDONED".equals(row.state))
       row.terminalReceipt = auth.receipt("terminal-receipt", receipt(row, "abandon", digest));
+    if (policy != null) {
+      if (row.recoveryReceipt.getBytes(StandardCharsets.UTF_8).length > 16000) bad();
+      policy.after("recover", row, em);
+    }
     if (absent) em.persist(row);
     em.flush();
     return result(row, 200);
