@@ -5,11 +5,15 @@ import static org.oriso.keycloak.lifecycle.LifecycleJson.*;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.*;
 import java.util.Map;
+import java.util.function.Supplier;
+import jakarta.persistence.LockModeType;
+import org.keycloak.connections.jpa.JpaConnectionProvider;
+import org.keycloak.models.jpa.entities.RealmEntity;
 import java.util.Set;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.resource.RealmResourceProvider;
 
-/** Finite bounded read. Mutations deliberately have no route before their own native RED. */
+/** Finite bounded read and receipt-backed deletion; other effects remain closed. */
 @jakarta.ws.rs.ext.Provider
 @jakarta.enterprise.inject.Vetoed
 @Consumes(MediaType.APPLICATION_JSON)
@@ -30,7 +34,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   @Path("v1/accounts/{account}/read")
   public Response read(@PathParam("account") String account, byte[] raw,
       @HeaderParam("X-ORISO-Task-Context") String proof) {
-    try {
+    return guarded(() -> {
       var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
       var body = parse(raw);
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
@@ -38,6 +42,90 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("read", account, body);
       return Response.ok(targets.read(request)).header("Cache-Control", "no-store").build();
+    });
+  }
+
+  @POST
+  @Path("v1/accounts/{account}/delete")
+  public Response delete(@PathParam("account") String account, byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> {
+      var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
+      var body = parse(raw);
+      var realm = session.getContext().getRealm();
+      auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
+          "account.delete", "POST", "realm/" + realm.getId() + "/account/" + account, body);
+      var request = MaintenanceRequest.parse("delete", account, body);
+      var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
+      var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
+      if (lockedRealm == null) deny();
+      em.refresh(lockedRealm);
+      String id = realm.getId() + ":" + request.operationId();
+      var prior = em.find(AccountMaintenanceOperation.class, id, LockModeType.PESSIMISTIC_WRITE);
+      String digest = auth.mac("maintenance-intent", body);
+      if (prior != null) {
+        em.refresh(prior);
+        if (!realm.getId().equals(prior.realmId) || !account.equals(prior.accountId)
+            || !"delete".equals(prior.command) || !machine.clientId().equals(prior.ownerClient)
+            || !machine.subject().equals(prior.ownerSubject)
+            || !LifecycleAuthorization.equal(digest, prior.intentDigest)
+            || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState))
+          throw new ClientErrorException("Maintenance operation conflicts", 409);
+        // Exact retry resolves before current target/provenance lookup, including reused native UUIDs.
+        return Response.ok(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
+      }
+      targets.delete(request);
+      var outcome = JSON.createObjectNode();
+      outcome.put("realmId", realm.getId());
+      outcome.put("accountId", account);
+      outcome.put("operationId", request.operationId());
+      outcome.put("command", "delete");
+      outcome.put("ownerClient", machine.clientId());
+      outcome.put("ownerSubject", machine.subject());
+      outcome.put("intentDigest", digest);
+      outcome.put("previousState", request.expectedState());
+      outcome.set("tenantId", request.target().path("tenantId"));
+      outcome.put("originDigest", auth.mac("maintenance-origin", request.target().path("origin")));
+      outcome.put("result", "DELETED");
+      var result = JSON.createObjectNode();
+      result.put("operationId", request.operationId());
+      result.put("accountId", account);
+      result.put("result", "DELETED");
+      result.put("receipt", auth.receipt("maintenance-operation-receipt", outcome));
+      var saved = new AccountMaintenanceOperation();
+      saved.id = id;
+      saved.realmId = realm.getId();
+      saved.operationId = request.operationId();
+      saved.accountId = account;
+      saved.command = "delete";
+      saved.ownerClient = machine.clientId();
+      saved.ownerSubject = machine.subject();
+      saved.intentDigest = digest;
+      saved.expectedState = request.expectedState();
+      saved.resultJson = canonical(result);
+      em.persist(saved);
+      if (realm.isAdminEventsEnabled()) {
+        var event = new org.keycloak.events.admin.AdminEvent();
+        event.setTime(System.currentTimeMillis());
+        event.setRealmId(realm.getId());
+        event.setOperationType(org.keycloak.events.admin.OperationType.DELETE);
+        event.setResourceType(org.keycloak.events.admin.ResourceType.USER);
+        event.setResourcePath("accounts/" + account);
+        var details = new org.keycloak.events.admin.AuthDetails();
+        details.setRealmId(realm.getId());
+        details.setClientId(machine.clientId());
+        details.setUserId(machine.subject());
+        event.setAuthDetails(details);
+        session.getProvider(org.keycloak.events.EventStoreProvider.class).onEvent(event, false);
+      }
+      em.flush();
+      return Response.ok(result).header("Cache-Control", "no-store").build();
+    });
+  }
+
+  private Response guarded(Supplier<Response> command) {
+    try {
+      return command.get();
     } catch (WebApplicationException failure) {
       session.getTransactionManager().setRollbackOnly();
       throw new WebApplicationException(Response.status(failure.getResponse().getStatus())

@@ -37,6 +37,11 @@ final class MaintenanceTarget {
     var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
     if (lockedRealm == null) deny();
     em.refresh(lockedRealm);
+    // A deleted native UUID cannot inherit an earlier committed human provenance.
+    if (!em.createNativeQuery(
+        "select ID from ORISO_ACCOUNT_MAINTENANCE_OP where REALM_ID = :realm and ACCOUNT_ID = :account and COMMAND = 'delete' for update")
+        .setParameter("realm", realm.getId()).setParameter("account", request.accountId())
+        .getResultList().isEmpty()) deny();
     var attempts = em.createQuery(
         "select a from AccountLifecycleAttempt a where a.realmId = :realm and a.accountId = :account",
         AccountLifecycleAttempt.class)
@@ -96,6 +101,19 @@ final class MaintenanceTarget {
     body.put("passwordChangeRequired", passwordChange);
     body.put("state", auth.mac("maintenance-state", state));
     return body;
+  }
+
+  void delete(MaintenanceRequest request) {
+    var current = read(request);
+    if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText())) conflict();
+    var realm = session.getContext().getRealm();
+    var user = session.users().getUserById(realm, request.accountId());
+    var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
+    if (cache != null && user != null) {
+      cache.evict(realm, user);
+      user = session.users().getUserById(realm, request.accountId());
+    }
+    if (user == null || !session.users().removeUser(realm, user)) conflict();
   }
 
   private JsonNode lockedSnapshot(EntityManager em, String id) {
