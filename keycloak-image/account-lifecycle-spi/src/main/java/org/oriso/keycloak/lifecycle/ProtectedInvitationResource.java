@@ -15,7 +15,7 @@ import org.keycloak.models.*;
 import org.keycloak.models.jpa.entities.RealmEntity;
 import org.keycloak.services.resource.RealmResourceProvider;
 
-/** Human-owned approval issuance. No native user is created by this resource. */
+/** Human approval and designated-owner lifecycle, with separate native authentication. */
 @jakarta.ws.rs.ext.Provider
 @jakarta.enterprise.inject.Vetoed
 @Consumes(MediaType.APPLICATION_JSON)
@@ -41,28 +41,45 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
   @Path("v1/approvals/{approval}/attempts/{attempt}")
   public Response create(@PathParam("approval") String approval, @PathParam("attempt") String attempt,
       byte[] raw, @HeaderParam("X-ORISO-Task-Context") String proof) {
-    return guarded(() -> createAccount(approval, attempt, raw, proof));
+    return guarded(() -> accountCommand("create", approval, attempt, raw, proof));
   }
 
-  private Response createAccount(String approval, String attempt, byte[] raw, String proof) {
+  @POST
+  @Path("v1/approvals/{approval}/attempts/{attempt}/owned-read")
+  public Response read(@PathParam("approval") String approval, @PathParam("attempt") String attempt,
+      byte[] raw, @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> accountCommand("owned-read", approval, attempt, raw, proof));
+  }
+
+  private Response accountCommand(String command, String approval, String attempt, byte[] raw, String proof) {
+    if (!Set.of("create", "owned-read").contains(command)) deny();
+    boolean create = "create".equals(command);
     uuid(approval); uuid(attempt);
     var body = parse(raw);
-    fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "acceptanceClaim",
+    if (create) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "acceptanceClaim",
         "execution", "account", "creationFingerprint");
+    else fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
+        "execution", "accountId", "creationProof");
     var em = lockedRealm();
-    var machine = machineAuthorization.requireMachine(session, Set.of("ACCOUNT_CREATE"));
-    crypto.verifyProtectedCommand(proof, machine, "protected-account.create", "PUT",
-        "realm/" + config.realmId + "/protected-invitation/" + approval + "/account-attempt/" + attempt, body);
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
+    if (row != null) em.refresh(row);
+    String attemptKey = protectedAttemptKey(config.realmId, approval, attempt);
+    var currentAttempt = em.find(AccountLifecycleAttempt.class, attemptKey, LockModeType.PESSIMISTIC_WRITE);
+    if (currentAttempt != null) em.refresh(currentAttempt);
+    // Current native grant checks run after the relevant provenance locks.
+    var machine = machineAuthorization.requireMachine(session, Set.of("ACCOUNT_CREATE"));
+    crypto.verifyProtectedCommand(proof, machine, "protected-account." + command, create ? "PUT" : "POST",
+        "realm/" + config.realmId + "/protected-invitation/" + approval + "/account-attempt/" + attempt, body);
     if (row == null) deny();
-    em.refresh(row);
     if (row.approvalReceipt == null || !canonical(body.path("approvalReceipt")).equals(row.approvalReceipt)
         || !LifecycleAuthorization.equal(row.scopeDigest, text(body, "scopeDigest", 64, false))
         || row.authorizationRevision != number(body, "authorizationRevision", true)) deny();
     var scope = parse(row.request).path("scope");
     if (!machine.clientId().equals(scope.path("creatorClient").asText())
         || !machine.subject().equals(scope.path("creatorSubject").asText())) deny();
-    var acceptance = body.path("acceptanceClaim");
+    if (!create && currentAttempt == null) deny();
+    var acceptance = create ? body.path("acceptanceClaim")
+        : parse(currentAttempt.scope).path("approvalBinding").path("acceptanceClaim");
     fields(acceptance, "workflowId", "inviteId", "authorizationRevision", "claimId", "journalVersion");
     if (!row.workflowId.equals(uuid(text(acceptance, "workflowId", 36, false)))
         || !row.inviteId.equals(text(acceptance, "inviteId", 255, false))
@@ -70,16 +87,18 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     uuid(text(acceptance, "claimId", 36, false));
     number(acceptance, "journalVersion", true);
     execution(body.path("execution"));
-    if (number(body.path("execution"), "generation", false) != 0) conflict();
+    if (create && number(body.path("execution"), "generation", false) != 0) conflict();
     String fingerprint = text(body, "creationFingerprint", 64, false);
     hex(fingerprint);
-    var fingerprintInput = body.deepCopy();
-    ((com.fasterxml.jackson.databind.node.ObjectNode) fingerprintInput).remove("creationFingerprint");
-    if (!LifecycleAuthorization.equal(fingerprint, crypto.mac("protected-account-creation/v1", fingerprintInput))) deny();
-    var account = body.path("account");
-    String recipient = scope.path("recipient").asText();
-    if (!recipient.equals(text(account, "email", 255, false))
-        || !encodedUsername(recipient).equals(text(account, "username", 255, false))) deny();
+    if (create) {
+      var fingerprintInput = body.deepCopy();
+      ((com.fasterxml.jackson.databind.node.ObjectNode) fingerprintInput).remove("creationFingerprint");
+      if (!LifecycleAuthorization.equal(fingerprint, crypto.mac("protected-account-creation/v1", fingerprintInput))) deny();
+      var account = body.path("account");
+      String recipient = scope.path("recipient").asText();
+      if (!recipient.equals(text(account, "email", 255, false))
+          || !encodedUsername(recipient).equals(text(account, "username", 255, false))) deny();
+    } else if (!LifecycleAuthorization.equal(fingerprint, currentAttempt.creationFingerprint)) deny();
     var enriched = parse(row.scope);
     var frozenProfile = enriched.path("profile");
     var internalScope = JSON.createObjectNode();
@@ -101,27 +120,28 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var identity = translated.putObject("identity");
     identity.set("scope", internalScope); identity.put("creationFingerprint", fingerprint);
     translated.set("execution", body.path("execution").deepCopy());
-    translated.set("account", account.deepCopy());
-    String attemptKey = protectedAttemptKey(config.realmId, approval, attempt);
-    var currentAttempt = em.find(AccountLifecycleAttempt.class, attemptKey, LockModeType.PESSIMISTIC_WRITE);
-    if (currentAttempt != null) em.refresh(currentAttempt);
+    if (create) translated.set("account", body.path("account").deepCopy());
+    else {
+      translated.set("accountId", body.path("accountId").deepCopy());
+      translated.set("creationProof", body.path("creationProof").deepCopy());
+    }
     var binding = new AccountLifecycleResource.LifecycleBinding(attemptKey, machine.clientId(), machine.subject(),
         internalScope, fingerprint, text(frozenProfile, "groupId", 255, false),
         crypto.mac("protected-initial-profile/v1", frozenProfile));
     // The concrete policy is private and is minted only after original-wire proof
     // verification and realm -> approval -> attempt locks. It is never a DTO/claim.
-    var policy = new ProtectedCreatePolicy(row, attempt, binding, frozenProfile, translated,
+    var policy = new ProtectedLifecyclePolicy(row, attempt, binding, frozenProfile, translated,
         crypto.mac("protected-invitation-payload/v1", body));
     return new AccountLifecycleResource(session, crypto, Map.of())
-        .executeProtected("create", attempt, translated, machine.actor(), policy);
+        .executeProtected(command, attempt, translated, machine.actor(), policy);
   }
 
-  private final class ProtectedCreatePolicy implements AccountLifecycleResource.LifecyclePolicy {
+  private final class ProtectedLifecyclePolicy implements AccountLifecycleResource.LifecyclePolicy {
     private final ProtectedInvitationApproval approval;
     private final String attempt, profileJson, internalJson, originalCommandDigest;
     private final AccountLifecycleResource.LifecycleBinding binding;
 
-    private ProtectedCreatePolicy(ProtectedInvitationApproval approval, String attempt,
+    private ProtectedLifecyclePolicy(ProtectedInvitationApproval approval, String attempt,
         AccountLifecycleResource.LifecycleBinding binding, JsonNode profile, JsonNode internalBody,
         String originalCommandDigest) {
       this.approval = approval; this.attempt = attempt; this.binding = binding;
@@ -148,9 +168,10 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     public String commandDigest() { return originalCommandDigest; }
 
     public void before(String command, AccountLifecycleAttempt current, EntityManager em) {
-      if (!"create".equals(command) || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
+      if (!Set.of("create", "owned-read").contains(command)
+          || !Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if (current == null) {
-        if (!"AUTHORIZED".equals(approval.state) || approval.boundAttemptId != null) conflict();
+        if (!"create".equals(command) || !"AUTHORIZED".equals(approval.state) || approval.boundAttemptId != null) conflict();
       } else if (!"BOUND".equals(approval.state) || !attempt.equals(approval.boundAttemptId)) conflict();
     }
 

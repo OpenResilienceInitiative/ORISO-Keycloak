@@ -158,7 +158,8 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       String command, String attemptId, JsonNode neutralBody, String checkedActor,
       LifecyclePolicy policy) {
     // Each protected command is enabled only with its own public HTTP tracer.
-    if (policy == null || !"create".equals(command) || !"ACCOUNT_CREATE".equals(checkedActor)) deny();
+    if (policy == null || !Set.of("create", "owned-read").contains(command)
+        || !"ACCOUNT_CREATE".equals(checkedActor)) deny();
     return guarded(() -> execute(command, attemptId, neutralBody, checkedActor, policy));
   }
 
@@ -197,6 +198,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       fields(body, "identity", "execution", "accountId", "creationProof");
       owned(body, row);
       if (!"OPEN".equals(row.state)) conflict();
+      if (policy != null) policy.before("owned-read", row, em);
       var user = integrity(row, realm, LifecycleGroups.pending(session, realm));
       if (user == null) conflict();
       return ok(projection(user), 200);
