@@ -57,6 +57,7 @@ class SanitizedResult(unittest.TestResult):
             "protected_cleanup_cases.py",
             "protected_fence_cases.py",
             "protected_expiry_cases.py",
+            "protected_reconciliation_cases.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }
@@ -325,9 +326,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 16:
+        if discovered != 17:
             raise AssertionError(
-                "Exactly sixteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence cases required"
+                "Exactly seventeen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence/reconciliation cases required"
             )
 
         def deadline(signum, frame):
@@ -398,6 +399,9 @@ def main():
                 ),
                 "expiredCommitObservation": getattr(
                     fixture, "expired_commit_observation", None
+                ),
+                "creationReconciliationObservation": getattr(
+                    fixture, "creation_reconciliation_observation", None
                 ),
             }
         )
@@ -479,8 +483,63 @@ def main():
                 "normal409TransactionCommitWitnessValidated"
             )
             is True
+            and (summary["creationReconciliationObservation"] or {}).get(
+                "replacementAndProfileDriftUnaffected"
+            )
+            is True
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["creationReconciliationObservation"] or {}).get(
+                "actualReplayStatus"
+            )
+            == 409
+            and summary["creationReconciliationObservation"].get("expectedReplayStatus")
+            == 200
+            and summary["creationReconciliationObservation"].get(
+                "actualOwnedReadStatus"
+            )
+            == 409
+            and summary["creationReconciliationObservation"].get(
+                "expectedOwnedReadStatus"
+            )
+            == 200
+            and all(
+                summary["creationReconciliationObservation"].get(key) is True
+                for key in (
+                    "nativeHumanApprovalAndCreationMACAllFieldsValidated",
+                    "originalOwnerScopeAcceptanceFingerprintAndExecutionValidated",
+                    "sourceNativeLiveReadValidated",
+                    "receiverDeadlineElapsed",
+                    "replayInputHasNoCreationOutcomeOrHumanBearer",
+                    "originalRequestBodyUnchanged",
+                    "accountCountUnchanged",
+                    "nativeAccountUnchanged",
+                    "nativeMembershipUnchanged",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_expired_creation_replay_reports_current_outcome_and_restricts_native_read"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = (
+                "GENUINE_PROTECTED_EXPIRED_CREATION_RECONCILIATION_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls
