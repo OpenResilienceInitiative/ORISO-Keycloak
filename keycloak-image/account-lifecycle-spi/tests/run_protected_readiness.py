@@ -85,7 +85,16 @@ def classify(summary):
     return "BEHAVIOR_FAILURE"
 
 
-def main():
+def main(
+    *,
+    fixture=NativeFixture,
+    test_class=BindingReadiness,
+    test_method="test_binding_drift_keeps_native_login_and_protected_unavailable",
+    case=CASE,
+    suite_name="protected-binding-readiness",
+    classify_result=classify,
+    extension_evidence=None
+):
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", required=True)
     args = parser.parse_args()
@@ -97,8 +106,8 @@ def main():
     before, workflow_before = source_manifest(module), digest(workflow)
     summary = {
         "schema": 1,
-        "suite": "protected-binding-readiness",
-        "case": CASE,
+        "suite": suite_name,
+        "case": case,
         "classification": "INPUT_OR_FIXTURE_ERROR",
         "sourceManifest": before,
         "workflowSHA256": workflow_before,
@@ -118,13 +127,7 @@ def main():
             raise AssertionError("Actual packaged JAR required")
         summary["jarSHA256"] = digest(jar)
         summary["unitEvidence"] = unit_evidence(module / "target/surefire-reports")
-        suite = unittest.TestSuite(
-            [
-                BindingReadiness(
-                    "test_binding_drift_keeps_native_login_and_protected_unavailable"
-                )
-            ]
-        )
+        suite = unittest.TestSuite([test_class(test_method)])
 
         def deadline(signum, frame):
             raise ProofDeadlineReached("Finite600s native proof deadline")
@@ -150,18 +153,20 @@ def main():
                     key: {k: v for k, v in val.items() if k != "started"}
                     for key, val in result.cases.items()
                 },
-                "nativeImageIds": getattr(NativeFixture, "native_image_ids", []),
-                "readinessObservation": BindingReadiness.observation,
-                "phase": getattr(NativeFixture, "phase", "not-started"),
+                "nativeImageIds": getattr(fixture, "native_image_ids", []),
+                "readinessObservation": test_class.observation,
+                "phase": getattr(fixture, "phase", "not-started"),
             }
         )
-        summary["classification"] = classify(summary)
+        if extension_evidence is not None:
+            summary.update(extension_evidence())
+        summary["classification"] = classify_result(summary)
     except Exception as error:
         summary["gateErrorType"] = type(error).__name__
         summary["errors"] = max(1, summary["errors"])
     finally:
         try:
-            summary["cleanup"] = cleanup_owned(NativeFixture)
+            summary["cleanup"] = cleanup_owned(fixture)
         except Exception as error:
             summary["cleanup"] = {"errorType": type(error).__name__}
             summary["classification"] = "CLEANUP_UNVERIFIED"

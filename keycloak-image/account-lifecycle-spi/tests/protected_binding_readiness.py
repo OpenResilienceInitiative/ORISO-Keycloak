@@ -60,10 +60,10 @@ def request(base, method, path, body=None, bearer=None, form=False):
         )
 
 
-def inspect_owned():
+def inspect_owned(fixture=NativeFixture):
     return json.loads(
         subprocess.run(
-            ["docker", "inspect", NativeFixture.name],
+            ["docker", "inspect", fixture.name],
             check=True,
             capture_output=True,
             text=True,
@@ -84,8 +84,8 @@ class BindingReadiness(unittest.TestCase):
         NativeFixture.doClassCleanups()
         self.assertEqual([], NativeFixture.tearDown_exceptions)
 
-    def runtime(self, baseline, protected_config):
-        current = inspect_owned()
+    def runtime(self, baseline, protected_config, fixture=NativeFixture):
+        current = inspect_owned(fixture)
         self.assertEqual(
             "true", current["Config"]["Labels"]["oriso-protected-receiver-test"]
         )
@@ -107,12 +107,12 @@ class BindingReadiness(unittest.TestCase):
         ]
         self.assertEqual(1, len(jar))
         self.assertFalse(jar[0]["RW"])
-        self.assertEqual(str(NativeFixture.jar_path), jar[0]["Source"])
+        self.assertEqual(str(fixture.jar_path), jar[0]["Source"])
         volume = [
             m for m in current["Mounts"] if m["Destination"] == "/opt/keycloak/data"
         ]
         self.assertEqual(1, len(volume))
-        self.assertEqual(NativeFixture.native_volume, volume[0]["Name"])
+        self.assertEqual(fixture.native_volume, volume[0]["Name"])
         self.assertEqual("volume", volume[0]["Type"])
         self.assertEqual(
             "true",
@@ -123,7 +123,7 @@ class BindingReadiness(unittest.TestCase):
                     "inspect",
                     "--format",
                     '{{ index .Labels "oriso-protected-receiver-test" }}',
-                    NativeFixture.native_volume,
+                    fixture.native_volume,
                 ],
                 check=True,
                 capture_output=True,
