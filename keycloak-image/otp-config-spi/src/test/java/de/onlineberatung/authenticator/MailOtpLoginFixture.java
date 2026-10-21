@@ -12,6 +12,7 @@ import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.mail.MailSendingException;
 import de.onlineberatung.otp.MemoryOtpService;
 import de.onlineberatung.otp.Otp;
+import de.onlineberatung.otp.OtpFailureLockout;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpMailThrottle;
 import java.time.Clock;
@@ -88,6 +89,10 @@ class MailOtpLoginFixture {
 
   OtpMailThrottle throttleFromConfig(AuthenticatorConfigModel config) {
     return OtpMailThrottle.fromConfig(clock, config);
+  }
+
+  OtpFailureLockout lockoutFromConfig(AuthenticatorConfigModel config) {
+    return OtpFailureLockout.fromConfig(clock, config);
   }
 
   void mailServerDown(boolean down) {

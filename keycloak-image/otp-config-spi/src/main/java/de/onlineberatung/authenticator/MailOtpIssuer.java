@@ -6,9 +6,11 @@ import de.onlineberatung.credential.CredentialContext;
 import de.onlineberatung.credential.MailOtpCredentialModel;
 import de.onlineberatung.credential.MailOtpCredentialService;
 import de.onlineberatung.mail.MailSendingException;
+import de.onlineberatung.otp.OtpFailureLockout;
 import de.onlineberatung.otp.OtpMailSender;
 import de.onlineberatung.otp.OtpMailThrottle;
 import de.onlineberatung.otp.OtpService;
+import java.time.Clock;
 import java.util.List;
 import org.jboss.logging.Logger;
 
@@ -22,6 +24,10 @@ import org.jboss.logging.Logger;
  * <p>A new code replaces the old one ("only the newest code is valid") and starts with a fresh
  * attempt counter. Inside the cooldown nothing is replaced, so a resend request can no longer reset
  * the counter of the code the user already has.
+ *
+ * <p>While a failed-attempt lockout is running, nothing is mailed either. That is the whole point
+ * of the lockout: if asking for a new code worked, three wrong guesses would cost a mail rather
+ * than a wait, and the attempt limit would be a speed bump.
  */
 public class MailOtpIssuer {
 
@@ -31,16 +37,32 @@ public class MailOtpIssuer {
   private final MailOtpCredentialService credentialService;
   private final OtpMailSender mailSender;
   private final OtpMailThrottle throttle;
+  private final OtpFailureLockout lockout;
 
+  /** Lockout at its defaults; kept for callers that do not configure one. */
   public MailOtpIssuer(OtpService otpService, MailOtpCredentialService credentialService,
       OtpMailSender mailSender, OtpMailThrottle throttle) {
+    this(otpService, credentialService, mailSender, throttle,
+        OtpFailureLockout.fromConfig(Clock.systemDefaultZone(), null));
+  }
+
+  public MailOtpIssuer(OtpService otpService, MailOtpCredentialService credentialService,
+      OtpMailSender mailSender, OtpMailThrottle throttle, OtpFailureLockout lockout) {
     this.otpService = otpService;
     this.credentialService = credentialService;
     this.mailSender = mailSender;
     this.throttle = throttle;
+    this.lockout = lockout;
   }
 
   public Outcome issue(MailOtpCredentialModel credentialModel, CredentialContext credContext) {
+    var standing = lockout.decide(credentialModel.getLockedUntil());
+    if (standing.isLocked()) {
+      logger.info("e-mail code for keycloak user " + credContext.getUser().getId()
+          + " not sent: failed-attempt lockout, " + standing.getRetryInSeconds() + "s left");
+      return new Outcome(Result.LOCKED_OUT, standing.getRetryInSeconds());
+    }
+
     var previousHistory = credentialModel.getMailsSentAt();
     var decision = throttle.decide(previousHistory, credentialModel.hasLiveCode(throttle.clock()));
 
@@ -90,6 +112,8 @@ public class MailOtpIssuer {
     KEPT,
     /** The mail cap is used up: nothing mailed. */
     LIMIT_REACHED,
+    /** A failed-attempt lockout is running: nothing mailed until it ends. */
+    LOCKED_OUT,
     /** Sending failed; the stored code was invalidated. */
     MAIL_FAILED
   }
