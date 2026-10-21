@@ -52,6 +52,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var binding = config.bindings.get(nativeHuman.getUser().getId());
     if (binding == null) deny();
     var human = CurrentHumanAuthorization.require(session, binding.policy());
+    if (row != null && !"AUTHORIZED".equals(row.state)) conflict();
     var profile = validateScope(scope, binding, human);
     String requestJson = canonical(request);
     var requestBinding = JSON.createObjectNode();
@@ -104,11 +105,12 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
 
   @POST
   @Path("v1/approvals/{approval}/cancel")
-  public Response cancel(@PathParam("approval") String approval, byte[] raw) {
-    return guarded(() -> cancelKnown(approval, raw));
+  public Response cancel(@PathParam("approval") String approval, byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> cancelKnown(approval, raw, proof));
   }
 
-  private Response cancelKnown(String approval, byte[] raw) {
+  private Response cancelKnown(String approval, byte[] raw, String proof) {
     uuid(approval);
     var body = parse(raw);
     fields(body, "cancellationId", "scopeDigest", "workflowId", "inviteId", "authorizationRevision",
@@ -121,17 +123,40 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     String scopeDigest = text(body, "scopeDigest", 64, true);
     if (scopeDigest != null) hex(scopeDigest);
     String reason = text(body, "reason", 30, false);
-    if (!Set.of("REVOKED", "SUPERSEDED", "ISSUANCE_ABORTED").contains(reason) || !body.path("absentScope").isNull()) bad();
+    if (!Set.of("REVOKED", "SUPERSEDED", "ISSUANCE_ABORTED").contains(reason)) bad();
     var em = lockedRealm();
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
-    var nativeHuman = NativeHumanBearer.require(session);
-    var binding = config.bindings.get(nativeHuman.getUser().getId());
-    if (binding == null) deny();
-    var human = CurrentHumanAuthorization.require(session, binding.policy());
-    if (row == null) throw new NotFoundException();
+    LifecycleAuthorization.CheckedMachine machine = null;
+    CurrentHumanAuthorization.VerifiedHuman human = null;
+    ProtectedInvitationConfiguration.Binding binding = null;
+    if (proof != null) {
+      machine = machineAuthorization.requireMachine(session, Set.of("SETUP"));
+      crypto.verifyProtectedCommand(proof, machine, "protected-invitation.cancel", "POST",
+          "realm/" + config.realmId + "/protected-invitation/" + approval, body);
+    } else {
+      var nativeHuman = NativeHumanBearer.require(session);
+      binding = config.bindings.get(nativeHuman.getUser().getId());
+      if (binding == null) deny();
+      human = CurrentHumanAuthorization.require(session, binding.policy());
+    }
+    boolean absent = row == null;
+    if (absent) {
+      if (machine == null || body.path("absentScope").isNull()) throw new NotFoundException();
+      if (scopeDigest != null) conflict();
+      row = restrictiveTombstone(approval, body, machine);
+    } else if (!body.path("absentScope").isNull()) {
+      // Proposed claims can only restrict their exact original proposal. They
+      // cannot replace an existing true human approval or issuer snapshot.
+      if (machine == null) conflict();
+      var proposal = restrictiveTombstone(approval, body, machine);
+      if (!proposal.request.equals(row.request) || !proposal.issuerSubject.equals(row.issuerSubject)
+          || !LifecycleAuthorization.equal(proposal.requestDigest, row.requestDigest)) conflict();
+    }
     var storedScope = parse(row.request).path("scope");
-    if ("TENANT_PEER".equals(binding.authority())
+    if (machine != null && (!machine.clientId().equals(storedScope.path("setupClient").asText())
+        || !machine.subject().equals(storedScope.path("setupSubject").asText()))) deny();
+    if (binding != null && "TENANT_PEER".equals(binding.authority())
         && (!"TENANT_ADMIN".equals(storedScope.path("protectedKind").asText())
             || !storedScope.path("targetTenantIds").get(0).isIntegralNumber()
             || storedScope.path("targetTenantIds").get(0).asLong() != human.tenantId())) deny();
@@ -140,7 +165,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         || !LifecycleAuthorization.equal(row.requestDigest, body.path("approvalRequestDigest").asText())
         || scopeDigest != null && !LifecycleAuthorization.equal(row.scopeDigest, scopeDigest)) conflict();
     String request = canonical(body);
-    if ("CANCELLED".equals(row.state)) {
+    if (!absent && "CANCELLED".equals(row.state)) {
       if (row.cancellationId == null || row.cancellationRequest == null || row.transitionReceipt == null) conflict();
       if (cancellationId.equals(row.cancellationId)) {
         if (!row.cancellationRequest.equals(request)) conflict();
@@ -153,7 +178,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       }
       return result(row, 200);
     }
-    if (!"AUTHORIZED".equals(row.state) || !Instant.parse(row.validUntil).isAfter(Instant.now())) conflict();
+    if (!absent && (!"AUTHORIZED".equals(row.state) || !Instant.parse(row.validUntil).isAfter(Instant.now()))) conflict();
     row.state = "CANCELLED";
     row.cancellationId = cancellationId;
     row.cancellationRequest = request;
@@ -164,13 +189,51 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     transition.put("scopeDigest", row.scopeDigest); transition.put("approvalRequestDigest", row.requestDigest);
     transition.put("operation", "protected-invitation.cancel"); transition.put("cancellationId", cancellationId);
     transition.put("reason", reason); transition.put("state", "CANCELLED");
-    transition.put("actor", "HUMAN"); transition.put("actorSubject", human.subject());
-    transition.put("actorIssuer", human.issuer()); transition.put("actorClient", human.clientId());
-    transition.put("actorBindingVersion", human.policyVersion());
+    transition.put("actor", machine == null ? "HUMAN" : machine.actor());
+    transition.put("actorSubject", machine == null ? human.subject() : machine.subject());
+    transition.put("actorIssuer", machine == null ? human.issuer() : config.issuer);
+    transition.put("actorClient", machine == null ? human.clientId() : machine.clientId());
+    if (machine == null) transition.put("actorBindingVersion", human.policyVersion());
+    else transition.putNull("actorBindingVersion");
     transition.put("receipt", crypto.receipt("protected-approval-cancel/v1", transition.deepCopy()));
     row.transitionReceipt = canonical(transition);
+    if (absent) em.persist(row);
     em.flush();
     return result(row, 200);
+  }
+
+  private ProtectedInvitationApproval restrictiveTombstone(String approval, JsonNode cancellation,
+      LifecycleAuthorization.CheckedMachine machine) {
+    var absentScope = cancellation.path("absentScope");
+    var scope = absentScope.deepCopy();
+    if (!scope.isObject()) bad();
+    var object = (com.fasterxml.jackson.databind.node.ObjectNode) scope;
+    String issuerRealm = text(scope, "originalIssuerRealm", 255, false);
+    String issuerSubject = uuid(text(scope, "originalIssuerSubject", 36, false));
+    object.remove(List.of("originalIssuerRealm", "originalIssuerSubject"));
+    validateScopeShape(scope);
+    if (!config.realmId.equals(issuerRealm) || !machine.clientId().equals(scope.path("setupClient").asText())
+        || !machine.subject().equals(scope.path("setupSubject").asText())) deny();
+    if (!scope.path("workflowId").equals(cancellation.path("workflowId"))
+        || !scope.path("inviteId").equals(cancellation.path("inviteId"))
+        || !scope.path("authorizationRevision").equals(cancellation.path("authorizationRevision"))) conflict();
+    var request = JSON.createObjectNode(); request.set("scope", scope);
+    var digestInput = JSON.createObjectNode(); digestInput.set("request", request);
+    digestInput.put("issuerRealm", issuerRealm); digestInput.put("issuerSubject", issuerSubject);
+    String requestDigest = crypto.mac("protected-approval-request/v1", digestInput);
+    if (!LifecycleAuthorization.equal(requestDigest, cancellation.path("approvalRequestDigest").asText())) conflict();
+    var restriction = JSON.createObjectNode(); restriction.set("scope", scope);
+    restriction.put("realmId", config.realmId); restriction.put("originalIssuerRealm", issuerRealm);
+    restriction.put("originalIssuerSubject", issuerSubject); restriction.put("restrictionOnly", true);
+    var row = new ProtectedInvitationApproval();
+    row.id = key(config.realmId, approval); row.realmId = config.realmId; row.approvalId = approval;
+    row.workflowId = scope.path("workflowId").asText(); row.inviteId = scope.path("inviteId").asText();
+    row.authorizationRevision = scope.path("authorizationRevision").asLong();
+    row.request = canonical(request); row.requestDigest = requestDigest; row.issuerSubject = issuerSubject;
+    row.scope = canonical(restriction); row.scopeDigest = crypto.mac("protected-approval-scope/v1", restriction);
+    row.validUntil = scope.path("validUntil").asText(); row.state = "CANCELLED";
+    // Null approvalReceipt is a permanent non-authorizing type distinction.
+    return row;
   }
 
   @POST
@@ -239,6 +302,18 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
 
   private ProtectedInvitationConfiguration.Profile validateScope(JsonNode scope,
       ProtectedInvitationConfiguration.Binding binding, CurrentHumanAuthorization.VerifiedHuman human) {
+    validateScopeShape(scope);
+    String kind = scope.path("protectedKind").asText(), mode = scope.path("tenantMode").asText();
+    long tenant = HumanPolicyJson.tenants(scope.get("targetTenantIds")).iterator().next();
+    if ("TENANT_PEER".equals(binding.authority())
+        && (!"TENANT_ADMIN".equals(kind) || !"EXISTING".equals(mode) || tenant != human.tenantId())) deny();
+    String profileId = text(scope, "protectedProfileId", 255, false);
+    var profile = config.profiles.get(profileId);
+    if (!binding.profiles().contains(profileId) || profile == null || !kind.equals(profile.kind()) || !profile.modes().contains(mode)) deny();
+    return profile;
+  }
+
+  private void validateScopeShape(JsonNode scope) {
     fields(scope, "workflowId", "inviteId", "authorizationRevision", "purpose", "recipient", "protectedKind",
         "targetTenantIds", "tenantMode", "reservationBinding", "agencyBinding", "protectedProfileId", "validUntil",
         "creatorClient", "creatorSubject", "setupClient", "setupSubject");
@@ -254,8 +329,6 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     long tenant = targets.iterator().next();
     if (!("PLATFORM_ADMIN".equals(kind) && tenant == 0 && "EXISTING".equals(mode))
         && !("TENANT_ADMIN".equals(kind) && tenant > 0 && Set.of("EXISTING", "RESERVED_NEW").contains(mode))) deny();
-    if ("TENANT_PEER".equals(binding.authority())
-        && (!"TENANT_ADMIN".equals(kind) || !"EXISTING".equals(mode) || tenant != human.tenantId())) deny();
     if (!"backend-account-create".equals(text(scope, "creatorClient", 255, false))
         || !config.actors.get("ACCOUNT_CREATE").equals(uuid(text(scope, "creatorSubject", 36, false)))
         || !"backend-setup".equals(text(scope, "setupClient", 255, false))
@@ -276,10 +349,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     String deadline = text(scope, "validUntil", 30, false);
     try { if (!Instant.parse(deadline).toString().equals(deadline)) bad(); }
     catch (java.time.DateTimeException failure) { bad(); }
-    String profileId = text(scope, "protectedProfileId", 255, false);
-    var profile = config.profiles.get(profileId);
-    if (!binding.profiles().contains(profileId) || profile == null || !kind.equals(profile.kind()) || !profile.modes().contains(mode)) deny();
-    return profile;
+    text(scope, "protectedProfileId", 255, false);
   }
 
   static String key(String realm, String approval) {
@@ -296,7 +366,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     result.put("approvalId", row.approvalId); result.put("scopeDigest", row.scopeDigest);
     result.put("state", row.state); result.put("version", row.version);
     result.putNull("boundAttemptId"); result.putNull("fencedExecution");
-    result.set("approvalReceipt", parse(row.approvalReceipt));
+    if (row.approvalReceipt == null) result.putNull("approvalReceipt");
+    else result.set("approvalReceipt", parse(row.approvalReceipt));
     if (row.transitionReceipt == null) result.putNull("transitionReceipt");
     else result.set("transitionReceipt", parse(row.transitionReceipt));
     result.put("approvalRequestDigest", row.requestDigest);

@@ -111,6 +111,8 @@ jobs:
           - missing-required-client
           - missing-required-service-account
           - unregistered-technical-human
+          - unregistered-task-role-human
+          - unregistered-inherited-task-human
           - allowlisted-denied-human
     runs-on: ubuntu-24.04
     timeout-minutes: 20

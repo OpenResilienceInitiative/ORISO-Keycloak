@@ -31,6 +31,8 @@ CASES = (
     "missing-required-client",
     "missing-required-service-account",
     "unregistered-technical-human",
+    "unregistered-task-role-human",
+    "unregistered-inherited-task-human",
     "allowlisted-denied-human",
 )
 
@@ -61,16 +63,22 @@ class Installation(protected.ProtectedInvitations):
         if cls.case == "extra-denies-prepared-five":
             # Actual master-realm installer remains a deny-only identity even
             # though it never existed as an application realm user.
+            cls.phase = "inventory-foreign-master-lookup"
             status, native = call(
                 cls.base,
                 "GET",
                 "/admin/realms/master/users?username=synthetic-installer&exact=true",
                 token=cls.installer,
             )
+            cls.installation_observation["masterLookupStatus"] = status
+            cls.installation_observation["masterLookupCount"] = (
+                len(native) if isinstance(native, list) else None
+            )
             helper.assertEqual(200, status)
             helper.assertEqual(1, len(native))
             foreign = native[0]["id"]
             helper.assertEqual(foreign, str(uuid.UUID(foreign)))
+            cls.phase = "inventory-foreign-application-absence"
             helper.assertEqual(
                 404,
                 call(
@@ -80,15 +88,18 @@ class Installation(protected.ProtectedInvitations):
                     token=cls.installer,
                 )[0],
             )
+            cls.phase = "inventory-deleted-deny-create"
             helper.admin(
                 "POST", "/users", {"username": "deleted-oneoff-deny", "enabled": False}
             )
+            cls.phase = "inventory-deleted-deny-native-lookup"
             deleted = helper.admin(
                 "GET", "/users?username=deleted-oneoff-deny&exact=true"
             )
             helper.assertEqual(1, len(deleted))
             deleted = deleted[0]["id"]
             helper.assertEqual(deleted, str(uuid.UUID(deleted)))
+            cls.phase = "inventory-deleted-deny-native-delete"
             helper.admin("DELETE", "/users/" + deleted)
             helper.assertEqual(
                 404,
@@ -103,12 +114,14 @@ class Installation(protected.ProtectedInvitations):
                 configuration["technicalSubjects"] + [foreign, deleted]
             )
             for actor in ACTORS:
+                cls.phase = "inventory-prepared-disable-" + actor
                 client = helper.admin("GET", "/clients/" + cls.client_ids[actor])
                 client["enabled"] = False
                 helper.admin("PUT", "/clients/" + cls.client_ids[actor], client)
                 helper.assertFalse(
                     helper.admin("GET", "/clients/" + cls.client_ids[actor])["enabled"]
                 )
+                cls.phase = "inventory-prepared-retained-link-" + actor
                 helper.assertEqual(
                     SUBJECTS[actor],
                     helper.admin(
@@ -142,7 +155,11 @@ class Installation(protected.ProtectedInvitations):
                     token=cls.installer,
                 )[0],
             )
-        elif cls.case == "unregistered-technical-human":
+        elif cls.case in {
+            "unregistered-technical-human",
+            "unregistered-task-role-human",
+            "unregistered-inherited-task-human",
+        }:
             helper.admin(
                 "POST",
                 "/users",
@@ -154,15 +171,77 @@ class Installation(protected.ProtectedInvitations):
             helper.assertEqual(1, len(technical))
             technical = technical[0]["id"]
             helper.assertNotIn(technical, configuration["technicalSubjects"])
-            group = helper.group_id("/protected-admins/technical-identities")
-            helper.admin("PUT", "/users/" + technical + "/groups/" + group)
-            helper.assertEqual(
-                [group],
-                [
-                    g["id"]
-                    for g in helper.admin("GET", "/users/" + technical + "/groups")
-                ],
-            )
+            task = helper.admin("GET", "/roles/invitation-reservations")
+            if cls.case == "unregistered-task-role-human":
+                helper.admin(
+                    "POST", "/users/" + technical + "/role-mappings/realm", [task]
+                )
+                helper.assertIn(
+                    task["id"],
+                    {
+                        r["id"]
+                        for r in helper.admin(
+                            "GET", "/users/" + technical + "/role-mappings/realm"
+                        )
+                    },
+                )
+            else:
+                if cls.case == "unregistered-inherited-task-human":
+                    helper.admin(
+                        "POST", "/roles", {"name": "technical-parent-composite"}
+                    )
+                    helper.admin(
+                        "POST", "/roles/technical-parent-composite/composites", [task]
+                    )
+                    parent_role = helper.admin(
+                        "GET", "/roles/technical-parent-composite"
+                    )
+                    helper.assertTrue(parent_role["composite"])
+                    helper.assertIn(
+                        task["id"],
+                        {
+                            r["id"]
+                            for r in helper.admin(
+                                "GET",
+                                "/roles/technical-parent-composite/composites/realm",
+                            )
+                        },
+                    )
+                    helper.admin("POST", "/groups", {"name": "technical-carrier"})
+                    parent = helper.group_id("/technical-carrier")
+                    helper.admin(
+                        "POST",
+                        "/groups/" + parent + "/role-mappings/realm",
+                        [parent_role],
+                    )
+                    helper.admin(
+                        "POST",
+                        "/groups/" + parent + "/children",
+                        {"name": "descendant"},
+                    )
+                    group = helper.group_id("/technical-carrier/descendant")
+                    helper.assertEqual(
+                        parent, helper.admin("GET", "/groups/" + group)["parentId"]
+                    )
+                    helper.assertEqual(
+                        [parent_role["id"]],
+                        [
+                            r["id"]
+                            for r in helper.admin(
+                                "GET", "/groups/" + parent + "/role-mappings/realm"
+                            )
+                        ],
+                    )
+                else:
+                    group = helper.group_id("/protected-admins/technical-identities")
+                helper.admin("PUT", "/users/" + technical + "/groups/" + group)
+                helper.assertEqual(
+                    [group],
+                    [
+                        g["id"]
+                        for g in helper.admin("GET", "/users/" + technical + "/groups")
+                    ],
+                )
         elif cls.case == "allowlisted-denied-human":
             configuration["technicalSubjects"] = sorted(
                 configuration["technicalSubjects"] + [protected.HUMAN]
@@ -356,9 +435,11 @@ def main():
                 == "CURRENT_NATIVE_INSTALLATION_VALIDATION"
             ):
                 summary["classification"] = "GENUINE_DENY_EXTRAS_INSTALLATION_RED"
-            elif args.case == "unregistered-technical-human" and not getattr(
-                Installation, "installation_refused", False
-            ):
+            elif args.case in {
+                "unregistered-technical-human",
+                "unregistered-task-role-human",
+                "unregistered-inherited-task-human",
+            } and not getattr(Installation, "installation_refused", False):
                 summary["classification"] = "GENUINE_MISSING_TECHNICAL_COVERAGE_RED"
             else:
                 summary["classification"] = "BEHAVIOR_FAILURE"
