@@ -54,6 +54,30 @@ class SanitizedResult(unittest.TestResult):
     def addError(self, test, err):
         super().addError(test, err)
         self.record(test, "error", err[0])
+        if (
+            err[0] is KeyError
+            and len(err[1].args) == 1
+            and err[1].args[0]
+            in {
+                "sub",
+                "iss",
+                "azp",
+                "tenantId",
+                "aud",
+                "realm_access",
+                "roles",
+                "exp",
+                "sid",
+                "enabled",
+                "standardFlowEnabled",
+                "serviceAccountsEnabled",
+                "fullScopeAllowed",
+                "id",
+                "attributes",
+                "name",
+            }
+        ):
+            self.cases[test.id()]["missingField"] = err[1].args[0]
 
     def addSkip(self, test, reason):
         super().addSkip(test, "No skipped native proof is accepted")
@@ -307,6 +331,7 @@ def main():
                 },
                 "nativeHumanPreconditions": getattr(fixture, "preconditions", []),
                 "phase": getattr(fixture, "phase", "not-started"),
+                "fixtureDiagnostic": getattr(fixture, "fixture_diagnostic", None),
                 "approvalObservation": getattr(fixture, "approval_observation", None),
                 "nativeImageIds": getattr(fixture, "native_image_ids", []),
                 "setupNativePrecondition": getattr(fixture, "setup_precondition", None),

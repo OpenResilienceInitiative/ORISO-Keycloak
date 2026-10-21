@@ -193,6 +193,15 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       user.user().leaveGroup(pending);
       user.user().joinGroup(group);
       user.user().setEnabled(true);
+      em.flush();
+      // Native joinGroup can use an older consistent-read view. Require its actual
+      // current effect before saving a terminal receipt; mismatch rolls back all writes.
+      var groups =
+          em.createNativeQuery(
+                  "select GROUP_ID from USER_GROUP_MEMBERSHIP where USER_ID = :id for update")
+              .setParameter("id", row.accountId)
+              .getResultList();
+      if (groups.size() != 1 || !row.groupId.equals(groups.get(0))) conflict();
       row.state = "COMMITTED";
       audit(realm, actor, OperationType.UPDATE, row.accountId);
     } else {

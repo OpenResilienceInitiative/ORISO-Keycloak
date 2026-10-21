@@ -35,6 +35,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.approval_observation = None
         cls.native_image_ids = []
         cls.setup_precondition = None
+        cls.fixture_diagnostic = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -96,6 +97,27 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.client_ids = helper.client_ids
         cls.protected_group_id = helper.group_id("/protected-admins/platform-admins")
         technical_group = helper.group_id("/protected-admins/technical-identities")
+        cls.phase = "configure-native-human-tenant-attribute"
+        native_profile = helper.admin("GET", "/users/profile")
+        helper.assertFalse(
+            any(
+                attribute["name"] == "tenantId"
+                for attribute in native_profile["attributes"]
+            )
+        )
+        native_profile["attributes"].append(
+            {
+                "name": "tenantId",
+                "multivalued": False,
+                "permissions": {"view": ["admin", "user"], "edit": ["admin"]},
+                "validations": {
+                    "length": {"min": 1, "max": 19},
+                    "pattern": {"pattern": "0|[1-9][0-9]{0,18}"},
+                },
+            }
+        )
+        helper.admin("PUT", "/users/profile", native_profile)
+        cls.phase = "create-native-human"
         # Existing one-off installer establishes a named application human. It is
         # separate from approve and never uses an installer token for approve.
         helper.admin(
@@ -118,6 +140,9 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         helper.assertEqual(1, len(humans))
         HUMAN = humans[0]["id"]
         helper.assertEqual(HUMAN, str(uuid.UUID(HUMAN)))
+        cls.phase = "persisted-native-human-tenant"
+        native_human = helper.admin("GET", "/users/" + HUMAN)
+        helper.assertEqual(["0"], native_human.get("attributes", {}).get("tenantId"))
         helper.admin("POST", "/roles", {"name": "agency-admin"})
         roles = [
             helper.admin("GET", "/roles/" + r) for r in ["agency-admin", "tenant-admin"]
@@ -437,6 +462,24 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         claims = json.loads(
             base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
         )
+        type(self).phase = "required-native-human-token-fields"
+        for required in (
+            "sub",
+            "iss",
+            "azp",
+            "tenantId",
+            "aud",
+            "realm_access",
+            "exp",
+            "sid",
+        ):
+            if required not in claims:
+                type(self).fixture_diagnostic = {
+                    "location": "native-human-access-token",
+                    "missingField": required,
+                }
+                self.fail("Native human token lacks a required field")
+        type(self).phase = "native-human-token-policy"
         self.assertEqual(HUMAN, claims["sub"])
         self.assertEqual(ISSUER, claims["iss"])
         self.assertEqual("protected-human-web", claims["azp"])
@@ -449,16 +492,19 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         clients = self.admin("GET", "/clients?clientId=protected-human-web")
         self.assertEqual(1, len(clients))
         client = self.admin("GET", "/clients/" + clients[0]["id"])
+        type(self).phase = "native-human-client-policy"
         self.assertTrue(client["enabled"])
         self.assertTrue(client["standardFlowEnabled"])
         self.assertFalse(client["serviceAccountsEnabled"])
         self.assertFalse(client["fullScopeAllowed"])
+        type(self).phase = "native-human-current-profile"
         native = self.admin("GET", "/users/" + HUMAN)
         self.assertTrue(native["enabled"])
         self.assertIsNone(native.get("serviceAccountClientLink"))
         self.assertEqual(
             {"agency-admin", "tenant-admin"}, set(claims["realm_access"]["roles"])
         )
+        type(self).phase = "native-human-effective-grants"
         native_roles = self.admin(
             "GET", "/users/" + HUMAN + "/role-mappings/realm/composite"
         )
@@ -469,6 +515,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         mappings = self.admin("GET", "/users/" + HUMAN + "/role-mappings")
         self.assertFalse(mappings.get("clientMappings"))
         self.assertGreater(claims["exp"], time.time())
+        type(self).phase = "native-human-userinfo-validation"
         status, current = call(
             self.base,
             "GET",
@@ -476,7 +523,14 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             token=bearer,
         )
         self.assertEqual(200, status)
+        if "sub" not in current:
+            type(self).fixture_diagnostic = {
+                "location": "native-userinfo",
+                "missingField": "sub",
+            }
+            self.fail("Native UserInfo lacks required subject")
         self.assertEqual(HUMAN, current["sub"])
+        type(self).phase = "native-human-current-session"
         self.assertTrue(claims.get("sid"))
         self.assertTrue(
             any(
