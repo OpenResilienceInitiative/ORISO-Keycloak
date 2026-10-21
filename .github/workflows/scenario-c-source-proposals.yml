@@ -67,6 +67,11 @@ jobs:
             "$RUNNER_TEMP/maven.tar.gz" | sha512sum --check
           tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
+      - name: Install exact provided lifecycle source before OTP
+        if: matrix.proposal == 'otp'
+        env:
+          MAVEN_OPTS: -Xmx512m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2
+        run: mvn -B -q -f keycloak-image/account-lifecycle-spi/pom.xml clean install '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2'
       - name: Package standalone proposal without image activation
         working-directory: ${{ matrix.module }}
         run: mvn -B -q clean package
@@ -77,13 +82,15 @@ jobs:
           PROOF_JAR_ENV: ${{ matrix.jar_env }}
           PROOF_FLOOR: ${{ matrix.floor }}
           PROOF_NAME: ${{ matrix.proposal }}
+          PROOF_MODULE: ${{ matrix.module }}
+          LIFECYCLE_C_TEST_JAR: keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar
         shell: bash
         run: |
           set -euo pipefail
           docker info > /dev/null
           docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
           python - <<'PY'
-          import contextlib, hashlib, importlib.util, io, json, os, pathlib, unittest
+          import contextlib, hashlib, importlib.util, io, json, os, pathlib, unittest, sys
           script, jar = pathlib.Path(os.environ["PROOF_SCRIPT"]), pathlib.Path(os.environ["PROOF_JAR"])
           if not script.is_file() or not jar.is_file():
               raise SystemExit("Missing standalone fixture or JAR; native proof cannot be skipped")
@@ -95,9 +102,23 @@ jobs:
           floor, count = int(os.environ["PROOF_FLOOR"]), suite.countTestCases()
           if count < floor:
               raise SystemExit("Native matrix has fewer cases than its required floor")
+          sys.path.insert(0, str(pathlib.Path("keycloak-image/account-lifecycle-spi/tests").resolve()))
+          from run_native import XmlResult
+          roots = [pathlib.Path(os.environ["PROOF_MODULE"])]
+          if os.environ["PROOF_NAME"] == "otp":
+              roots.append(pathlib.Path("keycloak-image/account-lifecycle-spi"))
+          def sources():
+              files = [path for root in roots for path in root.rglob("*")
+                       if path.is_file() and "target" not in path.parts and "__pycache__" not in path.parts and path.suffix != ".pyc"]
+              files += [pathlib.Path(".github/workflows/scenario-c-source-proposals.yml"),
+                        pathlib.Path(".github/actions/maven-build/action.yml")]
+              return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(files)}
+          source_before = sources()
+          lifecycle_jar = pathlib.Path(os.environ["LIFECYCLE_C_TEST_JAR"])
+          lifecycle_hash = hashlib.sha256(lifecycle_jar.read_bytes()).hexdigest() if os.environ["PROOF_NAME"] == "otp" else None
           output = io.StringIO()
           with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-              result = unittest.TextTestRunner(stream=output, verbosity=2).run(suite)
+              result = unittest.TextTestRunner(stream=output, verbosity=2, resultclass=XmlResult).run(suite)
           report = {"proposal": os.environ["PROOF_NAME"], "discovered": count,
                     "executed": result.testsRun, "required_floor": floor,
                     "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped),
@@ -106,10 +127,17 @@ jobs:
                     "fixture_support_sha256": {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
                         for f in script.parent.glob("scenario_c_otp_fixture.py")},
                     "failed_cases": [case.id() for case, _ in result.failures + result.errors]}
+          report.update({"github_sha": os.environ.get("GITHUB_SHA"),
+                         "source_manifest": source_before, "source_stable": source_before == sources(),
+                         "provided_lifecycle_jar_sha256": lifecycle_hash,
+                         "provided_lifecycle_jar_stable": lifecycle_hash is None or lifecycle_hash == hashlib.sha256(lifecycle_jar.read_bytes()).hexdigest(),
+                         "phase_receipts": getattr(getattr(module, "ScenarioCOtpPermissions", None), "phase_receipts", []),
+                         "contract_migration": "Old native-power positives become explicit unscoped denials; existing21Cnegative/control methods pluslegacy1 retained; newscopedpositive6 separate" if os.environ["PROOF_NAME"] == "otp" else None})
           pathlib.Path("proof-reports").mkdir(exist_ok=True)
+          result.write_xml(pathlib.Path("proof-reports/" + report["proposal"] + ".xml"), report["proposal"])
           pathlib.Path("proof-reports/" + report["proposal"] + ".json").write_text(json.dumps(report, indent=2) + "\n")
           print(json.dumps(report, sort_keys=True))
-          if result.testsRun != count or result.testsRun < floor or result.skipped or not result.wasSuccessful():
+          if result.testsRun != count or result.testsRun < floor or result.skipped or not result.wasSuccessful() or not report["source_stable"] or not report["provided_lifecycle_jar_stable"]:
               raise SystemExit("Real native proof did not pass every required case with zero skips")
           PY
       - name: Clean up this job's isolated fixture containers
