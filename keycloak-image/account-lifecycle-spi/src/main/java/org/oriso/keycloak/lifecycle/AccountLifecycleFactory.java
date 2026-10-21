@@ -72,6 +72,13 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
         : new AccountLifecycleResource(session, authorization, groups);
   }
 
+  // Both finite providers share exactly the same trusted configuration parser.
+  RealmResourceProvider createMaintenance(KeycloakSession session) {
+    return authorization == null
+        ? null
+        : new AccountMaintenanceResource(session, authorization, groups);
+  }
+
   public String getId() {
     return "oriso-account-lifecycle";
   }
