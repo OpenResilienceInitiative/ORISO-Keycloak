@@ -56,6 +56,7 @@ class SanitizedResult(unittest.TestResult):
             "protected_terminal_cases.py",
             "protected_cleanup_cases.py",
             "protected_fence_cases.py",
+            "protected_expiry_cases.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }
@@ -324,9 +325,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 15:
+        if discovered != 16:
             raise AssertionError(
-                "Exactly fifteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence cases required"
+                "Exactly sixteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence cases required"
             )
 
         def deadline(signum, frame):
@@ -394,6 +395,9 @@ def main():
                 ),
                 "boundCancelObservation": getattr(
                     fixture, "bound_cancel_observation", None
+                ),
+                "expiredCommitObservation": getattr(
+                    fixture, "expired_commit_observation", None
                 ),
             }
         )
@@ -471,8 +475,57 @@ def main():
             and (summary["abandonedCompensateObservation"] or {}).get("actualStatus")
             == 200
             and (summary["boundCancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["expiredCommitObservation"] or {}).get(
+                "normal409TransactionCommitWitnessValidated"
+            )
+            is True
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["expiredCommitObservation"] or {}).get("actualCommitStatus")
+            == 409
+            and summary["expiredCommitObservation"].get("oldGenerationRecoverStatus")
+            == 200
+            and summary["expiredCommitObservation"].get(
+                "expectedOldGenerationRecoverStatus"
+            )
+            == 409
+            and all(
+                summary["expiredCommitObservation"].get(key) is True
+                for key in (
+                    "nativeHumanApprovalAndCreationMACAllFieldsValidated",
+                    "trueBoundApprovalOriginalCreatorAndScopeValidated",
+                    "nativeCreatorAndAdminSubjectRolesAudiencesMatched",
+                    "originalGenerationZeroValidated",
+                    "receiverDeadlineElapsed",
+                    "noStatusRequestBetweenCommitAndRecovery",
+                    "accountCountUnchanged",
+                    "nativeAccountUnchanged",
+                    "nativeMembershipUnchanged",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_expired_first_commit_persists_fence_before_any_status_request"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = (
+                "GENUINE_PROTECTED_EXPIRED_COMMIT_TRANSACTION_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls
