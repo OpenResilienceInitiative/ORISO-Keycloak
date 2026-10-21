@@ -359,6 +359,14 @@ class SmtpControlPermissions(unittest.TestCase):
         for context in malformed:
             status, _ = self.smtp(PAYLOAD, context, token=token)
             self.assertEqual(403, status)
+        # A valid MAC authenticates the complete bytes, not just the first JSON value.
+        claims = base64.urlsafe_b64decode(signed.split(".")[0] + "=" * (-len(signed.split(".")[0]) % 4))
+        for trailing in (b" {}", b" true", b"\n[]"):
+            with self.subTest(trailing_json=trailing.decode().strip()):
+                payload = encoded(claims + trailing)
+                context = payload + "." + encoded(hmac.digest(KEY, b"proof\n" + payload.encode(), "sha256"))
+                self.assertEqual(403, self.smtp(PAYLOAD, context, token=token)[0])
+                self.assertEqual(before, self.admin("GET"))
         status, _ = self.smtp(dict(PAYLOAD, globalSmtpHost="changed.fixture.internal"), signed, token=token)
         self.assertEqual(403, status)
         status, _ = self.smtp(context=proof({}, method="PUT"), method="GET", token=token)
