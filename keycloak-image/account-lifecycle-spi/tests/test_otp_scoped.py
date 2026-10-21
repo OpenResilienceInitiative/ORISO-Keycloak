@@ -36,6 +36,17 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         return ["account.read", "account.locale", "otp.read", "otp.app-setup",
                 "otp.delete", "otp.email-start", "otp.email-finish"]
 
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(self.remove_fixture_app_credentials)
+
+    def remove_fixture_app_credentials(self):
+        # Exact disposable target only. Cleanup after a failed positive preserves the failure
+        # while preventing its real MFA credential from changing later login preconditions.
+        for credential in self.admin("GET", "/users/" + self.account_id + "/credentials"):
+            if credential["type"] == "otp":
+                self.admin("DELETE", "/users/" + self.account_id + "/credentials/" + credential["id"])
+
     def target(self):
         return {
             "accountId": self.account_id,
