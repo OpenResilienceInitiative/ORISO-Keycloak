@@ -16,6 +16,7 @@ from run_native import XmlResult
 EXPECTED_UNITS = {
     "org.oriso.keycloak.lifecycle.LifecycleJsonTest": 13,
     "org.oriso.keycloak.lifecycle.MaintenanceRequestTest": 8,
+    "org.oriso.keycloak.lifecycle.GeneralPolicyTest": 4,
 }
 NATIVE_FLOOR = 7
 
@@ -64,10 +65,10 @@ def sanitize_units(reports, destination):
             counts[key] += value
     destination.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(root).write(destination, encoding="utf-8", xml_declaration=True)
-    accepted = consistent_counts and actual == EXPECTED_UNITS and counts["tests"] == 21 and not any(
+    accepted = consistent_counts and actual == EXPECTED_UNITS and counts["tests"] == 25 and not any(
         counts[key] for key in ("failures", "errors", "skipped"))
     return {"suite_counts": actual, **counts, "required_suites": EXPECTED_UNITS,
-            "required_total": 21, "consistent_declared_counts": consistent_counts, "accepted": accepted,
+            "required_total": 25, "consistent_declared_counts": consistent_counts, "accepted": accepted,
             "diagnostic_boundary": "Java schema units only; not native maintenance acceptance"}
 
 
