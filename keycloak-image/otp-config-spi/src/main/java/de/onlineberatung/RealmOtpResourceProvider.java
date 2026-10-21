@@ -127,9 +127,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
             var dto = new OtpSetupDTO();
             dto.setInitialCode(target.initialCode());
             dto.setSecret(target.secret());
-            // The old native-power authentication barrier is retained for this wire-only slice.
-            // Actual scoped effects/immutable receipts are enabled only after its native RED.
-            return setupOtp(username, dto);
+            return setupOtpForTarget(new CredentialContext(target.session(), target.realm(), target.user()), dto);
           });
     }
     try {
@@ -151,7 +149,10 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
           .entity(new Error().error(MISSING_PARAMETER_ERROR)
               .errorDescription(MISSING_USERNAME_ERROR_DESCRIPTION)).build();
     }
-    var credentialContext = new CredentialContext(session, realm, user);
+    return setupOtpForTarget(new CredentialContext(session, realm, user), dto);
+  }
+
+  private Response setupOtpForTarget(CredentialContext credentialContext, OtpSetupDTO dto) {
     if (appCredentialService.is2FAConfigured(credentialContext)) {
       return Response.ok(new Success().info("OTP credential is already configured for this user"))
           .build();

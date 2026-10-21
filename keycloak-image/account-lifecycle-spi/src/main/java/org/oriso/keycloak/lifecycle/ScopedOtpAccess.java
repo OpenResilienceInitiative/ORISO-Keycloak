@@ -103,11 +103,94 @@ public final class ScopedOtpAccess {
     var read = JSON.createObjectNode();
     read.set("target", request.target());
     var target = MaintenanceRequest.parse("read", account, read);
+    if (policy == null) deny();
+    var em = session.getProvider(org.keycloak.connections.jpa.JpaConnectionProvider.class).getEntityManager();
+    var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class,
+        realm.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    if (lockedRealm == null) deny();
+    em.refresh(lockedRealm);
+    String id = realm.getId() + ":" + request.operationId();
+    var prior = em.find(AccountMaintenanceOperation.class, id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    String digest = authorization.mac("otp-intent", materialized);
+    if (prior != null) {
+      em.refresh(prior);
+      if (!realm.getId().equals(prior.realmId) || !account.equals(prior.accountId)
+          || !request.operation().equals(prior.command) || !machine.clientId().equals(prior.ownerClient)
+          || !machine.subject().equals(prior.ownerSubject)
+          || !LifecycleAuthorization.equal(digest, prior.intentDigest)
+          || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState))
+        throw new jakarta.ws.rs.ClientErrorException("OTP operation conflicts", 409);
+      // The immutable operation is retry provenance. Reauthorize the actual current human,
+      // then return before mutable credential/CAS lookup or a second enrollment effect.
+      policy.requireSelfOtpAppSetup(session, target, humanHeader);
+      var saved = parse(prior.resultJson);
+      int status = saved.path("status").asInt();
+      if (!Set.of(200, 201, 401).contains(status)) deny();
+      return Response.status(status).entity(saved).header("Cache-Control", "no-store").build();
+    }
     var current = new MaintenanceTarget(session, authorization, mappings)
         .readOtpSelfAppSetup(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
       throw new jakarta.ws.rs.ClientErrorException("Current OTP target state conflicts", 409);
-    return invoke(session, username, account, current, request, setup);
+    var nativeResponse = invoke(session, username, account, current, request, setup);
+    int status = nativeResponse.getStatus();
+    var nativeResult = JSON.valueToTree(nativeResponse.getEntity());
+    if (status == 200 || status == 201) {
+      fields(nativeResult, "info");
+      text(nativeResult, "info", 512, false);
+    } else if (status == 401) {
+      fields(nativeResult, "error", "error_description");
+      text(nativeResult, "error", 100, false);
+      text(nativeResult, "error_description", 512, false);
+    } else throw new IllegalStateException("Unsupported app OTP outcome");
+    var outcome = JSON.createObjectNode();
+    outcome.put("realmId", realm.getId());
+    outcome.put("accountId", account);
+    outcome.put("operationId", request.operationId());
+    outcome.put("operation", request.operation());
+    outcome.put("ownerClient", machine.clientId());
+    outcome.put("ownerSubject", machine.subject());
+    outcome.put("intentDigest", digest);
+    outcome.put("previousState", request.expectedState());
+    outcome.set("tenantId", request.target().path("tenantId"));
+    outcome.put("originDigest", authorization.mac("otp-origin", request.target().path("origin")));
+    outcome.put("status", status);
+    outcome.put("resultDigest", authorization.mac("otp-result", nativeResult));
+    var result = JSON.createObjectNode();
+    result.put("operationId", request.operationId());
+    result.put("accountId", account);
+    result.put("status", status);
+    result.set("result", nativeResult);
+    result.put("receipt", authorization.receipt("otp-operation-receipt", outcome));
+    var saved = new AccountMaintenanceOperation();
+    saved.id = id;
+    saved.realmId = realm.getId();
+    saved.operationId = request.operationId();
+    saved.accountId = account;
+    saved.command = request.operation();
+    saved.ownerClient = machine.clientId();
+    saved.ownerSubject = machine.subject();
+    saved.intentDigest = digest;
+    saved.expectedState = request.expectedState();
+    saved.resultJson = canonical(result);
+    em.persist(saved);
+    if (status == 201 && realm.isAdminEventsEnabled()) {
+      var event = new org.keycloak.events.admin.AdminEvent();
+      event.setTime(System.currentTimeMillis());
+      event.setRealmId(realm.getId());
+      event.setOperationType(org.keycloak.events.admin.OperationType.CREATE);
+      event.setResourceType(org.keycloak.events.admin.ResourceType.USER);
+      event.setResourcePath("accounts/" + account + "/otp");
+      var details = new org.keycloak.events.admin.AuthDetails();
+      details.setRealmId(realm.getId());
+      details.setClientId(machine.clientId());
+      details.setUserId(machine.subject());
+      event.setAuthDetails(details);
+      session.getProvider(org.keycloak.events.EventStoreProvider.class).onEvent(event, false);
+    }
+    // Credential effect, terminal invalid-code outcome and immutable receipt commit together.
+    em.flush();
+    return Response.status(status).entity(result).header("Cache-Control", "no-store").build();
   }
 
   private static Response invoke(KeycloakSession session, String username, String account,
