@@ -1,0 +1,114 @@
+name: Scenario C lifecycle proof
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - keycloak-image/account-lifecycle-spi/**
+      - .github/workflows/scenario-c-lifecycle-proof.yml
+  push:
+    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-protected-receiver-20261021]
+    paths:
+      - keycloak-image/account-lifecycle-spi/**
+      - .github/workflows/scenario-c-lifecycle-proof.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-proof-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: lifecycle-h2
+            suite: lifecycle
+            database: ''
+          - name: mariadb-11-4
+            suite: mariadb
+            database: mariadb@sha256:33a6653ab666774f48818120045f9367a81cd4c54c027412fe294a7d1274e2dc
+          - name: mariadb-11-0-6
+            suite: mariadb
+            database: mariadb@sha256:082554e82eb0e333cddd152d474bb55b8155c8f6585d4c5b0fb47ce2f740cb08
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+          cache-dependency-path: keycloak-image/account-lifecycle-spi/pom.xml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Install verified Maven 3.9.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://archive.apache.org/dist/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.tar.gz \
+            --output "$RUNNER_TEMP/maven.tar.gz"
+          printf '%s  %s\n' \
+            d50af8ab5e6005b46a07f0ce9d3719e67cfdf898da988a84871304cd59fb1af0fef2f99dea709e6e66f21f732f905979b5c2dce6b6860406f60a70e84d9cf0b8 \
+            "$RUNNER_TEMP/maven.tar.gz" | sha512sum --check
+          tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
+      - name: Package default-off standalone provider and run unit tests
+        working-directory: keycloak-image/account-lifecycle-spi
+        env:
+          MAVEN_OPTS: -Xmx512m -XX:ActiveProcessorCount=2
+        run: mvn -B -q clean package
+      - name: Verify current-transaction witness excludes historical deadlocks
+        run: python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_innodb_witness.py
+      - name: Run complete native matrix with exact-source receipts
+        env:
+          PROOF_SUITE: ${{ matrix.suite }}
+          PROOF_NAME: ${{ matrix.name }}
+          LIFECYCLE_C_MARIADB_TEST_IMAGE: ${{ matrix.database }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info > /dev/null
+          mkdir -p proof-reports
+          export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
+          if [ -z "$LIFECYCLE_C_MARIADB_TEST_IMAGE" ]; then
+            unset LIFECYCLE_C_MARIADB_TEST_IMAGE
+          fi
+          python keycloak-image/account-lifecycle-spi/tests/run_native.py "$PROOF_SUITE" \
+            --report "proof-reports/$PROOF_NAME.json"
+      - name: Clean up this isolated job's native containers and networks
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import subprocess
+          # This hosted job owns its fresh Docker daemon; only fixture-labelled resources qualify.
+          names = subprocess.run(
+              ["docker", "ps", "-aq", "--filter", "label=oriso-c-lifecycle-test=true"],
+              capture_output=True, text=True, check=True).stdout.split()
+          if names:
+              subprocess.run(["docker", "rm", "-fv", *names], check=True, capture_output=True)
+          networks = subprocess.run(
+              ["docker", "network", "ls", "--format", "{{.Name}}"],
+              capture_output=True, text=True, check=True).stdout.splitlines()
+          for network in networks:
+              if network.startswith("oriso-c-lifecycle-net-"):
+                  subprocess.run(["docker", "network", "rm", network], check=True, capture_output=True)
+          PYCODE
+      - name: Upload bounded native and unit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lifecycle-${{ matrix.name }}
+          path: |
+            proof-reports/*.json
+            proof-reports/*.xml
+            keycloak-image/account-lifecycle-spi/target/surefire-reports/TEST-*.xml
+          if-no-files-found: error
+          retention-days: 14

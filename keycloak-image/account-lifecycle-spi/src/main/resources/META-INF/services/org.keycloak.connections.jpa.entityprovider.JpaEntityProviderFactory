@@ -1,1 +1,2 @@
 org.oriso.keycloak.lifecycle.LifecycleEntities
+org.oriso.keycloak.lifecycle.ProtectedInvitationEntities

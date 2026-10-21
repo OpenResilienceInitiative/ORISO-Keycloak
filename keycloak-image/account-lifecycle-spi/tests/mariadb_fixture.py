@@ -27,8 +27,20 @@ DEFAULT_MARIADB_IMAGE = (
 COMPAT_MARIADB_IMAGE = (
     "mariadb@sha256:55db5a18b68b5f6db4c04640ad27301c0582cd799880f9ed6d9a458a5795342e"
 )
+# Explicit amd64 variants for isolated hosted CI; local proof pins remain unchanged.
+CI_MARIADB_IMAGE = (
+    "mariadb@sha256:33a6653ab666774f48818120045f9367a81cd4c54c027412fe294a7d1274e2dc"
+)
+CI_COMPAT_MARIADB_IMAGE = (
+    "mariadb@sha256:082554e82eb0e333cddd152d474bb55b8155c8f6585d4c5b0fb47ce2f740cb08"
+)
 MARIADB_IMAGE = os.environ.get("LIFECYCLE_C_MARIADB_TEST_IMAGE", DEFAULT_MARIADB_IMAGE)
-if MARIADB_IMAGE not in {DEFAULT_MARIADB_IMAGE, COMPAT_MARIADB_IMAGE}:
+if MARIADB_IMAGE not in {
+    DEFAULT_MARIADB_IMAGE,
+    COMPAT_MARIADB_IMAGE,
+    CI_MARIADB_IMAGE,
+    CI_COMPAT_MARIADB_IMAGE,
+}:
     raise AssertionError("An explicitly approved pinned MariaDB test image is required")
 
 
@@ -327,9 +339,16 @@ class MariaDbFixture(LifecycleFixture):
                 self.assertEqual("keycloak", account)
                 self.assertEqual("REPEATABLE READ", isolation)
                 status = self.sql("SHOW ENGINE INNODB STATUS").replace("\\n", "\n")
+                current = re.findall(
+                    r"(?ms)^-+\nTRANSACTIONS\n-+\n(.*?)^-+\nFILE I/O\n-+\n",
+                    status,
+                )
+                self.assertEqual(
+                    1, len(current), "Current InnoDB transaction section is required"
+                )
                 blocks = [
                     block
-                    for block in status.split("---TRANSACTION")
+                    for block in current[0].split("---TRANSACTION")[1:]
                     if re.search(r"thread id " + connection + r"\b", block)
                 ]
                 self.assertEqual(

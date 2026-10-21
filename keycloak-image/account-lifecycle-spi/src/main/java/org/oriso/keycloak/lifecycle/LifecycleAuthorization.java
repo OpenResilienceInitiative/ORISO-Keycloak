@@ -61,6 +61,36 @@ final class LifecycleAuthorization {
       String attempt,
       JsonNode body) {
     var realm = session.getContext().getRealm();
+    var machine = authenticateMachine(session);
+    String actor = machine.actor();
+    if ("ACCOUNT_ADMIN".equals(actor)
+        && !Set.of("account.creation-recover", "account.compensate").contains(operation)) deny();
+    verifyCommand(
+        proof,
+        machine,
+        "oriso-account-lifecycle",
+        "ACCOUNT_CREATE".equals(actor) ? "ACCOUNT_PROVISIONING" : "ACCOUNT_MAINTENANCE",
+        operation,
+        method,
+        "realm/" + realm.getId() + "/account-attempt/" + attempt,
+        body);
+    return actor;
+  }
+
+  /** Cached native machine identity; subsequent human authentication must not replace it. */
+  record CheckedMachine(
+      String actor, String clientId, String subject,
+      org.keycloak.services.managers.AuthenticationManager.AuthResult nativeAuth) {}
+
+  CheckedMachine requireMachine(KeycloakSession session, String requiredActor) {
+    if (!Set.of("ACCOUNT_CREATE", "ACCOUNT_ADMIN").contains(requiredActor)) deny();
+    var checked = authenticateMachine(session);
+    if (!requiredActor.equals(checked.actor())) deny();
+    return checked;
+  }
+
+  private CheckedMachine authenticateMachine(KeycloakSession session) {
+    var realm = session.getContext().getRealm();
     var auth = new BearerTokenAuthenticator(session).authenticate();
     if (auth == null) throw new NotAuthorizedException("Bearer");
     var token = auth.getToken();
@@ -133,29 +163,19 @@ final class LifecycleAuthorization {
         || MessageDigest.isEqual(
             encodedKey.getBytes(StandardCharsets.UTF_8), secret.getBytes(StandardCharsets.UTF_8)))
       deny();
-    if ("ACCOUNT_ADMIN".equals(actor)
-        && !Set.of("account.creation-recover", "account.compensate").contains(operation)) deny();
-    verify(
-        proof,
-        actor,
-        clientId,
-        subject,
-        operation,
-        method,
-        "realm/" + realm.getId() + "/account-attempt/" + attempt,
-        body);
-    return actor;
+    return new CheckedMachine(actor, clientId, subject, auth);
   }
 
-  private void verify(
+  void verifyCommand(
       String proof,
-      String actor,
-      String client,
-      String subject,
+      CheckedMachine machine,
+      String proofAudience,
+      String purpose,
       String operation,
       String method,
       String target,
       JsonNode body) {
+    String actor = machine.actor(), client = machine.clientId(), subject = machine.subject();
     try {
       if (proof == null || proof.length() > 8192) deny();
       String[] parts = proof.split("\\.", -1);
@@ -176,9 +196,8 @@ final class LifecycleAuthorization {
           issued = claims.path("iat").asLong(),
           expires = claims.path("exp").asLong();
       if (!"userservice".equals(claims.path("iss").asText())
-          || !"oriso-account-lifecycle".equals(claims.path("aud").asText())
-          || !("ACCOUNT_CREATE".equals(actor) ? "ACCOUNT_PROVISIONING" : "ACCOUNT_MAINTENANCE")
-              .equals(claims.path("purpose").asText())
+          || !proofAudience.equals(claims.path("aud").asText())
+          || !purpose.equals(claims.path("purpose").asText())
           || !operation.equals(claims.path("operation").asText())
           || !method.equals(claims.path("method").asText())
           || !actor.equals(claims.path("actor").asText())
@@ -244,7 +263,7 @@ final class LifecycleAuthorization {
     }
   }
 
-  private static void requireNoNativePermissions(
+  static void requireNoNativePermissions(
       KeycloakSession session, org.keycloak.representations.AccessToken token) {
     try {
       var realm = session.getContext().getRealm();

@@ -108,7 +108,7 @@ def main():
     }
     suite = unittest.defaultTestLoader.loadTestsFromModule(module)
     discovered = suite.countTestCases()
-    floor = 38 if args.suite == "lifecycle" else 8
+    floor = 38 if args.suite == "lifecycle" else 9
     if discovered < floor:
         raise SystemExit("Native case inventory below required floor")
     result = unittest.TextTestRunner(verbosity=2, resultclass=XmlResult).run(suite)

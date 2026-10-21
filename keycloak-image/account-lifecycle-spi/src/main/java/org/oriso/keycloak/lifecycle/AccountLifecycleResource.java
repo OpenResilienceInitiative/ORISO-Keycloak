@@ -485,7 +485,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     return new PendingAccount(user, current);
   }
 
-  private JsonNode lockedSnapshot(EntityManager em, String id) {
+  static JsonNode lockedSnapshot(EntityManager em, String id) {
     // Current locking reads must supply the values we validate. A normal model read
     // can retain an older MariaDB REPEATABLE READ view after these locks are acquired.
     // Keep scalar results: managed children break Keycloak's bulk-delete ordering.
