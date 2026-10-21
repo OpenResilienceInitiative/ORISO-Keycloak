@@ -250,10 +250,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
           session, username, raw,
           headers.getHeaderString("X-ORISO-Task-Context"),
           headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
-            var dto = new OtpSetupDTO();
-            dto.setInitialCode(target.initialCode());
-            // Wire-only: retain the original native-power barrier until its actual HTTP RED.
-            return setupOtpMail(username, dto);
+            return finishScopedMailSetup(target);
           });
     }
     try {
@@ -290,6 +287,23 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
               new Error().error("internal_error").errorDescription("failed to verify mail setup"))
           .build();
     }
+  }
+
+  private Response finishScopedMailSetup(
+      org.oriso.keycloak.lifecycle.ScopedOtpAccess.VerifiedOtpTarget target) {
+    var context = new CredentialContext(target.session(), target.realm(), target.user());
+    var credentials = mailCredentialService.getAllCredentials(context);
+    if (credentials.size() != 1 || credentials.get(0).isActive()) {
+      throw new jakarta.ws.rs.ClientErrorException("Current mail OTP credential conflicts", 409);
+    }
+    var credential = credentials.get(0);
+    if (otpService.validate(target.initialCode(), credential.getOtp()) != ValidationResult.VALID) {
+      throw new jakarta.ws.rs.ClientErrorException("Current mail OTP verification conflicts", 409);
+    }
+    target.bindEmailFinishCredential(credential);
+    mailCredentialService.activate(credential, context);
+    appCredentialService.deleteCredentials(context);
+    return Response.status(Status.CREATED).entity(new Success().info("OTP setup created")).build();
   }
 
   private void verifyAuthentication() {
