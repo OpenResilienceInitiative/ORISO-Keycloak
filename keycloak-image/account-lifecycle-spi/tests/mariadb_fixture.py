@@ -47,6 +47,8 @@ if MARIADB_IMAGE not in {
 class MariaDbFixture(LifecycleFixture):
     @classmethod
     def setUpClass(cls):
+        cls.lock_wait_receipts = []
+        cls.driver_latches = []
         jar = Path(os.environ.get("LIFECYCLE_C_TEST_JAR", ""))
         if not jar.is_file():
             raise AssertionError(
@@ -240,7 +242,7 @@ class MariaDbFixture(LifecycleFixture):
         type(self).ready()
         super().setUp()
 
-    def sql(self, statement):
+    def sql(self, statement, timeout=None):
         result = subprocess.run(
             [
                 "docker",
@@ -258,6 +260,7 @@ class MariaDbFixture(LifecycleFixture):
             ],
             capture_output=True,
             text=True,
+            timeout=timeout,
         )
         codes = re.findall(r"ERROR (\d+) \(([A-Z0-9]+)\)", result.stderr)
         self.assertEqual(
@@ -294,20 +297,42 @@ class MariaDbFixture(LifecycleFixture):
         editor.stdin.write(
             "START TRANSACTION//\nSELECT ID INTO @held_user FROM USER_ENTITY WHERE ID='"
             + user
-            + "' FOR UPDATE//\nSELECT 'USER_LOCK_HELD'//\n"
+            + "' FOR UPDATE//\nSELECT 'USER_LOCK_HELD',CONNECTION_ID(),"
+            + "IF(@held_user='"
+            + user
+            + "','MATCH','MISSING')//\n"
         )
         editor.stdin.flush()
-        self.editor_marker(editor, "USER_LOCK_HELD")
+        marker, connection, selected = self.editor_line(editor).split("\t")
+        self.assertEqual("USER_LOCK_HELD", marker)
+        self.assertTrue(connection.isdecimal())
+        self.assertEqual(
+            "MATCH", selected, "Owned driver must select the exact existing target row"
+        )
+        editor.oriso_connection = int(connection)
+        editor.oriso_target_digest = hashlib.sha256(user.encode()).hexdigest()
+        editor.oriso_selected_target = True
+        if len(type(self).driver_latches) < 64:
+            type(self).driver_latches.append(
+                {
+                    "connection": editor.oriso_connection,
+                    "targetDigest": editor.oriso_target_digest,
+                    "selectedExactTarget": True,
+                }
+            )
         return editor
 
-    def editor_marker(self, editor, expected):
-        ready, _, _ = select.select([editor.stdout], [], [], 15)
+    def editor_line(self, editor, timeout=15):
+        ready, _, _ = select.select([editor.stdout], [], [], timeout)
         self.assertTrue(
             ready, "Owned editor did not reach its deterministic database latch"
         )
+        return editor.stdout.readline().strip()
+
+    def editor_marker(self, editor, expected):
         self.assertEqual(
             expected,
-            editor.stdout.readline().strip(),
+            self.editor_line(editor),
             "Owned editor failed before its expected database latch",
         )
 
@@ -326,7 +351,229 @@ class MariaDbFixture(LifecycleFixture):
             editor.terminate()
             editor.communicate(timeout=10)
 
-    def wait_for_receiver_user_lock_and_read_view(self, user):
+    @staticmethod
+    def receiver_state(receiver):
+        result = {
+            "receiverRunning": receiver.running() if receiver is not None else False,
+            "receiverCompleted": receiver.done() if receiver is not None else False,
+            "httpStatus": None,
+            "receiverException": False,
+            "exceptionClass": None,
+        }
+        if receiver is not None and receiver.done():
+            if receiver.cancelled():
+                result["receiverException"] = True
+                result["exceptionClass"] = "CancelledError"
+                return result
+            error = receiver.exception()
+            if error is not None:
+                result["receiverException"] = True
+                kind = type(error).__name__
+                result["exceptionClass"] = (
+                    kind
+                    if kind
+                    in {"TimeoutError", "URLError", "HTTPError", "AssertionError"}
+                    else "OTHER"
+                )
+            else:
+                status, _ = receiver.result()
+                if (
+                    isinstance(status, int)
+                    and not isinstance(status, bool)
+                    and 100 <= status <= 599
+                ):
+                    result["httpStatus"] = status
+        return result
+
+    def missing_wait_observation(self, user, receiver, phase, editor):
+        receipt = {
+            **self.receiver_state(receiver),
+            "phase": (
+                phase
+                if phase in {"commit", "compensate", "owned-read"}
+                else "unspecified"
+            ),
+            "witnessObserved": False,
+            "beforeDriverRelease": self.receiver_state(receiver),
+            "driverAlive": editor is not None and editor.poll() is None,
+            "driverConnection": getattr(editor, "oriso_connection", None),
+            "driverSelectedExactTarget": getattr(
+                editor, "oriso_selected_target", False
+            ),
+            "targetDigest": hashlib.sha256(user.encode()).hexdigest(),
+            "waits": [],
+            "processes": {},
+        }
+        deadline = time.monotonic() + 5
+
+        def query(statement):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError()
+            return self.sql(statement, timeout=remaining)
+
+        try:
+            self.assertEqual(user, str(uuid.UUID(user)))
+            connection = receipt["driverConnection"]
+            self.assertIsInstance(connection, int)
+            raw = query(
+                "SELECT r.trx_mysql_thread_id, b.trx_mysql_thread_id, r.trx_state, r.trx_isolation_level,"
+                " l.lock_table, l.lock_index, l.lock_type, l.lock_mode, IF(l.lock_data IS NULL,1,0),"
+                " IF(l.lock_data LIKE '%"
+                + user
+                + "%',1,0) FROM information_schema.INNODB_LOCK_WAITS w"
+                " JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id"
+                " JOIN information_schema.INNODB_TRX r ON w.requesting_trx_id=r.trx_id"
+                " JOIN information_schema.INNODB_TRX b ON w.blocking_trx_id=b.trx_id"
+                " JOIN information_schema.PROCESSLIST p ON p.ID=r.trx_mysql_thread_id"
+                " WHERE p.USER='keycloak' ORDER BY r.trx_mysql_thread_id LIMIT 16"
+            )
+            for row in raw.splitlines()[:16]:
+                (
+                    requester,
+                    blocker,
+                    state,
+                    isolation,
+                    table,
+                    index,
+                    kind,
+                    mode,
+                    null_key,
+                    target_key,
+                ) = row.split("\t")
+                known_table = next(
+                    (
+                        name
+                        for name in (
+                            "USER_ENTITY",
+                            "REALM",
+                            "KEYCLOAK_GROUP",
+                            "KEYCLOAK_ROLE",
+                            "USER_ATTRIBUTE",
+                            "USER_ROLE_MAPPING",
+                            "USER_GROUP_MEMBERSHIP",
+                            "CREDENTIAL",
+                            "ORISO_ACCOUNT_LIFECYCLE_ATTEMPT",
+                        )
+                        if name in table
+                    ),
+                    "OTHER",
+                )
+                receipt["waits"].append(
+                    {
+                        "requesterConnection": int(requester),
+                        "blockerConnection": int(blocker),
+                        "blockedByOwnedDriver": int(blocker) == connection,
+                        "table": known_table,
+                        "indexClass": (
+                            "PRIMARY" if index == "PRIMARY" else "SECONDARY_OR_OTHER"
+                        ),
+                        "state": (
+                            state
+                            if state
+                            in {"RUNNING", "LOCK WAIT", "ROLLING BACK", "COMMITTING"}
+                            else "OTHER"
+                        ),
+                        "isolation": (
+                            isolation
+                            if isolation
+                            in {
+                                "REPEATABLE READ",
+                                "READ COMMITTED",
+                                "SERIALIZABLE",
+                                "READ UNCOMMITTED",
+                            }
+                            else "OTHER"
+                        ),
+                        "lockType": kind if kind in {"RECORD", "TABLE"} else "OTHER",
+                        "exclusive": mode.startswith("X"),
+                        "lockKeyNull": null_key == "1",
+                        "lockKeyMatchesTarget": target_key == "1",
+                    }
+                )
+            receipt["waitSampleAtLimit"] = len(receipt["waits"]) == 16
+            owner = query(
+                "SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id="
+                + str(connection)
+            )
+            receipt["driverHasCurrentTransaction"] = owner == "1"
+            raw = query(
+                "SELECT p.COMMAND, IF(p.STATE LIKE '%lock%',1,0), IF(t.trx_id IS NULL,0,1)"
+                " FROM information_schema.PROCESSLIST p LEFT JOIN information_schema.INNODB_TRX t ON p.ID=t.trx_mysql_thread_id"
+                " WHERE p.USER='keycloak' ORDER BY p.ID LIMIT 32"
+            )
+            counts = {
+                "sampled": 0,
+                "query": 0,
+                "sleep": 0,
+                "lockState": 0,
+                "transaction": 0,
+            }
+            for row in raw.splitlines()[:32]:
+                command, locked, transaction = row.split("\t")
+                counts["sampled"] += 1
+                counts["query"] += command == "Query"
+                counts["sleep"] += command == "Sleep"
+                counts["lockState"] += locked == "1"
+                counts["transaction"] += transaction == "1"
+            receipt["processes"] = counts
+            receipt["processSampleAtLimit"] = counts["sampled"] == 32
+        except Exception as error:
+            receipt["diagnosticErrorClass"] = (
+                type(error).__name__
+                if type(error).__name__
+                in {"TimeoutExpired", "TimeoutError", "AssertionError", "ValueError"}
+                else "OTHER"
+            )
+        type(self).lock_wait_receipts.append(receipt)
+        self.current_wait_receipt = receipt
+        return receipt
+
+    def release_failed_witness(self, editor, receiver):
+        # Release only our own transaction before executor teardown can wait on it.
+        receipt = getattr(self, "current_wait_receipt", None)
+        try:
+            editor.stdin.write("ROLLBACK//\nSELECT 'EDITOR_ROLLED_BACK'//\n")
+            editor.stdin.flush()
+            self.assertEqual("EDITOR_ROLLED_BACK", self.editor_line(editor, timeout=5))
+            if receipt is not None:
+                receipt["driverRollbackAcknowledged"] = True
+        except Exception as error:
+            if receipt is not None:
+                receipt["driverReleaseErrorClass"] = (
+                    type(error).__name__
+                    if type(error).__name__
+                    in {"AssertionError", "BrokenPipeError", "OSError"}
+                    else "OTHER"
+                )
+        finally:
+            self.stop_locked_editor(editor)
+        if receipt is not None:
+            try:
+                owner = self.sql(
+                    "SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id="
+                    + str(editor.oriso_connection),
+                    timeout=2,
+                )
+                receipt["driverTransactionReleased"] = owner == "0"
+            except Exception as error:
+                receipt["driverReleaseObservationErrorClass"] = (
+                    type(error).__name__
+                    if type(error).__name__ in {"AssertionError", "TimeoutExpired"}
+                    else "OTHER"
+                )
+        try:
+            receiver.result(timeout=5)
+        except Exception:
+            pass
+        if receipt is not None:
+            receipt["afterDriverRelease"] = self.receiver_state(receiver)
+            receipt["driverStopped"] = editor.poll() is not None
+
+    def wait_for_receiver_user_lock_and_read_view(
+        self, user, receiver=None, phase=None, editor=None
+    ):
+        self.current_wait_receipt = None
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             rows = self.sql(
@@ -363,4 +610,5 @@ class MariaDbFixture(LifecycleFixture):
                 )
                 return
             time.sleep(0.05)
+        self.missing_wait_observation(user, receiver, phase, editor)
         self.fail("Receiver did not reach the actual target-user InnoDB wait")
