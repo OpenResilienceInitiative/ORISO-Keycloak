@@ -36,6 +36,8 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.native_image_ids = []
         cls.setup_precondition = None
         cls.fixture_diagnostic = None
+        cls.authorization_controls = []
+        cls.cancel_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -440,7 +442,8 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
     def setUp(self):
         pass
 
-    def human(self):
+    def human(self, username="reviewed-human", expected_subject=None, record=True):
+        expected_subject = HUMAN if expected_subject is None else expected_subject
         require_active("human-preconditions")
         type(self).phase = "human-preconditions"
         status, value = call(
@@ -450,7 +453,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             {
                 "client_id": "protected-human-web",
                 "grant_type": "password",
-                "username": "reviewed-human",
+                "username": username,
                 "password": HUMAN_PASSWORD,
                 "scope": "openid",
             },
@@ -480,7 +483,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
                 }
                 self.fail("Native human token lacks a required field")
         type(self).phase = "native-human-token-policy"
-        self.assertEqual(HUMAN, claims["sub"])
+        self.assertEqual(expected_subject, claims["sub"])
         self.assertEqual(ISSUER, claims["iss"])
         self.assertEqual("protected-human-web", claims["azp"])
         self.assertEqual("0", claims["tenantId"])
@@ -498,7 +501,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         self.assertFalse(client["serviceAccountsEnabled"])
         self.assertFalse(client["fullScopeAllowed"])
         type(self).phase = "native-human-current-profile"
-        native = self.admin("GET", "/users/" + HUMAN)
+        native = self.admin("GET", "/users/" + expected_subject)
         self.assertTrue(native["enabled"])
         self.assertIsNone(native.get("serviceAccountClientLink"))
         self.assertEqual(
@@ -506,13 +509,15 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         )
         type(self).phase = "native-human-effective-grants"
         native_roles = self.admin(
-            "GET", "/users/" + HUMAN + "/role-mappings/realm/composite"
+            "GET", "/users/" + expected_subject + "/role-mappings/realm/composite"
         )
         self.assertEqual(
             {"agency-admin", "tenant-admin"}, {role["name"] for role in native_roles}
         )
-        self.assertEqual([], self.admin("GET", "/users/" + HUMAN + "/groups"))
-        mappings = self.admin("GET", "/users/" + HUMAN + "/role-mappings")
+        self.assertEqual(
+            [], self.admin("GET", "/users/" + expected_subject + "/groups")
+        )
+        mappings = self.admin("GET", "/users/" + expected_subject + "/role-mappings")
         self.assertFalse(mappings.get("clientMappings"))
         self.assertGreater(claims["exp"], time.time())
         type(self).phase = "native-human-userinfo-validation"
@@ -529,20 +534,24 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
                 "missingField": "sub",
             }
             self.fail("Native UserInfo lacks required subject")
-        self.assertEqual(HUMAN, current["sub"])
+        self.assertEqual(expected_subject, current["sub"])
         type(self).phase = "native-human-current-session"
         self.assertTrue(claims.get("sid"))
         self.assertTrue(
             any(
                 session["id"] == claims["sid"]
-                for session in self.admin("GET", "/users/" + HUMAN + "/sessions")
+                for session in self.admin(
+                    "GET", "/users/" + expected_subject + "/sessions"
+                )
             )
         )
+        if not record:
+            return bearer
         type(self).preconditions.append(
             {
                 "stage": "configured" if type(self).configuration_checked else "seed",
                 "realmId": self.realm_id,
-                "subject": HUMAN,
+                "subject": expected_subject,
                 "issuer": ISSUER,
                 "clientId": "protected-human-web",
                 "audiences": ["userservice"],
@@ -589,6 +598,155 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             + approval
             + suffix
         )
+
+    def test_installer_routine_and_unbound_human_cannot_authorize_protected_scope(self):
+        for actor in ACTORS:
+            with self.subTest(actor=actor):
+                native = self.admin(
+                    "GET",
+                    "/clients/" + self.client_ids[actor] + "/service-account-user",
+                )
+                self.assertEqual(SUBJECTS[actor], native["id"])
+                roles = self.admin(
+                    "GET", "/users/" + native["id"] + "/role-mappings/realm/composite"
+                )
+                self.assertEqual(set(ACTORS[actor][1]), {r["name"] for r in roles})
+                bearer = self.token(actor)
+                before = self.admin("GET", "/users/count")
+                status, _ = call(
+                    self.base,
+                    "PUT",
+                    self.endpoint(str(uuid.uuid4())),
+                    {"scope": self.scope()},
+                    bearer,
+                )
+                self.assertIn(status, (401, 403))
+                self.assertEqual(before, self.admin("GET", "/users/count"))
+                type(self).authorization_controls.append(
+                    {
+                        "principal": actor,
+                        "status": status,
+                        "nativePrincipalMatched": True,
+                    }
+                )
+        status, _ = call(
+            self.base,
+            "PUT",
+            self.endpoint(str(uuid.uuid4())),
+            {"scope": self.scope()},
+            self.installer,
+        )
+        self.assertIn(status, (401, 403))
+        type(self).authorization_controls.append(
+            {"principal": "INSTALLER", "status": status, "nativePrincipalMatched": True}
+        )
+
+        username = "unbound-" + uuid.uuid4().hex
+        self.admin(
+            "POST",
+            "/users",
+            {
+                "username": username,
+                "enabled": True,
+                "email": username + "@fixture.invalid",
+                "emailVerified": True,
+                "firstName": "Unbound",
+                "lastName": "Human",
+                "attributes": {"tenantId": ["0"]},
+                "credentials": [
+                    {"type": "password", "value": HUMAN_PASSWORD, "temporary": False}
+                ],
+            },
+        )
+        users = self.admin("GET", "/users?username=" + username + "&exact=true")
+        self.assertEqual(1, len(users))
+        subject = users[0]["id"]
+        self.assertEqual(subject, str(uuid.UUID(subject)))
+        self.addCleanup(lambda: self.admin("DELETE", "/users/" + subject))
+        defaults = self.admin("GET", "/users/" + subject + "/role-mappings/realm")
+        if defaults:
+            self.admin("DELETE", "/users/" + subject + "/role-mappings/realm", defaults)
+        roles = [
+            self.admin("GET", "/roles/" + r) for r in ("agency-admin", "tenant-admin")
+        ]
+        self.admin("POST", "/users/" + subject + "/role-mappings/realm", roles)
+        bearer = self.human(username, subject, record=False)
+        before = self.admin("GET", "/users/count")
+        status, _ = call(
+            self.base,
+            "PUT",
+            self.endpoint(str(uuid.uuid4())),
+            {"scope": self.scope()},
+            bearer,
+        )
+        self.assertEqual(403, status)
+        self.assertEqual(before, self.admin("GET", "/users/count"))
+        type(self).authorization_controls.append(
+            {
+                "principal": "UNBOUND_REAL_HUMAN",
+                "status": status,
+                "nativePrincipalMatched": True,
+            }
+        )
+
+    def test_human_cancel_is_durable_idempotent_and_blocks_delayed_approve(self):
+        approval, request = str(uuid.uuid4()), {"scope": self.scope()}
+        bearer = self.human(record=False)
+        before = self.admin("GET", "/users/count")
+        status, approved = call(
+            self.base, "PUT", self.endpoint(approval), request, bearer
+        )
+        self.assertEqual(201, status)
+        receipt = approved["approvalReceipt"]
+        cancel = {
+            "cancellationId": str(uuid.uuid4()),
+            "scopeDigest": receipt["scopeDigest"],
+            "workflowId": request["scope"]["workflowId"],
+            "inviteId": request["scope"]["inviteId"],
+            "authorizationRevision": 1,
+            "reason": "REVOKED",
+            "absentScope": None,
+            "approvalRequestDigest": receipt["approvalRequestDigest"],
+        }
+        type(self).phase = "real-human-cancel-http"
+        status, cancelled = call(
+            self.base, "POST", self.endpoint(approval, "/cancel"), cancel, bearer
+        )
+        after = self.admin("GET", "/users/count")
+        type(self).cancel_observation = {
+            "actualStatus": status,
+            "expectedStatus": 200,
+            "nativeHumanValidated": True,
+            "sourceApprovalCreated": True,
+            "noAccountCreated": before == after,
+        }
+        self.assertEqual(before, after)
+        self.assertEqual(200, status)
+        self.assertEqual("CANCELLED", cancelled["state"])
+        self.assertEqual(receipt, cancelled["approvalReceipt"])
+        self.assertTrue(cancelled["transitionReceipt"])
+        status, retry = call(
+            self.base, "POST", self.endpoint(approval, "/cancel"), cancel, bearer
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(cancelled, retry)
+        cancel["cancellationId"] = str(uuid.uuid4())
+        status, retry = call(
+            self.base, "POST", self.endpoint(approval, "/cancel"), cancel, bearer
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(cancelled["transitionReceipt"], retry["transitionReceipt"])
+        cancel["scopeDigest"] = "0" * 64
+        self.assertEqual(
+            409,
+            call(self.base, "POST", self.endpoint(approval, "/cancel"), cancel, bearer)[
+                0
+            ],
+        )
+        self.assertEqual(
+            409, call(self.base, "PUT", self.endpoint(approval), request, bearer)[0]
+        )
+        self.assertEqual(before, self.admin("GET", "/users/count"))
 
     def test_real_bound_human_approves_immutable_scope_without_creating_account(self):
         approval, request = str(uuid.uuid4()), {"scope": self.scope()}

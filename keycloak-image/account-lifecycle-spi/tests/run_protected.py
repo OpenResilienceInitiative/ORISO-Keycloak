@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One strict protected HTTP counterfactual, with sanitized bounded evidence."""
+"""Strict protected HTTP cases, with sanitized bounded native evidence."""
 
 import argparse
 import contextlib
@@ -275,7 +275,7 @@ def main():
     workflow_before = digest(workflow)
     summary = {
         "schema": 1,
-        "suite": "one-protected-human-approval",
+        "suite": "protected-human-approval-authority-and-cancel",
         "classification": "INPUT_OR_FIXTURE_ERROR",
         "sourceManifest": before,
         "workflowSHA256": workflow_before,
@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 1:
+        if discovered != 3:
             raise AssertionError(
-                "Exactly one first protected HTTP counterfactual required"
+                "Exactly three protected HTTP approval/authority/cancel cases required"
             )
 
         def deadline(signum, frame):
@@ -335,10 +335,30 @@ def main():
                 "approvalObservation": getattr(fixture, "approval_observation", None),
                 "nativeImageIds": getattr(fixture, "native_image_ids", []),
                 "setupNativePrecondition": getattr(fixture, "setup_precondition", None),
+                "authorizationControls": getattr(fixture, "authorization_controls", []),
+                "cancelObservation": getattr(fixture, "cancel_observation", None),
             }
         )
         native = summary["nativeHumanPreconditions"]
         observation = summary["approvalObservation"] or {}
+        controls = summary["authorizationControls"]
+        valid_controls = (
+            len(controls) == 7
+            and {v["principal"] for v in controls}
+            == {
+                "SETUP",
+                "ACCOUNT_CREATE",
+                "ACCOUNT_ADMIN",
+                "MAIL",
+                "RUNTIME",
+                "INSTALLER",
+                "UNBOUND_REAL_HUMAN",
+            }
+            and all(
+                v["nativePrincipalMatched"] and v["status"] in (401, 403)
+                for v in controls
+            )
+        )
         valid_preconditions = (
             len(native) == 2
             and [v["stage"] for v in native] == ["seed", "configured"]
@@ -367,8 +387,34 @@ def main():
             and valid_preconditions
             and observation.get("actualStatus") == 201
             and observation.get("noAccountCreated") is True
+            and valid_controls
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["cancelObservation"] or {}).get("actualStatus") in (404, 405)
+            and summary["cancelObservation"].get("expectedStatus") == 200
+            and summary["cancelObservation"].get("nativeHumanValidated") is True
+            and summary["cancelObservation"].get("sourceApprovalCreated") is True
+            and summary["cancelObservation"].get("noAccountCreated") is True
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_human_cancel_is_durable_idempotent_and_blocks_delayed_approve"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = "GENUINE_HUMAN_CANCEL_COUNTERFACTUAL_RED"
         elif (
             valid_preconditions
             and result.testsRun == 1
@@ -381,7 +427,7 @@ def main():
             summary["classification"] = "GENUINE_COUNTERFACTUAL_RED"
         elif not valid_preconditions:
             summary["classification"] = "FIXTURE_PRECONDITION_FAILURE"
-        elif not result.errors and result.testsRun == 1 and not result.skipped:
+        elif not result.errors and result.testsRun == discovered and not result.skipped:
             summary["classification"] = "BEHAVIOR_FAILURE_NOT_EXPECTED_COUNTERFACTUAL"
     except Exception as error:
         summary["gateErrorType"] = type(error).__name__

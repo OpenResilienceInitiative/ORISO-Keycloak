@@ -46,12 +46,12 @@ jobs:
             "$RUNNER_TEMP/maven.tar.gz" | sha512sum --check
           tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
-      - name: Package unchanged ordinary module and run its 13 units
+      - name: Package provider and run its 13 existing unit checks
         working-directory: keycloak-image/account-lifecycle-spi
         env:
           MAVEN_OPTS: -Xmx512m -XX:MaxMetaspaceSize=256m -XX:ActiveProcessorCount=2
         run: mvn -B -q clean package '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2'
-      - name: Run one real human approval counterfactual
+      - name: Run approval authority controls and human cancellation counterfactual
         env:
           PROTECTED_PROOF_RESOURCE_PROFILE: github-ubuntu-24-amd64-v1
         shell: bash

@@ -89,6 +89,8 @@ public final class CurrentNativeHumanIdentity {
     var user = AccountLifecycleResource.lockedSnapshot(em, token.getSubject());
     if (!policy.realmId.equals(user.path("realmId").asText()) || !user.path("enabled").asBoolean()
         || !user.path("serviceAccountClientLink").isNull() || !user.path("federationLink").isNull()) deny();
+    var currentUser = NativeCurrentGrants.one(em, "select ID, NOT_BEFORE from USER_ENTITY where ID = :id for update", token.getSubject());
+    if (token.getIat() < ((Number) currentUser[1]).longValue()) deny();
     var directGroups = jsonIds(user.path("groups"));
     var grants = NativeCurrentGrants.read(em, policy.realmId, jsonIds(user.path("roles")), directGroups);
     if (!Collections.disjoint(grants.groups().keySet(), policy.groups)
@@ -102,11 +104,8 @@ public final class CurrentNativeHumanIdentity {
     if (!realmRoles.equals(grants.realmRoles()) || !clientRoles.equals(grants.clientRoles())) deny();
     var audiences = token.getAudience() == null ? Set.<String>of() : new HashSet<>(Arrays.asList(token.getAudience()));
     if (token.getAudience() == null || audiences.size() != token.getAudience().length || !policy.audiences.contains(audiences)) deny();
-    Long tenant = tenant(user.path("attributes").get("tenantId"), token.getOtherClaims().get("tenantId"));
-    var permissions = AdminPermissions.evaluator(session, realm, new AdminAuth(realm, token, auth.getUser(), auth.getClient()));
-    if (permissions.isRealmAdmin() || permissions.realm().canManageRealm() || permissions.realm().canViewRealm()
-        || permissions.users().canManage() || permissions.users().canView() || permissions.users().canQuery()) deny();
-    LifecycleAuthorization.requireNoNativePermissions(session, token);
+    Long tenant = tenant(user.path("attributes").get("tenantId"), token.getOtherClaims().get("tenantId"), token.getOtherClaims().containsKey("tenantId"));
+    requireNoHumanNativePermissions(session, auth);
     var groups = new TreeMap<String, CurrentGroup>();
     grants.groups().forEach((id, group) -> groups.put(id, new CurrentGroup(id, grants.paths().get(id), group.parentId())));
     return new VerifiedHuman(policy.realmId, realm.getName(), token.getSubject(), token.getIssuer(),
@@ -134,8 +133,33 @@ public final class CurrentNativeHumanIdentity {
     return Urls.realmIssuer(base, session.getContext().getRealm().getName());
   }
 
-  private static Long tenant(JsonNode nativeValues, Object claim) {
-    if (nativeValues == null && claim == null) return null;
+  private static void requireNoHumanNativePermissions(KeycloakSession session,
+      org.keycloak.services.managers.AuthenticationManager.AuthResult auth) {
+    var context = session.getContext();
+    var previousClient = context.getClient();
+    var previousBearer = context.getBearerToken();
+    var previousSession = context.getUserSession();
+    try {
+      // Native FGAP conditions may inspect their client context. Evaluate the
+      // already native-authenticated human, then preserve the calling machine.
+      context.setClient(auth.getClient());
+      context.setBearerToken(auth.getToken());
+      context.setUserSession(auth.getSession());
+      var realm = context.getRealm();
+      var permissions = AdminPermissions.evaluator(session, realm,
+          new AdminAuth(realm, auth.getToken(), auth.getUser(), auth.getClient()));
+      if (permissions.isRealmAdmin() || permissions.realm().canManageRealm() || permissions.realm().canViewRealm()
+          || permissions.users().canManage() || permissions.users().canView() || permissions.users().canQuery()) deny();
+      LifecycleAuthorization.requireNoNativePermissions(session, auth.getToken());
+    } finally {
+      context.setClient(previousClient);
+      context.setBearerToken(previousBearer);
+      context.setUserSession(previousSession);
+    }
+  }
+
+  private static Long tenant(JsonNode nativeValues, Object claim, boolean claimPresent) {
+    if (nativeValues == null && !claimPresent) return null;
     if (nativeValues == null || !nativeValues.isArray() || nativeValues.size() != 1
         || !nativeValues.get(0).isTextual() || !(claim instanceof String)
         || !nativeValues.get(0).asText().equals(claim)
