@@ -3,6 +3,7 @@
 import hashlib
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 import unittest
@@ -44,6 +45,7 @@ TRUE_STATUS_FIELDS = STATUS_FIELDS - {"observerCommitted", "workerFailed", "stag
 class RollbackFixture(NativeFixture):
     @classmethod
     def setUpClass(cls):
+        cls.startup_failure = {}
         cls.companion_path = Path(os.environ["LIFECYCLE_PROOF_COMPANION_JAR"]).resolve()
         if not cls.companion_path.is_file():
             raise AssertionError("Actual separately compiled companion JAR required")
@@ -51,11 +53,25 @@ class RollbackFixture(NativeFixture):
         super().setUpClass()
 
     @classmethod
+    def ready(cls):
+        try:
+            super().ready()
+        except AssertionError:
+            # Collect before owned cleanup, retaining no raw native message or value.
+            try:
+                cls.startup_failure = startup_failure_observation(cls)
+            except Exception as error:
+                cls.startup_failure = {"observerExceptionType": type(error).__name__}
+            raise
+
+    @classmethod
     def memoryStart(cls):
         source = str(cls.companion_path) + ":" + COMPANION_TARGET + ":ro"
         if source not in cls.command:
             index = cls.command.index(IMAGE)
             cls.command[index:index] = ["-v", source]
+        if "--verbose" not in cls.command:
+            cls.command.append("--verbose")
         super().memoryStart()
 
     @classmethod
@@ -321,6 +337,72 @@ def companion_evidence():
         "companionJarStable": digest(jar) == RollbackFixture.companion_sha256,
         "companionJarEntriesSHA256": entries,
         "companionAbsentFromMainJar": True,
+        "startupFailureObservation": getattr(RollbackFixture, "startup_failure", {}),
+    }
+
+
+def startup_failure_observation(fixture):
+    inspected = inspect_owned(fixture)
+    if inspected["Config"]["Labels"].get("oriso-protected-receiver-test") != "true":
+        raise AssertionError("Owned native diagnostic label required")
+    output = subprocess.run(
+        ["docker", "logs", "--tail", "500", fixture.name],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    return sanitized_startup_failure(inspected["State"], output.stdout + output.stderr)
+
+
+def sanitized_startup_failure(state, raw):
+    allowed = (
+        "java.",
+        "jakarta.",
+        "io.quarkus.",
+        "org.jboss.",
+        "org.keycloak.",
+        "org.oriso.keycloak.lifecycle.proof.",
+    )
+    # Only Java identifiers and numeric source coordinates cross this boundary.
+    types = sorted(
+        {
+            v
+            for v in re.findall(
+                r"\b([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+(?:Exception|Error))\b",
+                raw,
+            )
+            if v.startswith(allowed)
+        }
+    )[:16]
+    frames = []
+    for owner, file, line in re.findall(
+        r"\bat\s+([A-Za-z_$][A-Za-z0-9_.$]*)\(([A-Za-z_$][A-Za-z0-9_$]*\.java):(\d+)\)",
+        raw,
+    ):
+        value = {"method": owner, "file": file, "line": int(line)}
+        if owner.startswith(allowed) and value not in frames:
+            frames.append(value)
+    phrases = (
+        "non-static inner class",
+        "non-static nested class",
+        "must be static",
+        "no suitable constructor",
+        "no default constructor",
+        "no no-arg constructor",
+        "must have a public no-args constructor",
+        "unsatisfied dependency",
+        "ambiguous dependencies",
+        "cannot be instantiated",
+    )
+    lower = raw.lower()
+    return {
+        "running": state["Running"],
+        "oomKilled": state["OOMKilled"],
+        "exitCode": state["ExitCode"],
+        "exceptionTypes": types,
+        "sourceFrames": frames[:16],
+        "fixedDiagnosticFlags": {v: v in lower for v in phrases},
     }
 
 

@@ -107,6 +107,7 @@ jobs:
       max-parallel: 2
       matrix:
         case:
+          - binding-rollback-only-unavailable
           - extra-denies-prepared-five
           - missing-required-client
           - missing-required-service-account
@@ -115,7 +116,6 @@ jobs:
           - unregistered-inherited-task-human
           - allowlisted-denied-human
           - binding-drift-login-available
-          - binding-rollback-only-unavailable
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
