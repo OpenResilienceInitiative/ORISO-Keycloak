@@ -60,7 +60,11 @@ public final class ProtectedInvitationFactory implements RealmResourceProviderFa
 
   public RealmResourceProvider create(KeycloakSession session) {
     if (configuration == null) return null;
-    if (!installationReady) throw new ServiceUnavailableException(Response.status(503).header("Cache-Control", "no-store").build());
+    if (!installationReady) {
+      // Native error mapping rebuilds exception responses; set its request response too.
+      session.getContext().getHttpResponse().setHeader("Cache-Control", "no-store");
+      throw new ServiceUnavailableException(Response.status(503).header("Cache-Control", "no-store").build());
+    }
     return new ProtectedInvitationResource(session, configuration, authorization);
   }
   public String getId() { return "oriso-protected-invitations"; }

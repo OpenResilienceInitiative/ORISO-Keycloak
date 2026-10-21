@@ -62,6 +62,14 @@ def classify(summary):
         return "INPUT_OR_FIXTURE_ERROR"
     if (
         summary.get("failures") == 1
+        and o.get("driftBootHumanLoginStatus") == 200
+        and o.get("driftBootNativeUserinfoAndCurrentSessionVerified") is True
+        and o.get("unreadyProtectedApprovalStatus") == 503
+        and o.get("unreadyResponseNoStore") is False
+    ):
+        return "GENUINE_PROTECTED_UNAVAILABLE_NO_STORE_RED"
+    if (
+        summary.get("failures") == 1
         and o.get("classifiedNativeBindingExitAndLoginUnavailable") is True
         and o.get("nonzeroNativeExitWithoutOom") is True
         and o.get("driftBootHumanLoginStatus") != 200

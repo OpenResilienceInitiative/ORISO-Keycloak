@@ -514,16 +514,34 @@ def main():
             if result.wasSuccessful():
                 summary["classification"] = "GREEN"
             elif (
+                summary["installationObservation"].get(
+                    "actualHumanNativeLoginAndUserinfoVerified"
+                )
+                is True
+                and summary["installationObservation"].get("protectedUnavailableStatus")
+                == 503
+                and summary["installationObservation"].get(
+                    "protectedUnavailableNoStore"
+                )
+                is False
+            ):
+                summary["classification"] = "GENUINE_PROTECTED_UNAVAILABLE_NO_STORE_RED"
+            elif (
                 args.case == "extra-denies-prepared-five"
                 and summary["installationObservation"].get("refusalStage")
                 == "CURRENT_NATIVE_INSTALLATION_VALIDATION"
             ):
                 summary["classification"] = "GENUINE_DENY_EXTRAS_INSTALLATION_RED"
-            elif args.case in {
-                "unregistered-technical-human",
-                "unregistered-task-role-human",
-                "unregistered-inherited-task-human",
-            } and not getattr(Installation, "installation_refused", False):
+            elif (
+                args.case
+                in {
+                    "unregistered-technical-human",
+                    "unregistered-task-role-human",
+                    "unregistered-inherited-task-human",
+                }
+                and summary["installationObservation"].get("protectedUnavailableStatus")
+                == 201
+            ):
                 summary["classification"] = "GENUINE_MISSING_TECHNICAL_COVERAGE_RED"
             else:
                 summary["classification"] = "BEHAVIOR_FAILURE"
