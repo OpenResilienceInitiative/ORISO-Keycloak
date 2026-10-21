@@ -210,6 +210,10 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
 
     public void before(String command, AccountLifecycleAttempt current, EntityManager em) {
       if ("compensate".equals(command)) {
+        if (current != null && "ABANDONED".equals(current.state)) {
+          requireAbandonedCleanup(current);
+          return;
+        }
         if (current == null || current.accountId == null
             || !Set.of("OPEN", "RECOVERY_CLAIMED").contains(current.state)
             || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
@@ -253,6 +257,14 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
             || !attempt.equals(approval.boundAttemptId)) conflict();
         return;
       }
+      if ("compensate".equals(command) && "ABANDONED".equals(current.state)) {
+        requireAbandonedCleanup(current);
+        if (!"compensate".equals(current.terminalOperation)
+            || !LifecycleAuthorization.equal(originalCommandDigest, current.terminalDigest)) conflict();
+        // Local cleanup of an actual absent attempt saves only its retry metadata.
+        // Its original abandon/recover and prior approval receipt remain immutable.
+        return;
+      }
       if (current.accountId == null) conflict();
       if ("compensate".equals(command)) {
         if (!"COMPENSATED".equals(current.state) || !"compensate".equals(current.terminalOperation)
@@ -285,6 +297,16 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       // Same request/JPA transaction as the native user, proof and attempt. A
       // callback/flush failure rolls every effect back; no separate transaction.
       em.flush();
+    }
+
+    private void requireAbandonedCleanup(AccountLifecycleAttempt current) {
+      if (current.accountId != null || current.creationProof != null
+          || current.recoveryReceipt == null || current.terminalReceipt == null
+          || current.recoveryId == null || !current.recoveryId.equals(current.executionId)
+          || current.recoveryExpected == null || current.recoveryExpected == Long.MAX_VALUE
+          || current.recoveryExpected + 1 != current.generation
+          || !Set.of("CANCELLED", "EXPIRED").contains(approval.state)
+          || !attempt.equals(approval.boundAttemptId) || approval.transitionReceipt == null) conflict();
     }
 
     private void restrictAfterCleanup(AccountLifecycleAttempt current) {
