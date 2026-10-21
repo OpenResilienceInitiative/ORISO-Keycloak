@@ -9,6 +9,7 @@ import org.keycloak.services.resource.*;
 public final class AccountLifecycleFactory implements RealmResourceProviderFactory {
   private LifecycleAuthorization authorization;
   private Map<String, Set<String>> groups;
+  private GeneralPolicy humanPolicy;
 
   public void init(Config.Scope scope) {
     String enabled = System.getenv("ORISO_ACCOUNT_LIFECYCLE_ENABLED");
@@ -57,6 +58,8 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
             });
     if (groups.isEmpty()) throw new IllegalStateException("Missing ordinary lifecycle mappings");
     authorization = new LifecycleAuthorization(realm, creator, admin, key, encoded);
+    String humanConfig = System.getenv("ORISO_ACCOUNT_MAINTENANCE_CONFIG");
+    if (humanConfig != null) humanPolicy = new GeneralPolicy(LifecycleJson.parse(humanConfig));
   }
 
   private static String required(String name) {
@@ -73,7 +76,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   }
 
   // Both finite providers share exactly the same trusted configuration parser.
-  RealmResourceProvider createMaintenance(KeycloakSession session, GeneralPolicy humanPolicy) {
+  RealmResourceProvider createMaintenance(KeycloakSession session) {
     return authorization == null
         ? null
         : new AccountMaintenanceResource(session, authorization, groups, humanPolicy);
@@ -83,7 +86,26 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
     return "oriso-account-lifecycle";
   }
 
-  public void postInit(KeycloakSessionFactory factory) {}
+  public void postInit(KeycloakSessionFactory factory) {
+    if (humanPolicy == null) return;
+    factory.register(event -> {
+      if (event instanceof org.keycloak.models.utils.PostMigrationEvent)
+        org.keycloak.models.utils.KeycloakModelUtils.runJobInTransaction(factory, session -> {
+          var realm = session.realms().getRealm(humanPolicy.nativePolicy.realmId);
+          if (realm == null) throw new IllegalStateException("Ordinary human native realm is missing");
+          session.getContext().setRealm(realm);
+          humanPolicy.validateInstallation(session);
+        });
+    });
+  }
+
+  jakarta.ws.rs.core.Response readOtpSelf(KeycloakSession session, String username,
+      String targetHeader, String proofHeader, String humanHeader,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> read) {
+    if (authorization == null || humanPolicy == null) LifecycleJson.deny();
+    return ScopedOtpAccess.checkedSelfRead(session, authorization, groups, humanPolicy,
+        username, targetHeader, proofHeader, humanHeader, read);
+  }
 
   public void close() {}
 }

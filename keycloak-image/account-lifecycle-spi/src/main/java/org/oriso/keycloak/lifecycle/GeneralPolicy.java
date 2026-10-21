@@ -46,6 +46,16 @@ final class GeneralPolicy {
 
   OrdinaryHuman requireSelf(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
     if (!Set.of("read", "locale").contains(request.command())) deny();
+    return requireSelectedSelf(session, request, rawHumanBearer, "account." + request.command());
+  }
+
+  OrdinaryHuman requireSelfOtpRead(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
+    if (!"read".equals(request.command())) deny();
+    return requireSelectedSelf(session, request, rawHumanBearer, "otp.read");
+  }
+
+  private OrdinaryHuman requireSelectedSelf(KeycloakSession session, MaintenanceRequest request,
+      String rawHumanBearer, String selectedOperation) {
     var origin = request.target().path("origin");
     if (!"SELF".equals(origin.path("kind").asText()) || !origin.path("humanAuthority").isNull()) deny();
     // Caller has acquired the realm and target-provenance locks before these fresh human locks.
@@ -70,7 +80,7 @@ final class GeneralPolicy {
           || parent.parentId() != null || !human.currentGroups().keySet().equals(Set.of(profile.groupId, profile.parentId))
           || !profile.realmRoles.equals(human.realmRoles()) || !profile.clientRoles.equals(human.clientRoles())
           || human.tenantId() == null && !profile.allowUnassignedTenant
-          || !profile.selfOperations.contains("account." + request.command())) deny();
+          || !profile.selfOperations.contains(selectedOperation)) deny();
       if (matched != null) deny();
       matched = profile;
     }

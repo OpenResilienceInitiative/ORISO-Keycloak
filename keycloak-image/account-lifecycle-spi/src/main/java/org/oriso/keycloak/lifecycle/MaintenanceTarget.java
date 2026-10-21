@@ -30,6 +30,16 @@ final class MaintenanceTarget {
   }
 
   JsonNode read(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer) {
+    return read(request, policy, rawHumanBearer, false);
+  }
+
+  JsonNode readOtpSelf(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer) {
+    if (policy == null || !"SELF".equals(request.target().path("origin").path("kind").asText())) deny();
+    return read(request, policy, rawHumanBearer, true);
+  }
+
+  private JsonNode read(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer,
+      boolean otpRead) {
     // Domain deletion and independently native-verified ordinary self are separate authorities.
     var origin = request.target().path("origin");
     boolean humanSelf = "SELF".equals(origin.path("kind").asText());
@@ -63,7 +73,10 @@ final class MaintenanceTarget {
     if (!scope.path("tenantId").equals(request.target().path("tenantId"))) deny();
     var expectedRoles = mappings.get(scope.path("initialGroup").asText());
     if (expectedRoles == null) deny();
-    if (humanSelf) policy.requireSelf(session, request, rawHumanBearer);
+    if (humanSelf) {
+      if (otpRead) policy.requireSelfOtpRead(session, request, rawHumanBearer);
+      else policy.requireSelf(session, request, rawHumanBearer);
+    }
     var entity = em.find(UserEntity.class, request.accountId(), LockModeType.PESSIMISTIC_WRITE);
     if (entity == null) deny();
     em.refresh(entity);

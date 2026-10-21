@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import unittest
+import zipfile
 import xml.etree.ElementTree as ET
 
 from run_native import XmlResult
@@ -115,6 +116,12 @@ def native(report):
     if not all(path.is_file() for path in jars.values()):
         raise ValueError("Both actual compiled providers required")
     hashes = {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in jars.items()}
+    with zipfile.ZipFile(jars["LIFECYCLE_C_TEST_JAR"]) as lifecycle:
+        if "org/oriso/keycloak/lifecycle/ScopedOtpAccess.class" not in lifecycle.namelist():
+            raise ValueError("Actual installed shared scoped access class required")
+    with zipfile.ZipFile(jars["OTP_C_TEST_JAR"]) as otp:
+        if any(name.startswith("org/oriso/keycloak/lifecycle/") for name in otp.namelist()):
+            raise ValueError("Provided shared classes must not be bundled into OTP")
     before = sources()
     import test_otp_scoped
     spec = importlib.util.spec_from_file_location("test_scenario_c_otp_permissions", MODULES[1] / "tests/test_scenario_c_otp_permissions.py")
@@ -134,6 +141,11 @@ def native(report):
             index = next(i for i, item in enumerate(args) if item.startswith("quay.io/keycloak/keycloak@sha256:"))
             if "--memory" not in args:
                 args[index:index] = ["--memory", "1g", "--cpus", "2"]
+            # Legacy keeps default-off policy, but loads the same provided dependency pair.
+            lifecycle = str(jars["LIFECYCLE_C_TEST_JAR"].resolve())
+            if not any(item.startswith(lifecycle + ":") for item in args):
+                index = next(i for i, item in enumerate(args) if item.startswith("quay.io/keycloak/keycloak@sha256:"))
+                args[index:index] = ["-v", lifecycle + ":/opt/keycloak/providers/account-lifecycle-spi.jar:ro"]
         return original(args, *values, **options)
 
     class Outcome(XmlResult):

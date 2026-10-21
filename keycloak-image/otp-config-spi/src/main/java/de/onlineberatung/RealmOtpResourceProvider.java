@@ -66,6 +66,15 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("fetch-otp-setup-info/{username}")
   @Produces({MediaType.APPLICATION_JSON})
   public Response getOtpSetupInfo(@PathParam("username") final String username) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfRead(
+          session, username,
+          headers.getHeaderString("X-ORISO-Account-Target"),
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          target -> otpSetupInfo(new CredentialContext(target.session(), target.realm(), target.user())));
+    }
     verifyAuthentication();
 
     final RealmModel realm = this.session.getContext().getRealm();
@@ -78,9 +87,11 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
               .errorDescription(MISSING_USERNAME_ERROR_DESCRIPTION)).build();
     }
 
-    var otpInfoDTO = new OtpInfoDTO();
+    return otpSetupInfo(new CredentialContext(session, realm, user));
+  }
 
-    var credentialContext = new CredentialContext(session, realm, user);
+  private Response otpSetupInfo(CredentialContext credentialContext) {
+    var otpInfoDTO = new OtpInfoDTO();
     if (appCredentialService.is2FAConfigured(credentialContext)) {
       otpInfoDTO.setOtpSetup(true);
       otpInfoDTO.setOtpType(OtpType.APP);
