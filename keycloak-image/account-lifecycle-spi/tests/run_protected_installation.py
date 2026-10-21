@@ -12,6 +12,8 @@ import subprocess
 import time
 import unittest
 import uuid
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from lifecycle_fixture import ACTORS, SUBJECTS, IMAGE, call
 from protected_resources import evidence as resource_evidence
@@ -78,37 +80,80 @@ class Installation(protected.ProtectedInvitations):
             helper.assertEqual(1, len(native))
             foreign = native[0]["id"]
             helper.assertEqual(foreign, str(uuid.UUID(foreign)))
-            cls.phase = "inventory-foreign-application-absence"
-            helper.assertEqual(
-                404,
-                call(
-                    cls.base,
-                    "GET",
-                    "/admin/realms/" + protected.REALM + "/users/" + foreign,
-                    token=cls.installer,
-                )[0],
+            helper.assertEqual("synthetic-installer", native[0]["username"])
+            status, native = call(
+                cls.base,
+                "GET",
+                "/admin/realms/master/users/" + foreign,
+                token=cls.installer,
             )
+            helper.assertEqual(200, status)
+            helper.assertEqual(foreign, native["id"])
+            helper.assertEqual("synthetic-installer", native["username"])
+            helper.assertIsNone(native.get("federationLink"))
+            helper.assertIsNone(native.get("serviceAccountClientId"))
+            status, storage = call(
+                cls.base,
+                "GET",
+                "/admin/realms/master/components?type=org.keycloak.storage.UserStorageProvider",
+                token=cls.installer,
+            )
+            helper.assertEqual(200, status)
+            helper.assertEqual([], storage)
+            cls.installation_observation[
+                "masterNativeLocalUserExactIdAndUsernameVerified"
+            ] = True
+            cls.phase = "inventory-foreign-application-observation"
+            # Native UsersResource deliberately returns403 for some missing-ID
+            # queries. Never interpret403 as absence. Master native200 and the
+            # pinned JPA global USER_ENTITY.ID primary key prove realm distinction.
+            cls.installation_observation["foreignApplicationLookupStatus"] = call(
+                cls.base,
+                "GET",
+                "/admin/realms/" + protected.REALM + "/users/" + foreign,
+                token=cls.installer,
+            )[0]
             cls.phase = "inventory-deleted-deny-create"
-            helper.admin(
-                "POST", "/users", {"username": "deleted-oneoff-deny", "enabled": False}
-            )
-            cls.phase = "inventory-deleted-deny-native-lookup"
-            deleted = helper.admin(
-                "GET", "/users?username=deleted-oneoff-deny&exact=true"
-            )
-            helper.assertEqual(1, len(deleted))
-            deleted = deleted[0]["id"]
+            with urlopen(
+                Request(
+                    cls.base + "/admin/realms/" + protected.REALM + "/users",
+                    method="POST",
+                    data=json.dumps(
+                        {"username": "deleted-oneoff-deny", "enabled": False}
+                    ).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + cls.installer,
+                    },
+                ),
+                timeout=30,
+            ) as created:
+                helper.assertEqual(201, created.status)
+                location = created.headers.get("Location")
+                helper.assertIsNotNone(location)
+                deleted = urlparse(location).path.rsplit("/", 1)[-1]
+                created.read()
             helper.assertEqual(deleted, str(uuid.UUID(deleted)))
+            cls.phase = "inventory-deleted-deny-native-get"
+            native = helper.admin("GET", "/users/" + deleted)
+            helper.assertEqual(deleted, native["id"])
+            helper.assertEqual("deleted-oneoff-deny", native["username"])
+            helper.assertFalse(native["enabled"])
+            helper.assertIsNone(native.get("federationLink"))
             cls.phase = "inventory-deleted-deny-native-delete"
-            helper.admin("DELETE", "/users/" + deleted)
             helper.assertEqual(
-                404,
+                204,
                 call(
                     cls.base,
-                    "GET",
+                    "DELETE",
                     "/admin/realms/" + protected.REALM + "/users/" + deleted,
                     token=cls.installer,
                 )[0],
+            )
+            cls.phase = "inventory-deleted-deny-fresh-exact-query"
+            helper.assertEqual(
+                [],
+                helper.admin("GET", "/users?username=deleted-oneoff-deny&exact=true"),
             )
             configuration["technicalSubjects"] = sorted(
                 configuration["technicalSubjects"] + [foreign, deleted]

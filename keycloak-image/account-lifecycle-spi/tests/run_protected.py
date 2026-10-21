@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 6:
+        if discovered != 7:
             raise AssertionError(
-                "Exactly six protected HTTP approval/authority/cancel/status/proof/tombstone cases required"
+                "Exactly seven protected HTTP approval/authority/cancel/status/proof/tombstone/expiry cases required"
             )
 
         def deadline(signum, frame):
@@ -342,6 +342,7 @@ def main():
                 "absentCancelObservation": getattr(
                     fixture, "absent_cancel_observation", None
                 ),
+                "expiryObservation": getattr(fixture, "expiry_observation", None),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -400,8 +401,44 @@ def main():
             and valid_controls
             and valid_proof_controls
             and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
+            and (summary["expiryObservation"] or {}).get("actualStatus") == 200
+            and summary["expiryObservation"].get("actualState") == "AUTHORIZED"
+            and summary["expiryObservation"].get("expectedState") == "EXPIRED"
+            and all(
+                summary["expiryObservation"].get(key) is True
+                for key in (
+                    "sourceLiveApprovalCreated",
+                    "sourceLiveStatusObserved",
+                    "nativeSetupValidated",
+                    "receiverDeadlineElapsed",
+                    "noAccountCreated",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_expired_authorization_materializes_one_immutable_terminal_receipt"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = "GENUINE_APPROVAL_EXPIRY_COUNTERFACTUAL_RED"
         elif (
             valid_preconditions
             and valid_controls

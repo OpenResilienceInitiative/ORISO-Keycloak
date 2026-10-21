@@ -46,6 +46,7 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.status_observation = None
         cls.proof_controls = []
         cls.absent_cancel_observation = None
+        cls.expiry_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -1058,6 +1059,63 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cancel["approvalRequestDigest"] = "0" * 64
         self.assertEqual(
             409, self.protected_machine_request("cancel", approval, cancel)[0]
+        )
+        self.assertEqual(before, self.admin("GET", "/users/count"))
+
+    def test_expired_authorization_materializes_one_immutable_terminal_receipt(self):
+        approval, request = str(uuid.uuid4()), {"scope": self.scope()}
+        deadline = int(time.time()) + 6
+        request["scope"]["validUntil"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(deadline)
+        )
+        bearer = self.human(record=False)
+        before = self.admin("GET", "/users/count")
+        status, approved = call(
+            self.base, "PUT", self.endpoint(approval), request, bearer
+        )
+        self.assertEqual(201, status)
+        query = {
+            "scopeDigest": approved["scopeDigest"],
+            "workflowId": request["scope"]["workflowId"],
+            "inviteId": request["scope"]["inviteId"],
+            "authorizationRevision": 1,
+            "attemptId": None,
+            "approvalRequestDigest": approved["approvalRequestDigest"],
+        }
+        status, current = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual("AUTHORIZED", current["state"])
+        while time.time() <= deadline + 1:
+            require_active("waiting-for-receiver-approval-expiry")
+            time.sleep(0.2)
+        status, expired = self.protected_machine_request("status", approval, query)
+        after = self.admin("GET", "/users/count")
+        type(self).expiry_observation = {
+            "actualStatus": status,
+            "actualState": expired.get("state"),
+            "expectedState": "EXPIRED",
+            "sourceLiveApprovalCreated": True,
+            "sourceLiveStatusObserved": True,
+            "nativeSetupValidated": True,
+            "receiverDeadlineElapsed": time.time() > deadline,
+            "noAccountCreated": before == after,
+        }
+        self.assertEqual(before, after)
+        self.assertEqual(200, status)
+        self.assertEqual("EXPIRED", expired["state"])
+        self.assertEqual(approved["approvalReceipt"], expired["approvalReceipt"])
+        self.assertIsNotNone(expired["transitionReceipt"])
+        status, retry = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual(expired, retry)
+        self.assertEqual(
+            409, call(self.base, "PUT", self.endpoint(approval), request, bearer)[0]
+        )
+        request["scope"]["validUntil"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 300)
+        )
+        self.assertEqual(
+            409, call(self.base, "PUT", self.endpoint(approval), request, bearer)[0]
         )
         self.assertEqual(before, self.admin("GET", "/users/count"))
 
