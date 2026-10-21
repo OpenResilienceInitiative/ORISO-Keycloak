@@ -437,8 +437,9 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
           newRow(
               body.path("identity"),
               realm,
-              approvedGroup(realm, body.path("identity").path("scope")),
-              attempt);
+              policy == null ? approvedGroup(realm, body.path("identity").path("scope")) : null,
+              attempt,
+              policy);
       row.state = "ABANDONED";
     } else {
       if (expected != row.generation || !Set.of("OPEN", "RECOVERY_CLAIMED").contains(row.state))
@@ -455,17 +456,14 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     if ("ABANDONED".equals(row.state))
       row.terminalReceipt = auth.receipt("terminal-receipt", receipt(row, "abandon", digest));
     if (policy != null) {
-      if (row.recoveryReceipt.getBytes(StandardCharsets.UTF_8).length > 16000) bad();
+      if (row.recoveryReceipt.getBytes(StandardCharsets.UTF_8).length > 16000
+          || row.terminalReceipt != null
+              && row.terminalReceipt.getBytes(StandardCharsets.UTF_8).length > 16000) bad();
       policy.after("recover", row, em);
     }
     if (absent) em.persist(row);
     em.flush();
     return result(row, 200);
-  }
-
-  private AccountLifecycleAttempt newRow(
-      JsonNode identity, RealmModel realm, GroupModel group, String attempt) {
-    return newRow(identity, realm, group, attempt, null);
   }
 
   private AccountLifecycleAttempt newRow(

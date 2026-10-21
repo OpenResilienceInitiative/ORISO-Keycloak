@@ -97,7 +97,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var scope = parse(row.request).path("scope");
     if ("ACCOUNT_CREATE".equals(machine.actor()) && (!machine.clientId().equals(scope.path("creatorClient").asText())
         || !machine.subject().equals(scope.path("creatorSubject").asText()))) deny();
-    if (!create && currentAttempt == null) deny();
+    if (!create && !recover && currentAttempt == null) deny();
     var acceptance = create || recover ? body.path("acceptanceClaim")
         : parse(currentAttempt.scope).path("approvalBinding").path("acceptanceClaim");
     fields(acceptance, "workflowId", "inviteId", "authorizationRevision", "claimId", "journalVersion");
@@ -110,7 +110,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       number(body, "expectedGeneration", false);
       String recoveryId = uuid(text(body, "recoveryId", 36, false));
       // A saved recovery ID is not a claim on a later server cancellation fence.
-      if (recoveryId.equals(currentAttempt.recoveryId)
+      if (currentAttempt != null && recoveryId.equals(currentAttempt.recoveryId)
           && !recoveryId.equals(currentAttempt.executionId)) conflict();
     } else execution(body.path("execution"));
     if (create && number(body.path("execution"), "generation", false) != 0) conflict();
@@ -124,7 +124,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       String recipient = scope.path("recipient").asText();
       if (!recipient.equals(text(account, "email", 255, false))
           || !encodedUsername(recipient).equals(text(account, "username", 255, false))) deny();
-    } else if (!LifecycleAuthorization.equal(fingerprint, currentAttempt.creationFingerprint)) deny();
+    } else if (currentAttempt != null
+        && !LifecycleAuthorization.equal(fingerprint, currentAttempt.creationFingerprint)) deny();
     var enriched = parse(row.scope);
     var frozenProfile = enriched.path("profile");
     var internalScope = JSON.createObjectNode();
@@ -200,7 +201,12 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
 
     public void before(String command, AccountLifecycleAttempt current, EntityManager em) {
       if ("recover".equals(command)) {
-        if (current == null || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+        if (current == null) {
+          if (!Set.of("AUTHORIZED", "CANCELLED", "EXPIRED").contains(approval.state)
+              || approval.boundAttemptId != null) conflict();
+          return;
+        }
+        if (!Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
             || !attempt.equals(approval.boundAttemptId)) conflict();
         return;
       }
@@ -212,15 +218,38 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     }
 
     public void after(String command, AccountLifecycleAttempt current, EntityManager em) {
-      if (current == null || current.accountId == null || !attempt.equals(current.attemptId)
+      if (current == null || !attempt.equals(current.attemptId)
           || !binding.rowId().equals(current.id) || !binding.ownerClient().equals(current.ownerClient)
           || !binding.ownerSubject().equals(current.ownerSubject)) conflict();
       if ("recover".equals(command)) {
-        if (!"RECOVERY_CLAIMED".equals(current.state)
+        if ("ABANDONED".equals(current.state)) {
+          if (current.accountId != null || current.creationProof != null
+              || current.recoveryReceipt == null || current.terminalReceipt == null
+              || !Set.of("AUTHORIZED", "CANCELLED", "EXPIRED").contains(approval.state)
+              || approval.boundAttemptId != null) conflict();
+          if ("AUTHORIZED".equals(approval.state)) {
+            if (approval.transitionReceipt != null) conflict();
+            var cleanup = JSON.createObjectNode();
+            cleanup.put("operation", "protected-invitation.cleanup"); cleanup.put("state", "CANCELLED");
+            cleanup.put("approvalId", approval.approvalId); cleanup.put("scopeDigest", approval.scopeDigest);
+            cleanup.put("boundAttemptId", attempt); cleanup.putNull("accountId");
+            cleanup.put("terminalReceipt", current.terminalReceipt);
+            cleanup.put("receipt", crypto.receipt("protected-approval-cleanup/v1", cleanup.deepCopy()));
+            String immutable = canonical(cleanup);
+            if (immutable.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
+            approval.state = "CANCELLED"; approval.transitionReceipt = immutable;
+          } else if (approval.transitionReceipt == null) conflict();
+          approval.boundAttemptId = attempt;
+          // The common engine persists the absent attempt and flushes both
+          // records together after this callback; no user/group lookup or effect.
+          return;
+        }
+        if (current.accountId == null || !"RECOVERY_CLAIMED".equals(current.state)
             || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
             || !attempt.equals(approval.boundAttemptId)) conflict();
         return;
       }
+      if (current.accountId == null) conflict();
       if (!Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if ("create".equals(command)) {
         if (!"OPEN".equals(current.state) || !"AUTHORIZED".equals(approval.state)
