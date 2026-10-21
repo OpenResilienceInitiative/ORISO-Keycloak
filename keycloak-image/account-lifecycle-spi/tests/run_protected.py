@@ -55,6 +55,7 @@ class SanitizedResult(unittest.TestResult):
             "protected_creation_cases.py",
             "protected_terminal_cases.py",
             "protected_cleanup_cases.py",
+            "protected_fence_cases.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }
@@ -323,9 +324,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 14:
+        if discovered != 15:
             raise AssertionError(
-                "Exactly fourteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate cases required"
+                "Exactly fifteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence cases required"
             )
 
         def deadline(signum, frame):
@@ -390,6 +391,9 @@ def main():
                 ),
                 "abandonedCompensateObservation": getattr(
                     fixture, "abandoned_compensate_observation", None
+                ),
+                "boundCancelObservation": getattr(
+                    fixture, "bound_cancel_observation", None
                 ),
             }
         )
@@ -466,8 +470,47 @@ def main():
             and all(v["status"] == 403 for v in summary["compensateProofControls"])
             and (summary["abandonedCompensateObservation"] or {}).get("actualStatus")
             == 200
+            and (summary["boundCancelObservation"] or {}).get("actualStatus") == 200
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["boundCancelObservation"] or {}).get("actualStatus") == 409
+            and summary["boundCancelObservation"].get("expectedStatus") == 200
+            and all(
+                summary["boundCancelObservation"].get(key) is True
+                for key in (
+                    "realHumanApprovalAndNativeCreationValidated",
+                    "originalNativeCreationMACAndAllFieldsValidated",
+                    "trueBoundApprovalOriginalCreatorAndScopeValidated",
+                    "nativeSetupSubjectRolesAndAudiencesMatched",
+                    "originalGenerationZeroAndExecutionValidated",
+                    "accountCountUnchanged",
+                    "nativeAccountUnchanged",
+                    "nativeMembershipUnchanged",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_bound_cancellation_fences_once_and_requires_a_new_cleanup_claim"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = (
+                "GENUINE_PROTECTED_BOUND_CANCEL_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls
