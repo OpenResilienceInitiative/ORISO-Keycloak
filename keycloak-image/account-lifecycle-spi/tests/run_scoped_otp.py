@@ -13,6 +13,7 @@ import platform
 import re
 import subprocess
 import sys
+import traceback
 import unittest
 import zipfile
 import xml.etree.ElementTree as ET
@@ -102,6 +103,17 @@ def units(report):
     return 0 if accepted else 1
 
 
+def method_outcomes(result):
+    return {
+        "failures": sum(x["status"] == "failure" for x in result.cases.values()),
+        "errors": sum(x["status"] == "error" for x in result.cases.values()),
+        "skipped": sum(x["status"] == "skipped" for x in result.cases.values()),
+        "failure_observations": len(result.failures),
+        "error_observations": len(result.errors),
+        "skipped_observations": len(result.skipped),
+    }
+
+
 def missing(report, status):
     save(report, {"status": status, "executed": 0, "floor": 11, "failures": 0, "errors": 1, "skipped": 0, "accepted": False, "genuine_scoped_read_red": False, "genuine_scoped_app_setup_red": False, "source_manifest": sources()})
     root = ET.Element("testsuite", name="scoped-otp", tests="1", failures="0", errors="1", skipped="0")
@@ -155,10 +167,24 @@ def native(report):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.assertion_cases = set()
+            self.failure_locations = []
+        def location(self, case, error):
+            frames = []
+            for frame in traceback.extract_tb(error[2]):
+                path = Path(frame.filename).resolve()
+                if path.is_relative_to(ROOT):
+                    frames.append({"path": str(path.relative_to(ROOT)), "function": frame.name,
+                                   "line": frame.lineno})
+            self.failure_locations.append({"case": case.id(), "exception_type": error[0].__name__,
+                                           "frames": frames})
         def addFailure(self, case, error):
+            self.location(case, error)
             if issubclass(error[0], AssertionError):
                 self.assertion_cases.add(case.id())
             super().addFailure(case, error)
+        def addError(self, case, error):
+            self.location(case, error)
+            super().addError(case, error)
 
     subprocess.run = bounded
     try:
@@ -170,18 +196,19 @@ def native(report):
     report.parent.mkdir(parents=True, exist_ok=True)
     result.write_xml(report.with_suffix(".xml"), "scoped-otp")
     failures = {case.id() for case, _ in result.failures}
+    outcome_counts = method_outcomes(result)
     phases = test_otp_scoped.ScopedOtpRead.phase_receipts
     preconditions = any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "exact_three_audiences", "stock_native_denied", "actual_self_human", "committed_ordinary_target")) for x in phases)
-    red = bool(preconditions and failures == {POSITIVE} and POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
+    red = bool(preconditions and failures == {POSITIVE} and POSITIVE in result.assertion_cases and len(result.failures) == 1 and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
     app_preconditions = any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "stock_native_denied", "actual_self_human", "committed_ordinary_target", "scoped_setup_read", "frozen_current_state", "reviewed_app_selector")) for x in phases)
-    app_red = bool(app_preconditions and failures == {APP_POSITIVE} and APP_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
+    app_red = bool(app_preconditions and failures == {APP_POSITIVE} and APP_POSITIVE in result.assertion_cases and len(result.failures) == 1 and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
     delete_preconditions = any(x.get("case") == DELETE_POSITIVE and x.get("phase") == "scoped-otp-delete-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "stock_native_denied", "actual_self_human", "committed_ordinary_target", "actual_prior_scoped_enrollment", "frozen_current_state")) for x in phases)
-    delete_red = bool(delete_preconditions and failures == {DELETE_POSITIVE} and DELETE_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == DELETE_POSITIVE and x.get("phase") == "scoped-otp-delete-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
+    delete_red = bool(delete_preconditions and failures == {DELETE_POSITIVE} and DELETE_POSITIVE in result.assertion_cases and len(result.failures) == 1 and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == DELETE_POSITIVE and x.get("phase") == "scoped-otp-delete-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
     email_finish_preconditions = any(x.get("case") == EMAIL_FINISH_POSITIVE and x.get("phase") == "scoped-otp-email-finish-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "stock_native_denied", "actual_self_human", "committed_ordinary_target", "installer_owned_pending_fixture", "exact_one_inactive_native_credential", "frozen_current_state", "reviewed_email_finish_selector")) for x in phases)
-    email_finish_red = bool(email_finish_preconditions and failures == {EMAIL_FINISH_POSITIVE} and EMAIL_FINISH_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == EMAIL_FINISH_POSITIVE and x.get("phase") == "scoped-otp-email-finish-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
+    email_finish_red = bool(email_finish_preconditions and failures == {EMAIL_FINISH_POSITIVE} and EMAIL_FINISH_POSITIVE in result.assertion_cases and len(result.failures) == 1 and not result.errors and not result.skipped and result.testsRun == 11 and any(x.get("case") == EMAIL_FINISH_POSITIVE and x.get("phase") == "scoped-otp-email-finish-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
     stable = before == sources() and hashes == {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in jars.items()}
     accepted = bool(stable and result.wasSuccessful() and result.testsRun == 11 and not result.skipped)
-    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 11, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "genuine_scoped_app_setup_red": app_red and stable, "genuine_scoped_delete_red": delete_red and stable, "genuine_scoped_email_finish_red": email_finish_red and stable, "accepted": accepted, "status": "GREEN" if accepted else "SCOPED_READ403_RED" if red and stable else "SCOPED_APP_SETUP403_RED" if app_red and stable else "SCOPED_DELETE403_RED" if delete_red and stable else "SCOPED_EMAIL_FINISH403_RED" if email_finish_red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Original scopedGET5+app3+firstdelete1+emailfinish1+defaultofflegacy1; other scoped routes/effects/User/SMTP/image/fullC remain open"})
+    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 11, **outcome_counts, "failure_locations": result.failure_locations, "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "genuine_scoped_app_setup_red": app_red and stable, "genuine_scoped_delete_red": delete_red and stable, "genuine_scoped_email_finish_red": email_finish_red and stable, "accepted": accepted, "status": "GREEN" if accepted else "SCOPED_READ403_RED" if red and stable else "SCOPED_APP_SETUP403_RED" if app_red and stable else "SCOPED_DELETE403_RED" if delete_red and stable else "SCOPED_EMAIL_FINISH403_RED" if email_finish_red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Original scopedGET5+app3+firstdelete1+emailfinish1+defaultofflegacy1; other scoped routes/effects/User/SMTP/image/fullC remain open"})
     print(json.dumps({"executed": result.testsRun, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "accepted": accepted, "genuine_scoped_read_red": red and stable}))
     return 0 if accepted else 1
 

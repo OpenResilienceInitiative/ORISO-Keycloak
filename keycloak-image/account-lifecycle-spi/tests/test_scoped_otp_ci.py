@@ -50,6 +50,18 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
             xml = path.with_suffix(".xml").read_text()
             return code, result, xml
 
+    def test_method_failures_and_cleanup_observations_are_both_preserved(self):
+        from types import SimpleNamespace
+        proof = importlib.util.module_from_spec(SPEC)
+        SPEC.loader.exec_module(proof)
+        actual = SimpleNamespace(cases={"first": {"status": "failure"}, "second": {"status": "failure"},
+                                       "third": {"status": "success"}},
+                                 failures=[1, 2, 3], errors=[], skipped=[])
+        result = proof.method_outcomes(actual)
+        self.assertEqual(2, result["failures"])
+        self.assertEqual(3, result["failure_observations"])
+        self.assertEqual(0, result["errors"])
+
     def test_actual_source_suite_passes(self):
         code, result, _ = self.gate()
         self.assertEqual(0, code)

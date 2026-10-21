@@ -329,11 +329,20 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
                    "secretData": canonical({"code": code, "expiry": now + 600000}).decode()}
         updated = dict(before)
         updated["credentials"] = [pending]
-        self.admin("PUT", "/users/" + self.account_id, updated)
+        status, _ = call(self.base, "PUT", "/admin/realms/" + REALM + "/users/" + self.account_id,
+                         updated, token=self.installer)
+        self.phase("scoped-otp-email-fixture-seed-write", status=status)
+        self.assertEqual(204, status)
+        self.addCleanup(self.remove_exact_mail_seed, credential_id)
         after = self.admin("GET", "/users/" + self.account_id)
+        self.phase("scoped-otp-email-fixture-profile-read", completed=True)
         for field in ["id", "username", "email", "firstName", "lastName", "enabled", "attributes", "requiredActions"]:
             self.assertEqual(before.get(field), after.get(field))
-        credentials = self.admin("GET", "/users/" + self.account_id + "/credentials")
+        self.phase("scoped-otp-email-fixture-profile-preserved", completed=True)
+        status, credentials = call(self.base, "GET", "/admin/realms/" + REALM + "/users/"
+                                   + self.account_id + "/credentials", token=self.installer)
+        self.phase("scoped-otp-email-fixture-credentials-read", status=status)
+        self.assertEqual(200, status)
         mail = [c for c in credentials if c["type"] == "MAIL_OTP_CM"]
         self.assertEqual(1, len(mail))
         self.assertEqual(credential_id, mail[0]["id"])
@@ -359,6 +368,12 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual(credential_id, mail[0]["id"])
         self.assertTrue(json.loads(mail[0]["credentialData"])["active"])
         self.phase("scoped-otp-email-finish-effect", exact_native_credential_activated=True)
+
+    def remove_exact_mail_seed(self, credential_id):
+        status, _ = call(self.base, "DELETE", "/admin/realms/" + REALM + "/users/"
+                         + self.account_id + "/credentials/" + credential_id, token=self.installer)
+        self.phase("scoped-otp-email-fixture-exact-cleanup", status=status)
+        self.assertIn(status, (204, 404))
 
     def test_create_actor_cannot_read_setup(self):
         self.assertEqual(403, self.scoped_read(self.human(), self.target(), 403,
