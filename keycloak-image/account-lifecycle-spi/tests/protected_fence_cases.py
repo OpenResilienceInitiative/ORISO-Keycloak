@@ -1,7 +1,11 @@
 """Public restrictive transitions; original native ownership never changes."""
 
+import base64
+import hashlib
+import hmac
+import json
 import uuid
-from lifecycle_fixture import ACTORS, SUBJECTS, REALM, canonical, mac
+from lifecycle_fixture import ACTORS, SUBJECTS, REALM, CONTEXT_KEY, canonical, mac
 
 
 class ProtectedFenceCases:
@@ -15,10 +19,26 @@ class ProtectedFenceCases:
         self.assertEqual(create["execution"], opened["execution"])
         account = opened["accountId"]
         self.assertEqual(account, str(uuid.UUID(account)))
-        creation = self.verified_receipt(
-            opened["creationProof"],
-            "creation-proof",
-            16384,
+        self.assertLessEqual(len(opened["creationProof"].encode()), 16384)
+        self.assertEqual(1, opened["creationProof"].count("."))
+        encoded, signature = opened["creationProof"].split(".")
+        expected_signature = (
+            base64.urlsafe_b64encode(
+                hmac.new(
+                    CONTEXT_KEY, ("creation-proof\n" + encoded).encode(), hashlib.sha256
+                ).digest()
+            )
+            .decode()
+            .rstrip("=")
+        )
+        self.assertTrue(hmac.compare_digest(expected_signature, signature))
+        creation = json.loads(
+            base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        )
+        self.assertEqual(
+            encoded, base64.urlsafe_b64encode(canonical(creation)).decode().rstrip("=")
+        )
+        self.assertEqual(
             {
                 "v",
                 "realmName",
@@ -32,6 +52,7 @@ class ProtectedFenceCases:
                 "initialRoleFingerprint",
                 "creationFingerprint",
             },
+            set(creation),
         )
         for field, value in {
             "v": 1,
