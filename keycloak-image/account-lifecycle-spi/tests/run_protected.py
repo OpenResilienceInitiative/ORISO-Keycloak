@@ -299,9 +299,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 4:
+        if discovered != 6:
             raise AssertionError(
-                "Exactly four protected HTTP approval/authority/cancel/status cases required"
+                "Exactly six protected HTTP approval/authority/cancel/status/proof/tombstone cases required"
             )
 
         def deadline(signum, frame):
@@ -338,6 +338,10 @@ def main():
                 "authorizationControls": getattr(fixture, "authorization_controls", []),
                 "cancelObservation": getattr(fixture, "cancel_observation", None),
                 "setupStatusObservation": getattr(fixture, "status_observation", None),
+                "protectedProofControls": getattr(fixture, "proof_controls", []),
+                "absentCancelObservation": getattr(
+                    fixture, "absent_cancel_observation", None
+                ),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -381,6 +385,11 @@ def main():
             and len(summary["nativeImageIds"]) == 2
             and summary["nativeImageIds"][0] == summary["nativeImageIds"][1]
         )
+        valid_proof_controls = (
+            len(summary["protectedProofControls"]) == 14
+            and len({v["control"] for v in summary["protectedProofControls"]}) == 14
+            and all(v["status"] == 403 for v in summary["protectedProofControls"])
+        )
         if (
             result.wasSuccessful()
             and result.testsRun == discovered
@@ -389,8 +398,45 @@ def main():
             and observation.get("actualStatus") == 201
             and observation.get("noAccountCreated") is True
             and valid_controls
+            and valid_proof_controls
+            and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and result.testsRun == discovered
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and (summary["setupStatusObservation"] or {}).get("actualStatus") == 200
+            and (summary["absentCancelObservation"] or {}).get("actualStatus")
+            in (400, 403, 404, 405)
+            and summary["absentCancelObservation"].get("expectedStatus") == 200
+            and all(
+                summary["absentCancelObservation"].get(key) is True
+                for key in (
+                    "nativeSetupCanonicalAudiencesMatched",
+                    "originalRequestDigestPredispatch",
+                    "nativeHumanValidatedForOriginalIdentity",
+                    "noPriorApproveDispatched",
+                    "noAccountCreated",
+                )
+            )
+            and all(
+                value["status"]
+                == (
+                    "failure"
+                    if key.endswith(
+                        ".test_setup_absent_cancel_tombstone_blocks_delayed_human_approval"
+                    )
+                    else "success"
+                )
+                for key, value in summary["cases"].items()
+            )
+        ):
+            summary["classification"] = "GENUINE_SETUP_ABSENT_CANCEL_COUNTERFACTUAL_RED"
         elif (
             valid_preconditions
             and valid_controls

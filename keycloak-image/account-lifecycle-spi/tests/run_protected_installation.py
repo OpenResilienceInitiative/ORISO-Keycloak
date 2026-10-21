@@ -2,7 +2,6 @@
 """Actual native installation boundary; fixture errors never count as behavior RED."""
 
 import argparse
-import base64
 import contextlib
 import io
 import json
@@ -62,19 +61,16 @@ class Installation(protected.ProtectedInvitations):
         if cls.case == "extra-denies-prepared-five":
             # Actual master-realm installer remains a deny-only identity even
             # though it never existed as an application realm user.
-            encoded = cls.installer.split(".")[1]
-            foreign = json.loads(
-                base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-            )["sub"]
-            helper.assertEqual(foreign, str(uuid.UUID(foreign)))
             status, native = call(
                 cls.base,
                 "GET",
-                "/admin/realms/master/users/" + foreign,
+                "/admin/realms/master/users?username=synthetic-installer&exact=true",
                 token=cls.installer,
             )
             helper.assertEqual(200, status)
-            helper.assertEqual(foreign, native["id"])
+            helper.assertEqual(1, len(native))
+            foreign = native[0]["id"]
+            helper.assertEqual(foreign, str(uuid.UUID(foreign)))
             helper.assertEqual(
                 404,
                 call(
@@ -112,6 +108,13 @@ class Installation(protected.ProtectedInvitations):
                 helper.admin("PUT", "/clients/" + cls.client_ids[actor], client)
                 helper.assertFalse(
                     helper.admin("GET", "/clients/" + cls.client_ids[actor])["enabled"]
+                )
+                helper.assertEqual(
+                    SUBJECTS[actor],
+                    helper.admin(
+                        "GET",
+                        "/clients/" + cls.client_ids[actor] + "/service-account-user",
+                    )["id"],
                 )
             cls.installation_observation.update(
                 {

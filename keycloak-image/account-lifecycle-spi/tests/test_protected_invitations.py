@@ -44,6 +44,8 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         cls.authorization_controls = []
         cls.cancel_observation = None
         cls.status_observation = None
+        cls.proof_controls = []
+        cls.absent_cancel_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -611,7 +613,18 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             + suffix
         )
 
-    def protected_machine_request(self, operation, approval, body, actor="SETUP"):
+    def protected_machine_request(
+        self,
+        operation,
+        approval,
+        body,
+        actor="SETUP",
+        *,
+        claim_overrides=None,
+        proof_domain="protected-invitation-proof/v1",
+        payload_domain="protected-invitation-payload/v1",
+        proof_body=None,
+    ):
         bearer = self.token(actor)
         payload = bearer.split(".")[1]
         native = json.loads(
@@ -620,14 +633,35 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         self.assertEqual(ISSUER, native["iss"])
         audiences = native["aud"]
         self.assertEqual(
-            {"agencyservice", "consultingtypeservice", "tenantservice", "userservice"},
+            {
+                "SETUP": {
+                    "agencyservice",
+                    "consultingtypeservice",
+                    "tenantservice",
+                    "userservice",
+                },
+                "ACCOUNT_CREATE": {"oriso-account-lifecycle", "userservice"},
+                "ACCOUNT_ADMIN": {
+                    "oriso-account-lifecycle",
+                    "oriso-otp",
+                    "userservice",
+                },
+                "MAIL": {"oriso-account-lifecycle", "userservice"},
+                "RUNTIME": {"oriso-account-lifecycle", "userservice"},
+            }[actor],
             set([audiences] if isinstance(audiences, str) else audiences),
         )
         now = int(time.time())
         claims = {
             "iss": "userservice",
             "aud": "oriso-protected-invitations",
-            "purpose": "INVITE_RESERVATIONS",
+            "purpose": {
+                "SETUP": "INVITE_RESERVATIONS",
+                "ACCOUNT_CREATE": "ACCOUNT_PROVISIONING",
+                "ACCOUNT_ADMIN": "ACCOUNT_MAINTENANCE",
+                "MAIL": "SYSTEM_EMAIL_DELIVERY",
+                "RUNTIME": "RUNTIME_POLICY",
+            }[actor],
             "operation": "protected-invitation." + operation,
             "method": "POST",
             "actor": actor,
@@ -635,18 +669,21 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
             "target": "realm/" + self.realm_id + "/protected-invitation/" + approval,
             "taskClient": ACTORS[actor][0],
             "taskSubject": SUBJECTS[actor],
-            "payloadDigest": mac("protected-invitation-payload/v1", body),
+            "payloadDigest": mac(
+                payload_domain, body if proof_body is None else proof_body
+            ),
             "jti": str(uuid.uuid4()),
             "nonce": uuid.uuid4().hex,
             "iat": now,
             "exp": now + 60,
         }
+        claims.update(claim_overrides or {})
         encoded = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
         signature = (
             base64.urlsafe_b64encode(
                 hmac.new(
                     CONTEXT_KEY,
-                    ("protected-invitation-proof/v1\n" + encoded).encode(),
+                    (proof_domain + "\n" + encoded).encode(),
                     hashlib.sha256,
                 ).digest()
             )
@@ -891,6 +928,138 @@ class ProtectedInvitations(LifecycleFixture, unittest.TestCase):
         self.assertEqual(
             403, self.protected_machine_request("status", approval, query)[0]
         )
+
+    def test_setup_status_denies_wrong_proof_and_payload_domains_independently(self):
+        approval, request = str(uuid.uuid4()), {"scope": self.scope()}
+        status, reference = call(
+            self.base, "PUT", self.endpoint(approval), request, self.human(record=False)
+        )
+        self.assertEqual(201, status)
+        query = {
+            "scopeDigest": reference["scopeDigest"],
+            "workflowId": request["scope"]["workflowId"],
+            "inviteId": request["scope"]["inviteId"],
+            "authorizationRevision": 1,
+            "attemptId": None,
+            "approvalRequestDigest": reference["approvalRequestDigest"],
+        }
+        controls = {
+            "ordinary-proof-domain": {"proof_domain": "proof"},
+            "ordinary-payload-domain": {"payload_domain": "payload"},
+            "different-payload-body": {"proof_body": {"execution": {"generation": 0}}},
+            "wrong-purpose": {"claim_overrides": {"purpose": "ACCOUNT_PROVISIONING"}},
+            "ordinary-proof-audience": {
+                "claim_overrides": {"aud": "oriso-account-lifecycle"}
+            },
+            "foreign-target": {
+                "claim_overrides": {
+                    "target": "realm/"
+                    + self.realm_id
+                    + "/protected-invitation/"
+                    + str(uuid.uuid4())
+                }
+            },
+            "wrong-method": {"claim_overrides": {"method": "PUT"}},
+            "wrong-operation": {
+                "claim_overrides": {"operation": "protected-invitation.cancel"}
+            },
+            "wrong-native-subject": {
+                "claim_overrides": {"taskSubject": SUBJECTS["MAIL"]}
+            },
+            "wrong-native-client": {
+                "claim_overrides": {"taskClient": ACTORS["MAIL"][0]}
+            },
+            "wrong-actor": {"claim_overrides": {"actor": "ACCOUNT_ADMIN"}},
+            "expired-proof": {
+                "claim_overrides": {
+                    "iat": int(time.time()) - 120,
+                    "exp": int(time.time()) - 60,
+                }
+            },
+            "mail-native-bearer": {"actor": "MAIL"},
+            "runtime-native-bearer": {"actor": "RUNTIME"},
+        }
+        before = self.admin("GET", "/users/count")
+        for name, options in controls.items():
+            with self.subTest(control=name):
+                status, _ = self.protected_machine_request(
+                    "status", approval, query, **options
+                )
+                type(self).proof_controls.append({"control": name, "status": status})
+                self.assertEqual(403, status)
+        self.assertEqual(before, self.admin("GET", "/users/count"))
+        status, current = self.protected_machine_request("status", approval, query)
+        self.assertEqual(200, status)
+        self.assertEqual(reference, current)
+
+    def test_setup_absent_cancel_tombstone_blocks_delayed_human_approval(self):
+        approval, request = str(uuid.uuid4()), {"scope": self.scope()}
+        bearer = self.human(record=False)
+        digest = mac(
+            "protected-approval-request/v1",
+            {
+                "request": request,
+                "issuerRealm": self.realm_id,
+                "issuerSubject": HUMAN,
+            },
+        )
+        absent_scope = dict(
+            request["scope"],
+            originalIssuerRealm=self.realm_id,
+            originalIssuerSubject=HUMAN,
+        )
+        cancel = {
+            "cancellationId": str(uuid.uuid4()),
+            "scopeDigest": None,
+            "workflowId": request["scope"]["workflowId"],
+            "inviteId": request["scope"]["inviteId"],
+            "authorizationRevision": 1,
+            "reason": "ISSUANCE_ABORTED",
+            "absentScope": absent_scope,
+            "approvalRequestDigest": digest,
+        }
+        before = self.admin("GET", "/users/count")
+        status, cancelled = self.protected_machine_request("cancel", approval, cancel)
+        after = self.admin("GET", "/users/count")
+        type(self).absent_cancel_observation = {
+            "actualStatus": status,
+            "expectedStatus": 200,
+            "nativeSetupCanonicalAudiencesMatched": True,
+            "originalRequestDigestPredispatch": True,
+            "nativeHumanValidatedForOriginalIdentity": True,
+            "noPriorApproveDispatched": True,
+            "noAccountCreated": before == after,
+        }
+        self.assertEqual(before, after)
+        self.assertEqual(200, status)
+        self.assertEqual("CANCELLED", cancelled["state"])
+        self.assertIsNone(cancelled["approvalReceipt"])
+        self.assertIsNotNone(cancelled["transitionReceipt"])
+        self.assertEqual(digest, cancelled["approvalRequestDigest"])
+        status, retry = self.protected_machine_request("cancel", approval, cancel)
+        self.assertEqual(200, status)
+        self.assertEqual(cancelled, retry)
+        self.assertEqual(
+            409, call(self.base, "PUT", self.endpoint(approval), request, bearer)[0]
+        )
+        status, _ = self.protected_machine_request(
+            "status",
+            approval,
+            {
+                "scopeDigest": None,
+                "workflowId": request["scope"]["workflowId"],
+                "inviteId": request["scope"]["inviteId"],
+                "authorizationRevision": 1,
+                "attemptId": None,
+                "approvalRequestDigest": digest,
+            },
+        )
+        self.assertEqual(200, status)
+        cancel["approvalRequestDigest"] = "0" * 64
+        self.assertEqual(
+            409, self.protected_machine_request("cancel", approval, cancel)[0]
+        )
+        self.assertEqual(before, self.admin("GET", "/users/count"))
 
 
 if __name__ == "__main__":
