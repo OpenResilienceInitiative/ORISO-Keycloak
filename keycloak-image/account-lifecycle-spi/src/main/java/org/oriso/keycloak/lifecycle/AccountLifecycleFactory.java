@@ -123,5 +123,13 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
         "otp.delete", "DELETE", username, raw, proofHeader, humanHeader, delete);
   }
 
+  jakarta.ws.rs.core.Response finishEmailOtpSelf(KeycloakSession session, String username,
+      byte[] raw, String proofHeader, String humanHeader,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> finish) {
+    if (authorization == null) LifecycleJson.deny();
+    return ScopedOtpAccess.checkedSelfMutation(session, authorization, groups, humanPolicy,
+        "otp.email-finish", "POST", username, raw, proofHeader, humanHeader, finish);
+  }
+
   public void close() {}
 }

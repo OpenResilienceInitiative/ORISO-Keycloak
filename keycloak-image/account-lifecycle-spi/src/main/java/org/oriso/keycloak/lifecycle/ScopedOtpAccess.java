@@ -41,6 +41,13 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, delete));
   }
 
+  public static Response requireSelfEmailFinish(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
+      Function<VerifiedOtpTarget, Response> finish) {
+    return guarded(session, () -> configuration(session).finishEmailOtpSelf(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, finish));
+  }
+
   private static AccountLifecycleFactory configuration(KeycloakSession session) {
     var factory = session.getKeycloakSessionFactory().getProviderFactory(
         RealmResourceProvider.class, "oriso-account-lifecycle");
@@ -130,6 +137,7 @@ public final class ScopedOtpAccess {
       // The immutable operation is retry provenance. Reauthorize the actual current human,
       // then return before mutable credential/CAS lookup or a second enrollment effect.
       if ("otp.delete".equals(operation)) policy.requireSelfOtpDelete(session, target, humanHeader);
+      else if ("otp.email-finish".equals(operation)) policy.requireSelfOtpEmailFinish(session, target, humanHeader);
       else policy.requireSelfOtpAppSetup(session, target, humanHeader);
       var saved = parse(prior.resultJson);
       int status = saved.path("status").asInt();
@@ -139,6 +147,7 @@ public final class ScopedOtpAccess {
     var targets = new MaintenanceTarget(session, authorization, mappings);
     var current = "otp.delete".equals(operation)
         ? targets.readOtpSelfDelete(target, policy, humanHeader)
+        : "otp.email-finish".equals(operation) ? targets.readOtpSelfEmailFinish(target, policy, humanHeader)
         : targets.readOtpSelfAppSetup(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
       throw new jakarta.ws.rs.ClientErrorException("Current OTP target state conflicts", 409);
@@ -245,7 +254,7 @@ public final class ScopedOtpAccess {
     public KeycloakSession session() { lifetime.check(); return lifetime.session; }
     public RealmModel realm() { lifetime.check(); return realm; }
     public UserModel user() { lifetime.check(); return user; }
-    public String initialCode() { lifetime.check(); if (request == null || !"otp.app-setup".equals(request.operation())) deny(); return request.otp().path("initialCode").textValue(); }
+    public String initialCode() { lifetime.check(); if (request == null || !Set.of("otp.app-setup", "otp.email-finish").contains(request.operation())) deny(); return request.otp().path("initialCode").textValue(); }
     public String secret() { lifetime.check(); if (request == null || !"otp.app-setup".equals(request.operation())) deny(); return request.otp().path("secret").textValue(); }
     @Override public String toString() { return "VerifiedOtpTarget[redacted]"; }
   }

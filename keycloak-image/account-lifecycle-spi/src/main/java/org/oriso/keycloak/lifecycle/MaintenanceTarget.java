@@ -48,6 +48,11 @@ final class MaintenanceTarget {
     return read(request, policy, rawHumanBearer, "otp.delete");
   }
 
+  JsonNode readOtpSelfEmailFinish(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer) {
+    if (policy == null || !"SELF".equals(request.target().path("origin").path("kind").asText())) deny();
+    return read(request, policy, rawHumanBearer, "otp.email-finish");
+  }
+
   private JsonNode read(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer,
       String otpOperation) {
     // Domain deletion and independently native-verified ordinary self are separate authorities.
@@ -86,6 +91,7 @@ final class MaintenanceTarget {
     if (humanSelf) {
       if ("otp.delete".equals(otpOperation)) policy.requireSelfOtpDelete(session, request, rawHumanBearer);
       else if ("otp.app-setup".equals(otpOperation)) policy.requireSelfOtpAppSetup(session, request, rawHumanBearer);
+      else if ("otp.email-finish".equals(otpOperation)) policy.requireSelfOtpEmailFinish(session, request, rawHumanBearer);
       else if ("otp.read".equals(otpOperation)) policy.requireSelfOtpRead(session, request, rawHumanBearer);
       else policy.requireSelf(session, request, rawHumanBearer);
     }

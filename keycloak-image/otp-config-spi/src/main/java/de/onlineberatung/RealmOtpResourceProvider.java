@@ -243,8 +243,27 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("setup-otp-mail/{username}")
   @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
-  public Response setupOtpMail(@PathParam("username") final String username,
-      final OtpSetupDTO mailSetup) {
+  public Response setupOtpMailRequest(@PathParam("username") final String username, final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfEmailFinish(
+          session, username, raw,
+          headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+            var dto = new OtpSetupDTO();
+            dto.setInitialCode(target.initialCode());
+            // Wire-only: retain the original native-power barrier until its actual HTTP RED.
+            return setupOtpMail(username, dto);
+          });
+    }
+    try {
+      return setupOtpMail(username, org.keycloak.util.JsonSerialization.readValue(raw, OtpSetupDTO.class));
+    } catch (java.io.IOException rejected) {
+      throw new jakarta.ws.rs.BadRequestException("Invalid OTP request");
+    }
+  }
+
+  public Response setupOtpMail(final String username, final OtpSetupDTO mailSetup) {
     verifyAuthentication();
 
     final var realm = this.session.getContext().getRealm();
