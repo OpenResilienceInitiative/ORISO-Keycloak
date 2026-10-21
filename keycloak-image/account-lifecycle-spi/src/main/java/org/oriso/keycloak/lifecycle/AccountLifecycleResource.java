@@ -158,9 +158,9 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       String command, String attemptId, JsonNode neutralBody, String checkedActor,
       LifecyclePolicy policy) {
     // Each protected command is enabled only with its own public HTTP tracer.
-    if (policy == null || !Set.of("create", "owned-read", "commit", "recover").contains(command)
+    if (policy == null || !Set.of("create", "owned-read", "commit", "recover", "compensate").contains(command)
         || !("ACCOUNT_CREATE".equals(checkedActor)
-            || "recover".equals(command) && "ACCOUNT_ADMIN".equals(checkedActor))) deny();
+            || Set.of("recover", "compensate").contains(command) && "ACCOUNT_ADMIN".equals(checkedActor))) deny();
     return guarded(() -> execute(command, attemptId, neutralBody, checkedActor, policy));
   }
 
@@ -248,6 +248,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       audit(realm, actor, OperationType.UPDATE, row.accountId);
     } else {
       if (!Set.of("OPEN", "RECOVERY_CLAIMED", "ABANDONED").contains(row.state)) conflict();
+      if (policy != null) policy.before("compensate", row, em);
       if (!"ABANDONED".equals(row.state)) {
         var user = integrity(row, realm, LifecycleGroups.pending(session, realm));
         if (user != null && !session.users().removeUser(realm, user.user())) conflict();

@@ -65,18 +65,26 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     return guarded(() -> accountCommand("recover", approval, attempt, raw, proof));
   }
 
+  @POST
+  @Path("v1/approvals/{approval}/attempts/{attempt}/compensate")
+  public Response compensate(@PathParam("approval") String approval, @PathParam("attempt") String attempt,
+      byte[] raw, @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> accountCommand("compensate", approval, attempt, raw, proof));
+  }
+
   private Response accountCommand(String command, String approval, String attempt, byte[] raw, String proof) {
-    if (!Set.of("create", "owned-read", "commit", "recover").contains(command)) deny();
+    if (!Set.of("create", "owned-read", "commit", "recover", "compensate").contains(command)) deny();
     boolean create = "create".equals(command);
     boolean recover = "recover".equals(command);
+    boolean compensate = "compensate".equals(command);
     uuid(approval); uuid(attempt);
     var body = parse(raw);
     if (create) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "acceptanceClaim",
         "execution", "account", "creationFingerprint");
     else if (recover) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
         "acceptanceClaim", "expectedGeneration", "recoveryId");
-    else if ("commit".equals(command)) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
-        "execution", "accountId", "creationProof", "localCommit");
+    else if ("commit".equals(command) || compensate) fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
+        "execution", "accountId", "creationProof", compensate ? "localCleanup" : "localCommit");
     else fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
         "execution", "accountId", "creationProof");
     var em = lockedRealm();
@@ -87,7 +95,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     if (currentAttempt != null) em.refresh(currentAttempt);
     // Current native grant checks run after the relevant provenance locks.
     var machine = machineAuthorization.requireMachine(session,
-        recover ? Set.of("ACCOUNT_CREATE", "ACCOUNT_ADMIN") : Set.of("ACCOUNT_CREATE"));
+        recover || compensate ? Set.of("ACCOUNT_CREATE", "ACCOUNT_ADMIN") : Set.of("ACCOUNT_CREATE"));
     crypto.verifyProtectedCommand(proof, machine, "protected-account." + (recover ? "creation-recover" : command), create ? "PUT" : "POST",
         "realm/" + config.realmId + "/protected-invitation/" + approval + "/account-attempt/" + attempt, body);
     if (row == null) deny();
@@ -155,6 +163,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       translated.set("accountId", body.path("accountId").deepCopy());
       translated.set("creationProof", body.path("creationProof").deepCopy());
       if ("commit".equals(command)) translated.set("localCommit", body.path("localCommit").deepCopy());
+      else if (compensate) translated.set("localCleanup", body.path("localCleanup").deepCopy());
     }
     var binding = new AccountLifecycleResource.LifecycleBinding(attemptKey,
         scope.path("creatorClient").asText(), scope.path("creatorSubject").asText(),
@@ -200,6 +209,13 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     public String commandDigest() { return originalCommandDigest; }
 
     public void before(String command, AccountLifecycleAttempt current, EntityManager em) {
+      if ("compensate".equals(command)) {
+        if (current == null || current.accountId == null
+            || !Set.of("OPEN", "RECOVERY_CLAIMED").contains(current.state)
+            || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+            || !attempt.equals(approval.boundAttemptId)) conflict();
+        return;
+      }
       if ("recover".equals(command)) {
         if (current == null) {
           if (!Set.of("AUTHORIZED", "CANCELLED", "EXPIRED").contains(approval.state)
@@ -227,19 +243,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
               || current.recoveryReceipt == null || current.terminalReceipt == null
               || !Set.of("AUTHORIZED", "CANCELLED", "EXPIRED").contains(approval.state)
               || approval.boundAttemptId != null) conflict();
-          if ("AUTHORIZED".equals(approval.state)) {
-            if (approval.transitionReceipt != null) conflict();
-            var cleanup = JSON.createObjectNode();
-            cleanup.put("operation", "protected-invitation.cleanup"); cleanup.put("state", "CANCELLED");
-            cleanup.put("approvalId", approval.approvalId); cleanup.put("scopeDigest", approval.scopeDigest);
-            cleanup.put("boundAttemptId", attempt); cleanup.putNull("accountId");
-            cleanup.put("terminalReceipt", current.terminalReceipt);
-            cleanup.put("receipt", crypto.receipt("protected-approval-cleanup/v1", cleanup.deepCopy()));
-            String immutable = canonical(cleanup);
-            if (immutable.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
-            approval.state = "CANCELLED"; approval.transitionReceipt = immutable;
-          } else if (approval.transitionReceipt == null) conflict();
-          approval.boundAttemptId = attempt;
+          restrictAfterCleanup(current);
           // The common engine persists the absent attempt and flushes both
           // records together after this callback; no user/group lookup or effect.
           return;
@@ -250,6 +254,15 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         return;
       }
       if (current.accountId == null) conflict();
+      if ("compensate".equals(command)) {
+        if (!"COMPENSATED".equals(current.state) || !"compensate".equals(current.terminalOperation)
+            || current.creationProof == null || current.terminalReceipt == null
+            || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+            || !attempt.equals(approval.boundAttemptId)) conflict();
+        restrictAfterCleanup(current);
+        em.flush();
+        return;
+      }
       if (!Instant.parse(approval.validUntil).isAfter(Instant.now())) conflict();
       if ("create".equals(command)) {
         if (!"OPEN".equals(current.state) || !"AUTHORIZED".equals(approval.state)
@@ -272,6 +285,25 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       // Same request/JPA transaction as the native user, proof and attempt. A
       // callback/flush failure rolls every effect back; no separate transaction.
       em.flush();
+    }
+
+    private void restrictAfterCleanup(AccountLifecycleAttempt current) {
+      if (Set.of("AUTHORIZED", "BOUND").contains(approval.state)) {
+        if (approval.transitionReceipt != null) conflict();
+        var cleanup = JSON.createObjectNode();
+        cleanup.put("operation", "protected-invitation.cleanup"); cleanup.put("state", "CANCELLED");
+        cleanup.put("approvalId", approval.approvalId); cleanup.put("scopeDigest", approval.scopeDigest);
+        cleanup.put("boundAttemptId", attempt);
+        if (current.accountId == null) cleanup.putNull("accountId");
+        else cleanup.put("accountId", current.accountId);
+        cleanup.put("terminalReceipt", current.terminalReceipt);
+        cleanup.put("receipt", crypto.receipt("protected-approval-cleanup/v1", cleanup.deepCopy()));
+        String immutable = canonical(cleanup);
+        if (immutable.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
+        approval.state = "CANCELLED"; approval.transitionReceipt = immutable;
+      } else if (!Set.of("CANCELLED", "EXPIRED").contains(approval.state)
+          || approval.transitionReceipt == null) conflict();
+      approval.boundAttemptId = attempt;
     }
   }
 
