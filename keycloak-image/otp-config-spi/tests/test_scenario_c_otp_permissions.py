@@ -389,7 +389,7 @@ class ScenarioCOtpPermissions(ScenarioCOtpFixture, unittest.TestCase):
             )[0],
         )
         self.assertEqual(
-            200,
+            403,
             self.otp(token, "GET", "fetch-otp-setup-info", "ordinary-consultant")[0],
         )
         self.assertEqual(

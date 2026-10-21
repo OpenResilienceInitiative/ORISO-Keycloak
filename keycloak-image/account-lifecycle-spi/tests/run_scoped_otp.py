@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sanitized first scoped OTP diagnostic: five actual GET cases plus legacy five-route control."""
+"""Sanitized first scoped OTP diagnostic: five actual GET cases, first app mutation plus legacy five-route control."""
 
 import argparse
 import contextlib
@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 MODULES = [ROOT / "keycloak-image/account-lifecycle-spi", ROOT / "keycloak-image/otp-config-spi"]
 WORKFLOW = ROOT / ".github/workflows/scenario-c-scoped-otp-proof.yml"
 POSITIVE = "test_otp_scoped.ScopedOtpRead.test_canonical_admin_current_self_reads_setup_without_native_grants"
+APP_POSITIVE = "test_otp_scoped.ScopedOtpRead.test_current_self_app_enrollment_retry_never_replaces_later_credentials"
 
 
 def sources():
@@ -100,7 +101,7 @@ def units(report):
 
 
 def missing(report, status):
-    save(report, {"status": status, "executed": 0, "floor": 6, "failures": 0, "errors": 1, "skipped": 0, "accepted": False, "genuine_scoped_read_red": False, "source_manifest": sources()})
+    save(report, {"status": status, "executed": 0, "floor": 7, "failures": 0, "errors": 1, "skipped": 0, "accepted": False, "genuine_scoped_read_red": False, "genuine_scoped_app_setup_red": False, "source_manifest": sources()})
     root = ET.Element("testsuite", name="scoped-otp", tests="1", failures="0", errors="1", skipped="0")
     ET.SubElement(ET.SubElement(root, "testcase", classname="scoped-otp.fixture", name="not_executed"), "error", message=status)
     ET.ElementTree(root).write(report.with_suffix(".xml"), encoding="utf-8", xml_declaration=True)
@@ -131,8 +132,8 @@ def native(report):
         unittest.defaultTestLoader.loadTestsFromTestCase(test_otp_scoped.ScopedOtpRead),
         unittest.defaultTestLoader.loadTestsFromTestCase(legacy.LegacyOtpPermissions),
     ])
-    if suite.countTestCases() != 6:
-        raise ValueError("Exact scoped5 plus legacy1 method inventory required")
+    if suite.countTestCases() != 7:
+        raise ValueError("Exact scopedGET5 plus app1 plus legacy1 method inventory required")
     original = subprocess.run
 
     def bounded(args, *values, **options):
@@ -169,10 +170,12 @@ def native(report):
     failures = {case.id() for case, _ in result.failures}
     phases = test_otp_scoped.ScopedOtpRead.phase_receipts
     preconditions = any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "exact_three_audiences", "stock_native_denied", "actual_self_human", "committed_ordinary_target")) for x in phases)
-    red = bool(preconditions and failures == {POSITIVE} and POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 6 and any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
+    red = bool(preconditions and failures == {POSITIVE} and POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 7 and any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-http" and x.get("status") == 403 and x.get("expected_status") == 200 for x in phases))
+    app_preconditions = any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "stock_native_denied", "actual_self_human", "committed_ordinary_target", "scoped_setup_read", "frozen_current_state", "reviewed_app_selector")) for x in phases)
+    app_red = bool(app_preconditions and failures == {APP_POSITIVE} and APP_POSITIVE in result.assertion_cases and not result.errors and not result.skipped and result.testsRun == 7 and any(x.get("case") == APP_POSITIVE and x.get("phase") == "scoped-otp-app-setup-http" and x.get("status") == 403 and x.get("expected_status") == 201 for x in phases))
     stable = before == sources() and hashes == {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in jars.items()}
-    accepted = bool(stable and result.wasSuccessful() and result.testsRun == 6 and not result.skipped)
-    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 6, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "accepted": accepted, "status": "GREEN" if accepted else "SCOPED_READ403_RED" if red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Five original-route scoped OTP GET cases plus one unchanged default-off all5routes legacy control; other scoped routes/effects/User/SMTP/image/fullC remain open"})
+    accepted = bool(stable and result.wasSuccessful() and result.testsRun == 7 and not result.skipped)
+    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 7, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "genuine_scoped_app_setup_red": app_red and stable, "accepted": accepted, "status": "GREEN" if accepted else "SCOPED_READ403_RED" if red and stable else "SCOPED_APP_SETUP403_RED" if app_red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Original scopedGET5+firstapp1+defaultofflegacy1; other scoped routes/effects/User/SMTP/image/fullC remain open"})
     print(json.dumps({"executed": result.testsRun, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "accepted": accepted, "genuine_scoped_read_red": red and stable}))
     return 0 if accepted else 1
 

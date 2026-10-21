@@ -72,7 +72,7 @@ jobs:
       - name: Require every source OTP unit suite with zero skips
         if: always()
         run: python keycloak-image/account-lifecycle-spi/tests/run_scoped_otp.py units --report proof-reports/scoped-otp-units.json
-      - name: Run exact scoped GET5 plus unchanged legacy five-route1 cases
+      - name: Run exact scoped GET5 plus first app1 and legacy five-route1 cases
         shell: bash
         run: |
           set -euo pipefail

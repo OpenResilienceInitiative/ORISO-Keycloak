@@ -16,8 +16,9 @@ public class GeneralPolicyTest {
   }
 
   @Test
-  public void exactReviewedSelfPolicyCanNameOtpRead() {
-    accepted("account.read", "account.locale", "otp.read");
+  public void exactReviewedSelfPolicyCanNameClosedOtpOperations() {
+    accepted("account.read", "account.locale", "otp.read", "otp.app-setup",
+        "otp.delete", "otp.email-start", "otp.email-finish");
   }
 
   @Test
@@ -29,7 +30,7 @@ public class GeneralPolicyTest {
 
   @Test
   public void foreignOperationSelectorsAreRejected() {
-    rejected("otp.delete");
+    rejected("otp.native-proxy");
     rejected("account.delete");
     rejected("protected.approve");
   }

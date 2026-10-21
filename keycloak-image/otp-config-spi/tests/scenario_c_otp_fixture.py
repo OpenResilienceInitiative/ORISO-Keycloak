@@ -446,13 +446,18 @@ class ScenarioCOtpFixture:
         return token
 
     def otp(self, token, method, route, target, body=None):
-        return call(
+        status, result = call(
             self.base,
             method,
             "/realms/" + REALM + "/otp-config/" + route + "/" + quote(target, safe=""),
             body,
             token,
         )
+        self.phase_receipts.append({"case": self.id(), "phase": "original-otp-http",
+                                    "method": method, "route": route, "status": status,
+                                    "code_validation_rejected": status == 401 and isinstance(result, dict)
+                                    and result.get("error") == "invalid_grant"})
+        return status, result
 
     def credentials(self, user_id):
         return sorted(
