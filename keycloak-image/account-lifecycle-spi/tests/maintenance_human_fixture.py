@@ -354,6 +354,13 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
             .decode()
             .rstrip("=")
         )
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + self.token("ACCOUNT_ADMIN"),
+            "X-ORISO-Task-Context": encoded + "." + signature,
+        }
+        if human is not None:
+            headers["X-ORISO-Human-Authorization"] = "Bearer " + human
         request = Request(
             self.base
             + "/realms/"
@@ -364,12 +371,7 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
             + command,
             data=canonical(body),
             method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": "Bearer " + self.token("ACCOUNT_ADMIN"),
-                "X-ORISO-Task-Context": encoded + "." + signature,
-                "X-ORISO-Human-Authorization": "Bearer " + human,
-            },
+            headers=headers,
         )
         try:
             with urlopen(request, timeout=30) as response:
@@ -432,7 +434,18 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
         self.assertEqual("UPDATED", receipt["result"])
         self.assertEqual(ACTORS["ACCOUNT_ADMIN"][0], receipt["ownerClient"])
         self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], receipt["ownerSubject"])
-        self.assertNotIn(human, json.dumps(result))
+        self.assertFalse(human in json.dumps(result), "Human token must not enter result")
+        audits = [
+            event
+            for event in self.admin("GET", "/admin-events?max=100")
+            if event.get("resourcePath") == "accounts/" + self.account_id
+            and event.get("operationType") == "UPDATE"
+        ]
+        self.assertTrue(audits, "Native maintenance must retain actual ADMIN audit ownership")
+        for event in audits:
+            self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], event["authDetails"]["userId"])
+            self.assertEqual(ACTORS["ACCOUNT_ADMIN"][0], event["authDetails"]["clientId"])
+        self.phase("human-maintenance-admin-audit", actual_admin_owner=True)
         self.assertEqual(
             ["fr"],
             self.admin("GET", "/users/" + self.account_id)["attributes"]["locale"],
@@ -452,3 +465,80 @@ class HumanMaintenance(LifecycleFixture, unittest.TestCase):
         self.assertEqual(
             403, self.invoke("read", {"target": mismatched}, human, 403)[0]
         )
+
+
+    def test_real_human_locale_refusals_recheck_current_authority_and_frozen_intent(
+        self,
+    ):
+        human = self.human()
+        self.phase("ordinary-committed", create_status=201, commit_status=200)
+        origin = {
+            "kind": "SELF",
+            "workflowId": str(uuid.uuid4()),
+            "humanSubject": self.account_id,
+            "humanIssuer": ISSUER,
+            "humanClient": CLIENT,
+            "humanAuthority": None,
+        }
+        target = {"accountId": self.account_id, "tenantId": "11", "origin": origin}
+        self.assertEqual(401, self.invoke("read", {"target": target}, None, 401)[0])
+        for field, value in [
+            ("humanSubject", str(uuid.uuid4())),
+            ("humanIssuer", "https://foreign.invalid/realms/foreign"),
+            ("humanClient", "foreign-client"),
+            ("humanAuthority", "PLATFORM"),
+        ]:
+            changed = json.loads(json.dumps(target))
+            changed["origin"][field] = value
+            self.assertEqual(403, self.invoke("read", {"target": changed}, human, 403)[0])
+        changed = json.loads(json.dumps(target))
+        changed["tenantId"] = "12"
+        self.assertEqual(403, self.invoke("read", {"target": changed}, human, 403)[0])
+        status, before = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        original = self.admin("GET", "/users/" + self.account_id)["attributes"]
+        changed = json.loads(json.dumps(original))
+        installer_locale = "it" if before["preferredLanguage"] != "it" else "de"
+        changed["locale"] = [installer_locale]
+        self.admin("PUT", "/users/" + self.account_id, {"attributes": changed})
+        body = {
+            "target": target,
+            "operationId": str(uuid.uuid4()),
+            "expectedState": before["state"],
+            "change": {"locale": "fr"},
+        }
+        # A distinct installer effect must make the old state stale; never refresh it automatically.
+        self.assertEqual(409, self.invoke("locale", body, human, 409)[0])
+        self.assertEqual(
+            [installer_locale],
+            self.admin("GET", "/users/" + self.account_id)["attributes"]["locale"],
+        )
+        status, fresh = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        # An explicit new deliberate action allocates a new ID; the refused intent stays frozen.
+        body["operationId"] = str(uuid.uuid4())
+        body["expectedState"] = fresh["state"]
+        self.assertEqual(200, self.invoke("locale", body, human, 200)[0])
+        body["change"]["locale"] = "it"
+        self.assertEqual(409, self.invoke("locale", body, human, 409)[0])
+        self.assertEqual(
+            ["fr"], self.admin("GET", "/users/" + self.account_id)["attributes"]["locale"]
+        )
+        # The still-valid JWT cannot preserve authority after current native tenant/grant changes.
+        current = self.admin("GET", "/users/" + self.account_id)["attributes"]
+        changed = json.loads(json.dumps(current))
+        changed["tenantId"] = ["12"]
+        self.admin("PUT", "/users/" + self.account_id, {"attributes": changed})
+        try:
+            self.assertEqual(403, self.invoke("read", {"target": target}, human, 403)[0])
+        finally:
+            self.admin("PUT", "/users/" + self.account_id, {"attributes": current})
+        group_path = "/users/" + self.account_id + "/groups/" + self.group["id"]
+        self.admin("DELETE", group_path)
+        try:
+            self.assertEqual(403, self.invoke("read", {"target": target}, human, 403)[0])
+        finally:
+            self.admin("PUT", group_path)
+        self.assertEqual(200, self.invoke("read", {"target": target}, human, 200)[0])
+        self.admin("POST", "/users/" + self.account_id + "/logout")
+        self.assertEqual(401, self.invoke("read", {"target": target}, human, 401)[0])

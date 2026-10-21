@@ -17,7 +17,7 @@ EXPECTED_UNITS = {
     "org.oriso.keycloak.lifecycle.LifecycleJsonTest": 13,
     "org.oriso.keycloak.lifecycle.MaintenanceRequestTest": 8,
 }
-NATIVE_FLOOR = 6
+NATIVE_FLOOR = 7
 
 
 def source_manifest(module):
@@ -104,7 +104,7 @@ def native(report, workflow):
     suite = unittest.defaultTestLoader.loadTestsFromModule(imported)
     discovered = suite.countTestCases()
     if discovered < NATIVE_FLOOR:
-        missing_native(report, "BELOW_SIX_CASE_FLOOR_NOT_BEHAVIOR_RED")
+        missing_native(report, "BELOW_SEVEN_CASE_FLOOR_NOT_BEHAVIOR_RED")
         return 1
     result = unittest.TextTestRunner(verbosity=2, resultclass=XmlResult).run(suite)
     report.parent.mkdir(parents=True, exist_ok=True)

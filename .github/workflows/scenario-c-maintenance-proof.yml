@@ -58,7 +58,7 @@ jobs:
       - name: Check every Java unit and retain only sanitized method XML
         if: always()
         run: python keycloak-image/account-lifecycle-spi/tests/run_maintenance.py units --report proof-reports/maintenance-units.json
-      - name: Run all six actual maintenance HTTP cases with zero skips
+      - name: Run all seven actual maintenance HTTP cases with zero skips
         shell: bash
         run: |
           set -euo pipefail
