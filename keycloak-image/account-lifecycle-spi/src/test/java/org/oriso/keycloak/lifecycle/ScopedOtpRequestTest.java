@@ -90,6 +90,25 @@ public class ScopedOtpRequestTest {
   }
 
   @Test
+  public void emailFinishDecodesOnlyTheInitialCodeWithNullSecretAndEmail() {
+    var exact = body();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) exact.path("otp")).putNull("secret");
+    ScopedOtpRequest decoded;
+    try {
+      decoded = ScopedOtpRequest.parse("otp.email-finish", ID, exact);
+    } catch (WebApplicationException rejected) {
+      throw new AssertionError("Actual closed initial-code finish body must decode");
+    }
+    assertEquals("otp.email-finish", decoded.operation());
+    assertEquals("123456", decoded.otp().path("initialCode").asText());
+    assertTrue(decoded.otp().path("secret").isNull());
+    assertTrue(decoded.otp().path("email").isNull());
+    rejected("otp.email-finish", ID, body());
+    ((com.fasterxml.jackson.databind.node.ObjectNode) exact.path("otp")).put("email", "other@test.invalid");
+    rejected("otp.email-finish", ID, exact);
+  }
+
+  @Test
   public void setupSecretAndInitialCodeCannotAppearInTheRequestDescription() {
     String description = accepted(body()).toString();
     assertFalse(description.contains(SECRET));
