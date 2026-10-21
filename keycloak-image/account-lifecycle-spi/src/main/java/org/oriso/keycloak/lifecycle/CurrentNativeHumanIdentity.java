@@ -177,11 +177,14 @@ public final class CurrentNativeHumanIdentity {
     if (token.getAudience() == null || audiences.size() != token.getAudience().length || !policy.audiences.contains(audiences)) deny();
     Long tenant = tenant(user.path("attributes").get("tenantId"), token.getOtherClaims().get("tenantId"), token.getOtherClaims().containsKey("tenantId"));
     requireNoHumanNativePermissions(session, auth);
+    Long issuedAt = token.getIat(), expiresAt = token.getExp();
+    if (issuedAt == null || issuedAt <= 0 || expiresAt == null || expiresAt <= issuedAt
+        || expiresAt <= java.time.Instant.now().getEpochSecond()) deny();
     var groups = new TreeMap<String, CurrentGroup>();
     grants.groups().forEach((id, group) -> groups.put(id, new CurrentGroup(id, grants.paths().get(id), group.parentId())));
     return new VerifiedHuman(policy.realmId, realm.getName(), token.getSubject(), token.getIssuer(),
         token.getIssuedFor(), auth.getClient().getId(), auth.getSession().getId(), tenant, Set.copyOf(audiences),
-        directGroups, Map.copyOf(groups), grants.realmRoles(), grants.clientRoles());
+        directGroups, Map.copyOf(groups), grants.realmRoles(), grants.clientRoles(), issuedAt, expiresAt);
   }
 
   static void currentClient(EntityManager em, String realmId, String uuid, String clientId, Long issuedAt) {
@@ -263,13 +266,16 @@ public final class CurrentNativeHumanIdentity {
     private final Set<String> audiences, directGroupIds, realmRoles;
     private final Map<String, CurrentGroup> currentGroups;
     private final Map<String, Set<String>> clientRoles;
+    private final long validatedJwtIssuedAt, validatedJwtExpiresAt;
     private VerifiedHuman(String realmId, String realmName, String subject, String issuer, String clientId,
         String clientUuid, String nativeSessionId, Long tenantId, Set<String> audiences, Set<String> directGroupIds,
-        Map<String, CurrentGroup> currentGroups, Set<String> realmRoles, Map<String, Set<String>> clientRoles) {
+        Map<String, CurrentGroup> currentGroups, Set<String> realmRoles, Map<String, Set<String>> clientRoles,
+        long validatedJwtIssuedAt, long validatedJwtExpiresAt) {
       this.realmId = realmId; this.realmName = realmName; this.subject = subject; this.issuer = issuer;
       this.clientId = clientId; this.clientUuid = clientUuid; this.nativeSessionId = nativeSessionId; this.tenantId = tenantId;
       this.audiences = audiences; this.directGroupIds = directGroupIds; this.currentGroups = currentGroups;
       this.realmRoles = realmRoles; this.clientRoles = clientRoles;
+      this.validatedJwtIssuedAt = validatedJwtIssuedAt; this.validatedJwtExpiresAt = validatedJwtExpiresAt;
     }
     public String realmId() { return realmId; }
     public String realmName() { return realmName; }
@@ -284,6 +290,10 @@ public final class CurrentNativeHumanIdentity {
     public Map<String, CurrentGroup> currentGroups() { return currentGroups; }
     public Set<String> realmRoles() { return realmRoles; }
     public Map<String, Set<String>> clientRoles() { return clientRoles; }
+    // Native-validated scalar bounds confer no authority beyond the owning
+    // request/transaction/thread. Consumers snapshot only within that lifetime.
+    public long validatedJwtIssuedAt() { return validatedJwtIssuedAt; }
+    public long validatedJwtExpiresAt() { return validatedJwtExpiresAt; }
   }
 
   private CurrentNativeHumanIdentity() {}

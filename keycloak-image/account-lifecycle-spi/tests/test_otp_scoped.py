@@ -111,12 +111,15 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertTrue(result.get("otpSecretQrCode"))
 
     def scoped_app_setup(self, human, body):
+        return self.scoped_mutation(human, body, "otp.app-setup", "PUT", "setup-otp", 201)
+
+    def scoped_mutation(self, human, body, operation, method, route, expected):
         username = self.creation_input["account"]["username"]
         materialized = {**body, "username": username}
         now = int(time.time())
         claims = {
             "iss": "userservice", "aud": "oriso-otp", "purpose": "OTP",
-            "operation": "otp.app-setup", "method": "PUT", "actor": "ACCOUNT_ADMIN",
+            "operation": operation, "method": method, "actor": "ACCOUNT_ADMIN",
             "realm": REALM,
             "target": "realm/" + self.realm_id + "/account/" + self.account_id,
             "taskClient": ACTORS["ACCOUNT_ADMIN"][0], "taskSubject": SUBJECTS["ACCOUNT_ADMIN"],
@@ -127,8 +130,8 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         signature = base64.urlsafe_b64encode(hmac.new(
             CONTEXT_KEY, ("proof\n" + encoded).encode(), hashlib.sha256).digest()).decode().rstrip("=")
         request = Request(
-            self.base + "/realms/" + REALM + "/otp-config/setup-otp/" + quote(username, safe=""),
-            data=canonical(body), method="PUT", headers={
+            self.base + "/realms/" + REALM + "/otp-config/" + route + "/" + quote(username, safe=""),
+            data=canonical(body), method=method, headers={
                 "Content-Type": "application/json",
                 "Authorization": "Bearer " + self.token("ACCOUNT_ADMIN"),
                 "X-ORISO-Task-Context": encoded + "." + signature,
@@ -141,7 +144,8 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         except HTTPError as error:
             status, raw = error.code, error.read()
             error.close()
-        self.phase("scoped-otp-app-setup-http", status=status, expected_status=201)
+        self.phase("scoped-otp-app-setup-http" if operation == "otp.app-setup" else "scoped-otp-delete-http",
+                   status=status, expected_status=expected)
         return status, json.loads(raw) if raw else None
 
     def test_current_self_app_enrollment_retry_never_replaces_later_credentials(self):
@@ -197,6 +201,46 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertFalse(self.scoped_read(human, self.target(), 200)[1]["otpSetup"])
         self.phase("scoped-otp-app-exact-retry", admin_receipt_owner=True,
                    saved_receipt_equal=True, no_reenrollment=True)
+
+    def app_enrollment_body(self, human, target):
+        import struct
+        status, setup = self.scoped_read(human, target, 200)
+        self.assertEqual(200, status)
+        self.assertFalse(setup["otpSetup"])
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        seed = setup["otpSecret"]
+        digest = hmac.new(seed.encode(), struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
+        offset = digest[-1] & 15
+        code = str((struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1000000).zfill(6)
+        return {"target": target, "operationId": str(uuid.uuid4()), "expectedState": current["state"],
+                "otp": {"initialCode": code, "secret": seed, "email": None}}
+
+    def test_current_self_delete_retry_never_removes_a_later_enrollment(self):
+        human, target = self.human(), self.target()
+        self.assertEqual(201, self.scoped_app_setup(human, self.app_enrollment_body(human, target))[0])
+        self.assertEqual(1, len([c for c in self.admin("GET", "/users/" + self.account_id
+                                                     + "/credentials") if c["type"] == "otp"]))
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        self.assertEqual(403, call(self.base, "GET", "/admin/realms/" + REALM
+                                  + "/users/" + self.account_id, token=self.token("ACCOUNT_ADMIN"))[0])
+        body = {"target": target, "operationId": str(uuid.uuid4()),
+                "expectedState": current["state"], "otp": None}
+        self.phase("scoped-otp-delete-preconditions", canonical_admin=True, stock_native_denied=True,
+                   actual_self_human=True, committed_ordinary_target=True,
+                   actual_prior_scoped_enrollment=True, frozen_current_state=True)
+        status, deleted = self.scoped_mutation(human, body, "otp.delete", "DELETE", "delete-otp", 200)
+        self.assertEqual(200, status)
+        self.assertEqual(200, deleted["status"])
+        self.assertEqual(body["operationId"], deleted["operationId"])
+        self.assertFalse(self.scoped_read(human, target, 200)[1]["otpSetup"])
+        self.assertEqual(201, self.scoped_app_setup(human, self.app_enrollment_body(human, target))[0])
+        status, retried = self.scoped_mutation(human, body, "otp.delete", "DELETE", "delete-otp", 200)
+        self.assertEqual(200, status)
+        self.assertEqual(deleted, retried)
+        self.assertTrue(self.scoped_read(human, target, 200)[1]["otpSetup"])
+        self.phase("scoped-otp-delete-exact-retry", saved_receipt_equal=True, no_redelete=True)
 
     def test_create_actor_cannot_read_setup(self):
         self.assertEqual(403, self.scoped_read(self.human(), self.target(), 403,
