@@ -28,7 +28,7 @@ public class GeneralPolicyTest {
     grant.put("authority", "TENANT_PEER");
     grant.putArray("targetProfiles").add("reviewed-consultant-v1");
     grant.putArray("operations").add("account.read").add("account.profile").add("account.email")
-        .add("account.ordinary-profile").add("account.deactivate").add("account.reactivate");
+        .add("account.ordinary-profile").add("account.deactivate").add("account.reactivate").add("account.profile-transition");
     grant.put("selfOnly", false);
     try { assertNotNull(new GeneralPolicy(value)); }
     catch (WebApplicationException rejected) {
@@ -80,6 +80,12 @@ public class GeneralPolicyTest {
     var unknown = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) unknown.path("workflowOperations").path(0)).putArray("targetProfiles").add("protected-platform-v1"); rejectAdmin(unknown);
     var duplicate = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ArrayNode) duplicate.path("workflowOperations")).add(grant.deepCopy()); rejectAdmin(duplicate);
     var empty = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read"); empty.putArray("workflowOperations"); assertNotNull(new GeneralPolicy(empty));
+    assertThrows(jakarta.ws.rs.ForbiddenException.class,()->new GeneralPolicy(empty).workflowOperations.require("reviewed-consultant-v1","account.read"));
+    var imported=value.deepCopy();var importGrant=(com.fasterxml.jackson.databind.node.ObjectNode)imported.path("workflowOperations").path(0);
+    importGrant.put("kind","IMPORT");importGrant.putArray("operations").add("account.read").add("account.ordinary-profile");
+    try{assertNotNull(new GeneralPolicy(imported));}catch(WebApplicationException refused){fail("Reviewed import grant rejected with status "+refused.getResponse().getStatus());}
+    importGrant.putArray("operations").add("account.reactivate");rejectAdmin(imported);
+
   }
 
   @Test

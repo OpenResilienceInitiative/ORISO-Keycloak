@@ -68,6 +68,11 @@ def install_policy(cls, helper, protected):
     config['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': ['consultant-v1', 'user-v1'],
         'operations': ['account.deactivate', 'account.reactivate', 'account.read']}]
     command = cls.command.copy()
+    for index, argument in enumerate(command):
+        if argument.startswith('ORISO_ACCOUNT_LIFECYCLE_GROUPS='):
+            reviewed_groups = json.loads(argument.split('=', 1)[1])
+            reviewed_groups['/human-roles/consultant-basic'] = ['consultant']
+            command[index] = 'ORISO_ACCOUNT_LIFECYCLE_GROUPS=' + json.dumps(reviewed_groups, separators=(',', ':'))
     index = command.index(IMAGE)
     command[index:index] = ['-e', 'ORISO_ACCOUNT_MAINTENANCE_CONFIG=' + json.dumps(config, separators=(',', ':'))]
     cls.command = command

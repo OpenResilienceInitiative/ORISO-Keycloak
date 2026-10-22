@@ -19,6 +19,10 @@ public class ProtectedPeerPolicyTest {
         .put("accountId", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         .put("protectedProfileId", "platform-v1").put("profileVersion", 1);
     assertAccepted(operations);
+    var transition = operationGrant("PLATFORM", "platform-v1"); transition.put("selfOnly", false);
+    transition.putArray("operations").add("account.profile-transition");
+    ((ObjectNode)operations.path("bindings").get(0)).putArray("accountOperations").add(transition);
+    assertAccepted(operations);
     var parsed = new ProtectedInvitationConfiguration(operations);
     assertEquals(1, parsed.bindingAccountOperations.values().iterator().next().size());
     assertEquals("platform-v1", parsed.adoptedAccounts.get("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").profileId());
@@ -137,6 +141,10 @@ public class ProtectedPeerPolicyTest {
     var unknown=value.deepCopy(); ((ObjectNode)unknown.path("workflowOperations").path(0)).putArray("targetProfiles").add("missing"); assertRejected(unknown);
     var duplicate=value.deepCopy(); ((ArrayNode)duplicate.path("workflowOperations")).add(grant.deepCopy()); assertRejected(duplicate);
     var empty=base(); empty.putArray("workflowOperations"); assertAccepted(empty);
+    var imported=value.deepCopy();var importGrant=(ObjectNode)imported.path("workflowOperations").path(0);
+    importGrant.put("kind","IMPORT");importGrant.putArray("operations").add("account.read");assertAccepted(imported);
+    importGrant.putArray("operations").add("account.ordinary-profile");assertRejected(imported);
+
   }
 
   @Test

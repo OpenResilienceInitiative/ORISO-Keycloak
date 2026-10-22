@@ -122,6 +122,64 @@ public class MaintenanceRequestTest {
     }
   }
 
+  @Test
+  public void typedProfileTransitionHasOnlyTwoFiniteHumanSelectorShapes() {
+    var body = (com.fasterxml.jackson.databind.node.ObjectNode) parse(command("{}"));
+    var origin = (com.fasterxml.jackson.databind.node.ObjectNode) body.path("target").path("origin");
+    origin.put("kind", "HUMAN_ADMIN"); origin.put("humanAuthority", "PROTECTED_ACCOUNT_OPERATIONS_V1");
+    for (String transition : java.util.List.of("ADD_CONSULTANT_IDENTITY", "ADD_AGENCY_ADMIN_IDENTITY")) {
+      for (String selector : java.util.List.of("{\"group\":\"/human-roles/consultant-agency-admin\"}",
+          "{\"profileId\":\"reviewed-tenant-dual-v2\",\"profileVersion\":2}")) {
+        var change=(com.fasterxml.jackson.databind.node.ObjectNode)parse(selector);change.put("transition",transition);body.set("change",change);
+        try { assertEquals(transition,MaintenanceRequest.parse("profile-transition",ID,body).change().path("transition").asText()); }
+        catch(WebApplicationException refused){fail("Reviewed typed profile transition rejected with status "+refused.getResponse().getStatus());}
+      }
+    }
+    for (String invalid : java.util.List.of("{\"transition\":\"REMOVE_CONSULTANT_IDENTITY\",\"group\":\"/human-roles/consultant\"}",
+        "{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"roles\":[\"consultant\"]}",
+        "{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"group\":\"/human-roles/consultant\",\"profileId\":\"dual\",\"profileVersion\":1}",
+        "{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"profileId\":\"dual\",\"profileVersion\":0}",
+        "{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"profileId\":\"dual\",\"profileVersion\":\"1\"}")) {
+      body.set("change",parse(invalid));
+      try{MaintenanceRequest.parse("profile-transition",ID,body);fail("Unreviewed transition accepted");}
+      catch(WebApplicationException expected){assertEquals(400,expected.getResponse().getStatus());}
+    }
+    body.set("change",parse("{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"group\":\"/human-roles/consultant\"}"));
+    origin.put("kind","SELF");
+    try{MaintenanceRequest.parse("profile-transition",ID,body);fail("SELF cannot select a typed administration transition");}
+    catch(WebApplicationException expected){assertTrue(expected.getResponse().getStatus()==400||expected.getResponse().getStatus()==403);}
+  }
+
+  @Test
+  public void existingConsultantImportWorkflowIsExactSevenFieldsAndClosedRequiredRoles() {
+    var body=(com.fasterxml.jackson.databind.node.ObjectNode)parse(command("{\"group\":\"/human-roles/consultant-agency-admin\"}"));
+    var origin=(com.fasterxml.jackson.databind.node.ObjectNode)body.path("target").path("origin");
+    origin.put("kind","IMPORT");origin.put("workflowId",OPERATION);
+    for(String key:java.util.List.of("humanSubject","humanIssuer","humanClient","humanAuthority"))origin.putNull(key);
+    var workflow=body.putObject("workflow");workflow.put("v",1);workflow.put("kind","IMPORT");workflow.put("workId",OPERATION);
+    workflow.put("sourceDigest","a".repeat(64));workflow.put("recordNumber",Long.MAX_VALUE);workflow.put("rowDigest","b".repeat(64));
+    workflow.putArray("requiredRoles").add("consultant").add("restricted-agency-admin").add("user-admin");
+    try{assertEquals("IMPORT",MaintenanceRequest.parse("ordinary-profile",ID,body).workflow().path("kind").asText());}
+    catch(WebApplicationException refused){fail("Reviewed exact existing import workflow rejected with status "+refused.getResponse().getStatus());}
+    for(String roles:java.util.List.of("[]","[\"consultant\",\"consultant\"]","[\"user\"]","[\"realm-admin\",\"consultant\"]","[\"user-admin\",\"consultant\"]")){
+      var wrong=body.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("workflow")).set("requiredRoles",parse(roles));
+      try{MaintenanceRequest.parse("ordinary-profile",ID,wrong);fail("Unreviewed import role tuple accepted");}
+      catch(WebApplicationException expected){assertEquals(400,expected.getResponse().getStatus());}
+    }
+    for(String field:java.util.List.of("v","kind","workId","sourceDigest","recordNumber","rowDigest","requiredRoles")){
+      var wrong=body.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("workflow")).remove(field);
+      try{MaintenanceRequest.parse("ordinary-profile",ID,wrong);fail("Incomplete import tuple accepted");}
+      catch(WebApplicationException expected){assertEquals(400,expected.getResponse().getStatus());}
+    }
+    var extra=body.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)extra.path("workflow")).put("humanAuthority","PLATFORM");
+    try{MaintenanceRequest.parse("ordinary-profile",ID,extra);fail("Unreviewed import field accepted");}
+    catch(WebApplicationException expected){assertEquals(400,expected.getResponse().getStatus());}
+    for(String command:java.util.List.of("deactivate","reactivate","profile-transition","delete")){
+      try{MaintenanceRequest.parse(command,ID,body);fail("Import workflow granted unrelated command");}
+      catch(WebApplicationException expected){assertTrue(expected.getResponse().getStatus()==400||expected.getResponse().getStatus()==403);}
+    }
+  }
+
   private static MaintenanceRequest accepted(String operation, String change) {
     try {
       return MaintenanceRequest.parse(operation, ID, parse(command(change)));
