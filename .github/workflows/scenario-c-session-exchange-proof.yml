@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: OpenResilienceInitiative/ORISO-UserService
-          ref: 8d95601def16a22977109a02069e252d0e9af540
+          ref: e3ff87b0f335fad1c8408e3dfd33c62ed5d1e9b7
           path: subject
           fetch-depth: 0
           persist-credentials: false
@@ -68,7 +68,7 @@ jobs:
           python3 host/scripts/ci/session-exchange-proof.py "$S1_ROLE" \
             --source host --source-ref "$GITHUB_SHA" \
             --support support --support-ref a1a1eb1ce51728e0ad60f7f07660f8c87b96815b \
-            --user subject --user-ref 8d95601def16a22977109a02069e252d0e9af540 \
+            --user subject --user-ref e3ff87b0f335fad1c8408e3dfd33c62ed5d1e9b7 \
             --evidence "$RUNNER_TEMP/s1-finite-proof-${S1_ROLE}"
       - name: Retain only bounded sanitized source and outcome receipts
         if: always()
