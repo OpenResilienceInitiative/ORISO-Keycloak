@@ -162,7 +162,7 @@ public class MaintenanceRequestTest {
     try{assertEquals("IMPORT",MaintenanceRequest.parse("ordinary-profile",ID,body).workflow().path("kind").asText());}
     catch(WebApplicationException refused){fail("Reviewed exact existing import workflow rejected with status "+refused.getResponse().getStatus());}
     for(String roles:java.util.List.of("[]","[\"consultant\",\"consultant\"]","[\"user\"]","[\"realm-admin\",\"consultant\"]","[\"user-admin\",\"consultant\"]")){
-      var wrong=body.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("workflow")).set("requiredRoles",parse(roles));
+      var wrong=body.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("workflow")).set("requiredRoles",parse("{\"roles\":"+roles+"}").path("roles"));
       try{MaintenanceRequest.parse("ordinary-profile",ID,wrong);fail("Unreviewed import role tuple accepted");}
       catch(WebApplicationException expected){assertEquals(400,expected.getResponse().getStatus());}
     }
