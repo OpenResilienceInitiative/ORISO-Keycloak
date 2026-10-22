@@ -75,6 +75,9 @@ public class OtpMailFormAuthenticatorTest {
 
     mailSender = mock(OtpMailSender.class);
     otpService = mock(OtpService.class);
+    // A mock would answer 0, and then the first wrong code would already be the last
+    // one and start a lockout. The real service tolerates three.
+    when(otpService.maxFailedValidations()).thenReturn(3);
     credentialService = mock(MailOtpCredentialService.class);
 
     activeCredential =

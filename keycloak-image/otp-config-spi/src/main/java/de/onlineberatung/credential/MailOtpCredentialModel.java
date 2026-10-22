@@ -106,6 +106,16 @@ public class MailOtpCredentialModel extends CredentialModel {
     return this;
   }
 
+  /** When the failed-attempt lockout ends (epoch millis); null for a credential never locked. */
+  public Long getLockedUntil() {
+    return credentialData.getLockedUntil();
+  }
+
+  /** Which step of the lockout ladder the last lockout was; 0 when there was none. */
+  public int getLockoutLevel() {
+    return credentialData.getLockoutLevel();
+  }
+
   /** Whether the stored code can still be typed in: neither used nor expired. */
   public boolean hasLiveCode(Clock clock) {
     var code = secretData.getCode();
@@ -126,6 +136,16 @@ public class MailOtpCredentialModel extends CredentialModel {
 
   void invalidateCode() {
     this.secretData.setCode(INVALIDATED);
+  }
+
+  void lockOut(long lockedUntil, int level) {
+    this.credentialData.setLockedUntil(lockedUntil);
+    this.credentialData.setLockoutLevel(level);
+  }
+
+  void clearLockout() {
+    this.credentialData.setLockedUntil(null);
+    this.credentialData.setLockoutLevel(0);
   }
 
   void updateInternalModel() {
