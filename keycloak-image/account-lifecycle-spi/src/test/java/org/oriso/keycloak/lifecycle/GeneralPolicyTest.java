@@ -82,6 +82,21 @@ public class GeneralPolicyTest {
     var empty = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read"); empty.putArray("workflowOperations"); assertNotNull(new GeneralPolicy(empty));
   }
 
+  @Test
+  public void ordinaryAdoptionHasOnlyExactInstalledProfileAndVersion() {
+    var value=(com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    var profile=((com.fasterxml.jackson.databind.node.ObjectNode)value.path("ordinaryProfiles").path(0)).deepCopy();
+    profile.put("id","reviewed-user-v2");profile.put("version",2);profile.put("groupId","user-group");profile.put("groupPath","/human-roles/user");profile.putArray("realmRoles").add("user");
+    ((com.fasterxml.jackson.databind.node.ArrayNode)value.path("ordinaryProfiles")).add(profile);
+    var entry=value.putArray("adoptedAccounts").addObject();entry.put("accountId","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");entry.put("ordinaryProfileId","reviewed-user-v2");entry.put("profileVersion",2);
+    try { assertNotNull(new GeneralPolicy(value)); } catch(WebApplicationException refused){fail("Reviewed ordinary adoption rejected with status "+refused.getResponse().getStatus());}
+    for(String field:List.of("accountId","ordinaryProfileId","profileVersion")){var wrong=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("adoptedAccounts").path(0)).remove(field);rejectAdmin(wrong);}
+    var stale=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)stale.path("adoptedAccounts").path(0)).put("profileVersion",1);rejectAdmin(stale);
+    var unknown=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)unknown.path("adoptedAccounts").path(0)).put("ordinaryProfileId","missing");rejectAdmin(unknown);
+    var duplicate=value.deepCopy();((com.fasterxml.jackson.databind.node.ArrayNode)duplicate.path("adoptedAccounts")).add(entry.deepCopy());rejectAdmin(duplicate);
+    var extra=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)extra.path("adoptedAccounts").path(0)).put("authority","DELETE");rejectAdmin(extra);
+  }
+
   private static void rejectAdmin(JsonNode value) {
     try { new GeneralPolicy(value); fail("Unreviewed ordinary admin policy accepted"); }
     catch (WebApplicationException rejected) { assertEquals(400, rejected.getResponse().getStatus()); }

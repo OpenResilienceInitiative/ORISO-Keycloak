@@ -91,3 +91,58 @@ def exercise(test, helper, observed):
             test.assertEqual(409, conflict_status); test.assertNotIn('receipt', conflict)
             records[label]['effectAndExactRetryVerified'] = True
             records[label]['exactSavedReadAndClaimReservationVerified'] = True
+    if all(value.get('effectAndExactRetryVerified') for value in records.values()):
+        terminal_and_expired_history(test, helper, observed)
+
+
+def terminal_and_expired_history(test, helper, observed):
+    account, _ = committed(test, helper)
+    native = helper.admin('GET', '/users/' + account)
+    def selection(deadline):
+        target = {'accountId': account, 'tenantId': native['attributes']['tenantId'][0], 'origin': {
+            'kind': 'PASSWORD_RESET', 'workflowId': str(uuid.uuid4()), 'humanSubject': None,
+            'humanIssuer': None, 'humanClient': None, 'humanAuthority': None}}
+        workflow = {'v': 1, 'kind': 'PASSWORD_RESET', 'claimId': str(uuid.uuid4()), 'claimVersion': 1,
+            'authorityValidUntil': deadline, 'expectedUsername': native['username'].upper(),
+            'expectedEmailDigest': mac('maintenance-workflow-email/v1', native['email']),
+            'profileKind': 'ORDINARY', 'profileId': 'consultant-v1', 'profileVersion': 1}
+        return {'target': target, 'workflow': workflow}
+    read = selection(int(time.time()) + 120)
+    status, current = invoke(helper, account, 'account.password-reset.read', read)
+    test.assertEqual(200, status)
+    body = {**copy.deepcopy(read), 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
+            'change': {'password': 'Too-short-1', 'temporary': False}}
+    realm = helper.admin('GET', '')
+    helper.admin('PUT', '', {'passwordPolicy': 'length(100)'})
+    try:
+        status, terminal = invoke(helper, account, 'account.password-reset', body)
+        test.assertEqual(400, status); test.assertEqual('NO_EFFECT', terminal['result'])
+        test.assertEqual({'operationId', 'accountId', 'result', 'status', 'receipt'}, set(terminal))
+        encoded, signature = terminal['receipt'].split('.')
+        test.assertEqual(hmac.new(CONTEXT_KEY, ('maintenance-no-effect-receipt/v1\n' + encoded).encode(), hashlib.sha256).hexdigest(), signature)
+        payload = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+        test.assertEqual(12, len(payload)); test.assertEqual(400, payload['status']); test.assertEqual('password-reset', payload['command'])
+        test.assertEqual(mac('maintenance-intent', body), payload['intentDigest'])
+    finally:
+        helper.admin('PUT', '', {'passwordPolicy': realm.get('passwordPolicy', '')})
+    test.assertEqual((status, terminal), invoke(helper, account, 'account.password-reset', body))
+    test.assertEqual((status, terminal), invoke(helper, account, 'account.password-reset.read', read))
+    read = selection(int(time.time()) + 5)
+    status, current = invoke(helper, account, 'account.password-reset.read', read)
+    test.assertEqual(200, status)
+    body = {**copy.deepcopy(read), 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
+            'change': {'password': 'Historical-causal-' + uuid.uuid4().hex, 'temporary': False}}
+    status, result = invoke(helper, account, 'account.password-reset', body)
+    test.assertEqual(200, status)
+    time.sleep(max(0, read['workflow']['authorityValidUntil'] - int(time.time()) + 1))
+    changed = copy.deepcopy(native); changed['firstName'] = 'Concurrent-native-profile'
+    helper.admin('PUT', '/users/' + account, changed)
+    before = helper.admin('GET', '/users/' + account)
+    test.assertEqual((status, result), invoke(helper, account, 'account.password-reset.read', read))
+    test.assertEqual((status, result), invoke(helper, account, 'account.password-reset', body))
+    test.assertEqual(before, helper.admin('GET', '/users/' + account))
+    missing = copy.deepcopy(read); missing['workflow']['claimId'] = str(uuid.uuid4())
+    missing_status, missing_reply = invoke(helper, account, 'account.password-reset.read', missing)
+    test.assertEqual(400, missing_status); test.assertNotIn('receipt', missing_reply)
+    observed['causalTerminalHistory'] = {'policy400SignedAndFenced': True,
+        'savedReadAndMutationAfterExpiryBeforeMutableState': True, 'expiredAbsentDenied': True}

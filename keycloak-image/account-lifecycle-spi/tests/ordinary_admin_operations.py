@@ -32,6 +32,17 @@ def install_policy(cls, helper, protected):
               'adminOperations': [{'authority': authority, 'selfOnly': False,
                                    'targetProfiles': ['consultant-v1', 'consultant-basic-v1', 'user-v1'],
                                    'operations': OPERATIONS} for authority in ['PLATFORM', 'TENANT_PEER']]}
+    username = 'adopted-ordinary-' + uuid.uuid4().hex
+    helper.admin('POST', '/users', {'username': username, 'enabled': True, 'email': username + '@oriso.org',
+        'firstName': 'Legacy', 'lastName': 'Asker', 'attributes': {'tenantId': ['11']}})
+    users = helper.admin('GET', '/users?username=' + username + '&exact=true'); helper.assertEqual(1, len(users))
+    account = users[0]['id']; defaults = helper.admin('GET', '/users/' + account + '/role-mappings/realm')
+    if defaults: helper.admin('DELETE', '/users/' + account + '/role-mappings/realm', defaults)
+    helper.admin('PUT', '/users/' + account + '/groups/' + helper.group_id('/human-roles/user'))
+    config['adoptedAccounts'] = [{'accountId': account, 'ordinaryProfileId': 'user-v1', 'profileVersion': 1}]
+    cls.ordinary_adopted_account = account
+    config['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': ['consultant-v1'],
+        'operations': ['account.deactivate', 'account.reactivate', 'account.read']}]
     command = cls.command.copy()
     index = command.index(IMAGE)
     command[index:index] = ['-e', 'ORISO_ACCOUNT_MAINTENANCE_CONFIG=' + json.dumps(config, separators=(',', ':'))]
@@ -126,6 +137,22 @@ def exercise(test, helper, primary, peer, observed):
         status, _ = HumanMaintenanceFixture.invoke(helper, 'read', {'target': cross}, peer[1], 403)
         test.assertEqual(403, status)
         observed['ordinaryCrossTenantPeerDenied'] = True
+        status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, primary, 200)
+        test.assertEqual(200, status)
+        refused = {'target': copy.deepcopy(target), 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
+            'change': {'expectedUsername': native['username'], 'expectedEmail': native['email'], 'password': 'short'}}
+        realm = helper.admin('GET', ''); helper.admin('PUT', '', {'passwordPolicy': 'length(100)'})
+        try:
+            status, terminal = HumanMaintenanceFixture.invoke(helper, 'reactivate', refused, primary, 400)
+            records['reactivatePolicy400'] = {'status': status, 'preconditions': True}
+            with test.subTest(operation='ordinary.reactivate.policy400'):
+                test.assertEqual(400, status); test.assertEqual('NO_EFFECT', terminal.get('result'))
+                test.assertEqual({'operationId', 'accountId', 'result', 'status', 'receipt'}, set(terminal))
+                records['reactivatePolicy400']['signedPrewriteRefusal'] = True
+        finally:
+            helper.admin('PUT', '', {'passwordPolicy': realm.get('passwordPolicy', '')})
+        if terminal.get('result') == 'NO_EFFECT':
+            test.assertEqual((status, terminal), HumanMaintenanceFixture.invoke(helper, 'reactivate', refused, primary, 400))
     finally:
         helper.account_id, helper.creation_input = old_account, old_create
 

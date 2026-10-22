@@ -32,6 +32,14 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'authority': 'PLATFORM', 'targetProfiles': ['platform-v1', PROFILE], 'selfOnly': False,
             'operations': ['account.email', 'account.profile', 'account.read'],
         }]
+        value['bindings'][0]['accountOperations'].append({
+            'authority': 'PLATFORM', 'targetProfiles': [PROFILE], 'selfOnly': False,
+            'operations': ['account.deactivate', 'account.reactivate', 'account.reassign-tenant']})
+        value['bindings'][0]['accountOperations'].append({
+            'authority': 'PLATFORM', 'targetProfiles': ['platform-v1'], 'selfOnly': False,
+            'operations': ['account.deactivate', 'account.reactivate']})
+        value['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': [PROFILE, 'platform-v1'],
+            'operations': ['account.deactivate', 'account.reactivate', 'account.read']}]
         from ordinary_admin_operations import install_policy
         from protected_adoption_operations import install
         install_policy(cls, helper, value)
@@ -132,6 +140,12 @@ class ProtectedOperationRead(PeerReadiness):
         adoption(self, helper, primary, o)
         from causal_password_operations import exercise as causal
         causal(self, helper, o)
+        from tenant_reassignment_operations import exercise as reassignment
+        reassignment(self, helper, primary, (account, human), o)
+        from inactivity_operations import exercise as inactivity
+        inactivity(self, helper, primary, (account, human), o)
+        from ordinary_adoption_operations import exercise as ordinary_adoption
+        ordinary_adoption(self, helper, o)
 
     def remaining_operations(self, helper, account, human, target, observed):
         """Five finite public receiver assertions; every setup error remains an error."""
@@ -348,6 +362,7 @@ class ProtectedOperationRead(PeerReadiness):
         self.assertTrue(grant['selfOnly'])
         self.assertIn('platform-v1', grant['targetProfiles'])
         self.assertIn('otp.read', grant['operations'])
+        type(helper).new_platform_account = account
         observed['newPlatformCommittedConsumedNative0AndRealSessionVerified'] = True
         observed['newPlatformExplicitRootSelfGrantWithoutPersonBindingVerified'] = True
         target = {'accountId': account, 'tenantId': '0', 'origin': {'kind': 'SELF',
