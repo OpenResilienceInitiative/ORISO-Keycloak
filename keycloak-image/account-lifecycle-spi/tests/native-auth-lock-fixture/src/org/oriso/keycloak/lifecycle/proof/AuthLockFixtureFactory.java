@@ -97,7 +97,10 @@ public final class AuthLockFixtureFactory implements RealmResourceProviderFactor
             String sql = row[3] == null ? "" : row[3].toString().toLowerCase(java.util.Locale.ROOT)
                 .replace('"', ' ').replaceAll("\\s+", " ").trim();
             // SQL and session identifiers are examined only in this native worker's memory.
-            boolean exactRealmQuery = sql.matches("select .+ from (public\\.)?realm [a-z0-9_]+ where [a-z0-9_]+\\.id=\\? for update");
+            // H2 Command.toString appends Trace.formatParams. Require that one
+            // exact parameter to be this holder's actual canonical realm UUID.
+            boolean exactRealmQuery = sql.matches("select .+ from (public\\.)?realm [a-z0-9_]+ where [a-z0-9_]+\\.id=\\? for update \\{1: '"
+                + java.util.regex.Pattern.quote(realmId) + "'\\}");
             if (((Number) row[0]).longValue() != holder && "BLOCKED".equals(row[1])
                 && row[2] instanceof Number n && n.longValue() == holder && exactRealmQuery && !blocked) {
               blocked = true;
