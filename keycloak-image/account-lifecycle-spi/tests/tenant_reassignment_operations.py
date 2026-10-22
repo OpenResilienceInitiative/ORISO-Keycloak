@@ -21,13 +21,14 @@ def exercise(test, helper, primary, peer, observed):
                 'change': {'tenantId': '22'}}
         # The current consumed peer is never a PLATFORM reassignment source.
         denied = copy.deepcopy(body); denied['operationId'] = str(uuid.uuid4()); denied['target']['origin']['humanSubject'] = peer[0]
-        test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'reassign-tenant', denied, peer[1], 403)[0])
+        peer_status, _ = HumanMaintenanceFixture.invoke(helper, 'reassign-tenant', denied, peer[1], 403)
         before_groups = helper.admin('GET', '/users/' + account + '/groups')
         before_roles = helper.admin('GET', '/users/' + account + '/role-mappings')
         status, result = HumanMaintenanceFixture.invoke(helper, 'reassign-tenant', body, primary, 200)
-        records[label] = {'status': status, 'preconditions': True}
+        records[label] = {'status': status, 'preconditions': True, 'peerStatus': peer_status}
         with test.subTest(operation='tenant-reassignment.' + label):
             test.assertEqual(200, status); test.assertEqual('UPDATED', result['result'])
+            test.assertEqual(403, peer_status)
             test.assertEqual(['22'], helper.admin('GET', '/users/' + account)['attributes']['tenantId'])
             test.assertEqual(before_groups, helper.admin('GET', '/users/' + account + '/groups'))
             test.assertEqual(before_roles, helper.admin('GET', '/users/' + account + '/role-mappings'))
