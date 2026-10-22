@@ -87,6 +87,11 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         "execution", "accountId", "creationProof", compensate ? "localCleanup" : "localCommit");
     else fields(body, "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint",
         "execution", "accountId", "creationProof");
+    var allowedActors = recover || compensate ? Set.of("ACCOUNT_CREATE", "ACCOUNT_ADMIN") : Set.of("ACCOUNT_CREATE");
+    var preflight = machineAuthorization.preflightMachine(session, allowedActors);
+    var machine = preflight.machine();
+    crypto.verifyProtectedCommand(proof, machine, "protected-account." + (recover ? "creation-recover" : command), create ? "PUT" : "POST",
+        "realm/" + config.realmId + "/protected-invitation/" + approval + "/account-attempt/" + attempt, body);
     var em = lockedRealm();
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
@@ -94,8 +99,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var currentAttempt = em.find(AccountLifecycleAttempt.class, attemptKey, LockModeType.PESSIMISTIC_WRITE);
     if (currentAttempt != null) em.refresh(currentAttempt);
     // Current native grant checks run after the relevant provenance locks.
-    var machine = machineAuthorization.requireMachine(session,
-        recover || compensate ? Set.of("ACCOUNT_CREATE", "ACCOUNT_ADMIN") : Set.of("ACCOUNT_CREATE"));
+    machineAuthorization.requireCurrentMachine(session, preflight, allowedActors);
+    // Preserve the original expiry decision after any wait for those locks.
     crypto.verifyProtectedCommand(proof, machine, "protected-account." + (recover ? "creation-recover" : command), create ? "PUT" : "POST",
         "realm/" + config.realmId + "/protected-invitation/" + approval + "/account-attempt/" + attempt, body);
     if (row == null) deny();
@@ -428,11 +433,12 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var request = parse(raw);
     fields(request, "scope");
     var scope = request.path("scope");
+    var nativeHuman = NativeHumanBearer.require(session);
     var em = lockedRealm();
     // The verified native subject may resolve one consumed origin. Lock that
     // origin/attempt before any fresh human authorization projection.
     var peers = new ProtectedPeerDelegation(session, config, crypto);
-    var resolved = peers.resolve(NativeHumanBearer.require(session), em);
+    var resolved = peers.resolve(nativeHuman, em);
     var binding = resolved.binding();
     String key = key(config.realmId, approval);
     var row = em.find(ProtectedInvitationApproval.class, key, LockModeType.PESSIMISTIC_WRITE);
@@ -522,18 +528,22 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     if (scopeDigest != null) hex(scopeDigest);
     String reason = text(body, "reason", 30, false);
     if (!Set.of("REVOKED", "SUPERSEDED", "ISSUANCE_ABORTED").contains(reason)) bad();
+    var nativeHuman = proof == null ? NativeHumanBearer.require(session) : null;
+    var preflight = proof == null ? null : machineAuthorization.preflightMachine(session, Set.of("SETUP"));
+    var machine = preflight == null ? null : preflight.machine();
+    if (machine != null) crypto.verifyProtectedCommand(proof, machine, "protected-invitation.cancel", "POST",
+        "realm/" + config.realmId + "/protected-invitation/" + approval, body);
     var em = lockedRealm();
     var peers = new ProtectedPeerDelegation(session, config, crypto);
     // A delegated origin and its attempt precede the target approval/attempt and user locks.
-    var resolved = proof == null ? peers.resolve(NativeHumanBearer.require(session), em) : null;
+    var resolved = proof == null ? peers.resolve(nativeHuman, em) : null;
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
     var boundAttempt = lockedBoundAttempt(row, em);
-    LifecycleAuthorization.CheckedMachine machine = null;
     CurrentHumanAuthorization.VerifiedHuman human = null;
     ProtectedInvitationConfiguration.Binding binding = null;
     if (proof != null) {
-      machine = machineAuthorization.requireMachine(session, Set.of("SETUP"));
+      machineAuthorization.requireCurrentMachine(session, preflight, Set.of("SETUP"));
       crypto.verifyProtectedCommand(proof, machine, "protected-invitation.cancel", "POST",
           "realm/" + config.realmId + "/protected-invitation/" + approval, body);
     } else {
@@ -704,12 +714,15 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     if (scopeDigest != null) hex(scopeDigest);
     String attempt = text(body, "attemptId", 36, true);
     if (attempt != null) uuid(attempt);
+    var preflight = machineAuthorization.preflightMachine(session, Set.of("SETUP"));
+    var machine = preflight.machine();
+    // Authenticate the original HTTP command before any lifecycle row lock.
+    crypto.verifyProtectedCommand(proof, machine, "protected-invitation.status", "POST",
+        "realm/" + config.realmId + "/protected-invitation/" + approval, body);
     var em = lockedRealm();
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
-    var machine = machineAuthorization.requireMachine(session, Set.of("SETUP"));
-    // The route selects the protected MAC domains and binds the original wire
-    // bytes semantically before any future internal lifecycle translation.
+    machineAuthorization.requireCurrentMachine(session, preflight, Set.of("SETUP"));
     crypto.verifyProtectedCommand(proof, machine, "protected-invitation.status", "POST",
         "realm/" + config.realmId + "/protected-invitation/" + approval, body);
     if (row == null) throw new NotFoundException();
