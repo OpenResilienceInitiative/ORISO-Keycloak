@@ -36,7 +36,7 @@ class HumanMaintenanceFixture(LifecycleFixture):
 
     @classmethod
     def reviewed_self_operations(cls):
-        return ["account.read", "account.locale"]
+        return ["account.read", "account.locale", "account.profile", "account.password"]
 
     @classmethod
     def reviewed_human_profile(cls):
@@ -436,6 +436,40 @@ class HumanMaintenanceFixture(LifecycleFixture):
         return status, value
 
 class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
+    def test_real_human_self_profile_is_receipt_bound_and_does_not_replay_over_later_edits(self):
+        human = self.human()
+        self.phase("ordinary-committed", create_status=201, commit_status=200)
+        origin = {"kind": "SELF", "workflowId": str(uuid.uuid4()),
+                  "humanSubject": self.account_id, "humanIssuer": ISSUER,
+                  "humanClient": CLIENT, "humanAuthority": None}
+        target = {"accountId": self.account_id, "tenantId": "11", "origin": origin}
+        status, before = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        native = self.admin("GET", "/users/" + self.account_id)
+        body = {"target": target, "operationId": str(uuid.uuid4()),
+                "expectedState": before["state"],
+                "change": {"firstName": "Updated", "lastName": "Ordinary", "email": native["email"]}}
+        status, result = self.invoke("profile", body, human, 200)
+        self.assertEqual(200, status)
+        encoded = result["receipt"].split(".")[0]
+        self.assertEqual(hmac.new(CONTEXT_KEY, ("maintenance-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest(), result["receipt"].split(".")[1])
+        receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual("profile", receipt["command"])
+        self.assertEqual(mac("maintenance-intent", body), receipt["intentDigest"])
+        self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], receipt["ownerSubject"])
+        updated = self.admin("GET", "/users/" + self.account_id)
+        self.assertEqual("Updated", updated["firstName"])
+        self.assertEqual("Ordinary", updated["lastName"])
+        self.assertEqual(native["email"], updated["email"])
+        updated["firstName"] = "Later installer edit"
+        self.admin("PUT", "/users/" + self.account_id, updated)
+        self.assertEqual((200, result), self.invoke("profile", body, human, 200))
+        self.assertEqual("Later installer edit", self.admin("GET", "/users/" + self.account_id)["firstName"])
+        changed = json.loads(json.dumps(body)); changed["change"]["firstName"] = "Conflicting"
+        self.assertEqual(409, self.invoke("profile", changed, human, 409)[0])
+        stale = json.loads(json.dumps(body)); stale["operationId"] = str(uuid.uuid4())
+        self.assertEqual(409, self.invoke("profile", stale, human, 409)[0])
+
     def test_real_human_self_locale_keeps_admin_receipt_owner_and_rejects_origin_mix(
         self,
     ):

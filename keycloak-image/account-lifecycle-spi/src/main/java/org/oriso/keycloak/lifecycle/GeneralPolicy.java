@@ -143,10 +143,10 @@ final class GeneralPolicy {
       if (!value.path("allowUnassignedTenant").isBoolean()) bad();
       allowUnassignedTenant = value.path("allowUnassignedTenant").asBoolean();
       var operations = value.path("selfOperations");
-      if (!operations.isArray() || operations.isEmpty() || operations.size() > 7) bad();
+      if (!operations.isArray() || operations.isEmpty() || operations.size() > 9) bad();
       var selected = new HashSet<String>();
       for (var operation : operations) {
-        if (!operation.isTextual() || !Set.of("account.read", "account.locale", "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish").contains(operation.asText())
+        if (!operation.isTextual() || !Set.of("account.read", "account.locale", "account.profile", "account.password", "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish").contains(operation.asText())
             || !selected.add(operation.asText())) bad();
       }
       selfOperations = Set.copyOf(selected);
