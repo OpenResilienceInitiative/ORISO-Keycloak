@@ -2,6 +2,7 @@ import copy
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
 
 spec = importlib.util.spec_from_file_location("s1_proof", Path(__file__).parents[1] / "ci/session-exchange-proof.py")
 p = importlib.util.module_from_spec(spec)
@@ -58,6 +59,49 @@ class SessionProofControls(unittest.TestCase):
                        lambda x:x[0].update(confirmedAbsent=False),lambda x:x[0].pop("confirmedAbsent")):
             bad=copy.deepcopy(good);mutate(bad)
             self.assertFalse(p.groups_ok(bad,2))
+
+    def test_formatter_cannot_change_adjacent_untracked_or_empty_sources(self):
+        self.assertTrue(p.format_allowed([p.USER_FILES[0]],""))
+        self.assertFalse(p.format_allowed([],""))
+        self.assertFalse(p.format_allowed([p.USER_FILES[0]],"untracked.java"))
+        self.assertFalse(p.format_allowed(["src/main/java/Adjacent.java"],""))
+
+    def test_only_confirmed_formatter_failure_can_trigger_private_proposal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log=Path(directory)/"compile.log"
+            secret="private-provider-message-never-export"
+            log.write_text("spotless-maven-plugin:check "+secret)
+            self.assertIs(p.compile_diagnostics(log)["spotlessConfirmed"],False)
+            log.write_text("The following files had format violations:\nRun 'mvn spotless:apply'\n"+secret)
+            result=p.compile_diagnostics(log)
+            self.assertIs(result["spotlessConfirmed"],True)
+            self.assertNotIn(secret,str(result))
+            self.assertEqual({"spotlessConfirmed","ownedFilesMentioned","compilerFailure"},set(result))
+
+    def test_formatter_replaces_unstarted_tests_in_exact_three_group_catalogue(self):
+        self.assertEqual(["toolchain","user-compile","user-formatter"],p.planned_groups("user",True))
+        self.assertEqual(["toolchain","user-compile","user-tests"],p.planned_groups("user",False))
+        self.assertEqual(4,len(p.planned_groups("native",False)))
+        with self.assertRaises(RuntimeError):p.planned_groups("user","true")
+        with self.assertRaises(RuntimeError):p.planned_groups("native",True)
+        with self.assertRaises(RuntimeError):p.planned_groups("unknown",False)
+        three=[{"processGroup":i,"confirmedAbsent":True} for i in (1,2,3)]
+        self.assertTrue(p.groups_ok(three,len(p.planned_groups("user",True))))
+        self.assertFalse(p.groups_ok(three[:2],len(p.planned_groups("user",True))))
+        self.assertTrue(p.named_groups_ok(three,p.planned_groups("user",True),p.planned_groups("user",True)))
+        self.assertFalse(p.named_groups_ok(three,p.planned_groups("user",False),p.planned_groups("user",True)))
+        self.assertFalse(p.named_groups_ok(three[:2],p.planned_groups("user",True),p.planned_groups("user",True)))
+
+    def test_failed_worktree_add_can_remove_only_its_exact_owned_empty_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve()
+            scratch=Path(tempfile.mkdtemp(prefix="s1-owned-user-format-",dir=root))
+            stat=scratch.stat();owner=(stat.st_dev,stat.st_ino,stat.st_uid)
+            self.assertTrue(p.empty_owned_scratch(scratch,owner,root))
+            self.assertFalse(p.empty_owned_scratch(scratch,(owner[0],owner[1]+1,owner[2]),root))
+            self.assertFalse(p.empty_owned_scratch(scratch,owner,root/"other"))
+            (scratch/"foreign").write_text("do not remove")
+            self.assertFalse(p.empty_owned_scratch(scratch,owner,root))
 
     def test_runtime_requires_one_known_false_oom_integer_zero_restart(self):
         good=[{"kind":"container","runtime":{"oomKilled":False,"restartCount":0}}]

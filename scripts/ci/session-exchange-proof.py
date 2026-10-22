@@ -101,6 +101,119 @@ def runtime_known(cleanup):
             and type(rows[0].get("restartCount")) is int and rows[0]["restartCount"] == 0)
 
 
+def named_groups_ok(groups, executed, planned):
+    return isinstance(planned,list) and executed == planned and groups_ok(groups,len(planned))
+
+
+def compile_diagnostics(log):
+    value = log.read_text(errors="replace")
+    return {"spotlessConfirmed": "The following files had format violations:" in value
+            and "Run 'mvn spotless:apply'" in value,
+            "ownedFilesMentioned": [Path(p).name for p in USER_FILES if Path(p).name in value],
+            "compilerFailure": "maven-compiler-plugin" in value and "[ERROR]" in value}
+
+
+def native_failure_frames(value):
+    frames, types = [], []
+    for line in value.splitlines():
+        match = re.search(r"\bat ((?:org\.oriso|de\.onlineberatung|org\.keycloak)\.[A-Za-z0-9_.$<>]+)\(([A-Za-z0-9_$.-]+\.java):(\d+)\)", line)
+        if match:
+            row = {"method":match[1],"file":match[2],"line":int(match[3])}
+            if row not in frames: frames.append(row)
+        match = re.search(r"\b((?:java\.lang|org\.keycloak|org\.hibernate|io\.quarkus|jakarta)\.[A-Za-z0-9_.$]+(?:Exception|Error))(?=:|$)",line)
+        if match and match[1] not in types: types.append(match[1])
+    return {"exceptionTypes":types[:8],"sourceFrames":frames[-12:]}
+
+
+def format_allowed(changed, untracked):
+    return bool(changed) and set(changed).issubset(USER_FILES) and not untracked
+
+
+def empty_owned_scratch(scratch, owner, runtemp):
+    if (scratch.is_symlink() or scratch.parent != runtemp.resolve()
+            or not scratch.name.startswith("s1-owned-user-format-") or not scratch.is_dir()):
+        return False
+    stat = scratch.stat()
+    return (stat.st_dev,stat.st_ino,stat.st_uid) == owner and not list(scratch.iterdir())
+
+
+def planned_groups(role, formatted=False):
+    if type(formatted) is not bool or role not in {"user","native"} or (role == "native" and formatted):
+        raise RuntimeError("Known role/formatter-attempt state required")
+    if role == "native":
+        return ["toolchain","lifecycle-compile","otp-compile","native-test"]
+    return ["toolchain","user-compile","user-formatter" if formatted else "user-tests"]
+
+
+def verify_format_delta(user, scratch, ref, deadline):
+    def checked_git(root, *args):
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Original compile deadline exhausted")
+        return subprocess.check_output(["git",*args],cwd=root,timeout=min(30,remaining))
+    if (checked_git(user,"rev-parse","HEAD").decode().strip() != ref
+            or checked_git(user,"status","--porcelain")
+            or checked_git(scratch,"rev-parse","HEAD").decode().strip() != ref
+            or (scratch/checked_git(scratch,"rev-parse","--git-common-dir").decode().strip()).resolve()
+            != (user/checked_git(user,"rev-parse","--git-common-dir").decode().strip()).resolve()):
+        raise RuntimeError("Exact owned formatter sources required")
+    changed = checked_git(scratch,"diff","--name-only").decode().splitlines()
+    if not format_allowed(changed,checked_git(scratch,"ls-files","--others","--exclude-standard")):
+        raise RuntimeError("Any unowned formatter delta refuses")
+    patch = checked_git(scratch,"diff","--",*USER_FILES)
+    return patch,{"changedPaths":changed,"patchSHA256":hashlib.sha256(patch).hexdigest()}
+
+
+def mechanical_proposal(user, ref, support, env, private, out, deadline, report):
+    # Same live MemoryLease/baseline as failed compilation; never reset for the formatter.
+    if git(user,"rev-parse","HEAD") != ref or git(user,"status","--porcelain"):
+        raise RuntimeError("Exact clean original formatter source required")
+    before = snapshot(user)
+    scratch = Path(tempfile.mkdtemp(prefix="s1-owned-user-format-",dir=os.environ["RUNNER_TEMP"]))
+    stat = scratch.stat()
+    owner = (stat.st_dev,stat.st_ino,stat.st_uid)
+    receipt = {"state":"NO_PROPOSAL","ref":ref,"allowedPaths":list(USER_FILES),
+               "sourceBefore":before,"scratchConfirmedAbsent":False}
+    try:
+        git(user,"worktree","add","--detach",str(scratch),ref)
+        if git(scratch,"rev-parse","HEAD") != ref:
+            raise RuntimeError("Immutable scratch source required")
+        scope = "|".join(re.escape(str(scratch/p)) for p in USER_FILES)
+        report["executedGroupNames"].append("user-formatter")
+        result = support.bounded([str(scratch/"mvnw"),"-B","-ntp","-q",
+            "-DspotlessFiles="+scope,"spotless:apply"],scratch,env,private/"formatter.log",420,deadline)
+        if result:
+            raise RuntimeError("Scoped owned formatter failed")
+        patch,delta = verify_format_delta(user,scratch,ref,deadline)
+        receipt.update(delta)
+        receipt["state"] = "MECHANICAL_PROPOSAL_ONLY"
+    finally:
+        if scratch.exists():
+            if empty_owned_scratch(scratch,owner,Path(os.environ["RUNNER_TEMP"])):
+                scratch.rmdir()
+            else:
+                stat = scratch.stat()
+                common = (user/ git(user,"rev-parse","--git-common-dir")).resolve()
+                scratch_common = (scratch/git(scratch,"rev-parse","--git-common-dir")).resolve()
+                if (scratch.is_symlink() or (stat.st_dev,stat.st_ino,stat.st_uid) != owner
+                        or scratch.parent != Path(os.environ["RUNNER_TEMP"]).resolve()
+                        or not scratch.name.startswith("s1-owned-user-format-")
+                        or git(scratch,"rev-parse","HEAD") != ref or scratch_common != common):
+                    raise RuntimeError("Exact scratch ownership unavailable; removal refused")
+                git(user,"worktree","remove","--force",str(scratch))
+        receipt["sourceAfter"] = snapshot(user)
+        receipt["originalSourcesStable"] = receipt["sourceAfter"] == before
+        receipt["scratchConfirmedAbsent"] = not scratch.exists()
+        receipt["totalDeadlineRetained"] = time.monotonic() <= deadline
+        if not all(receipt[k] for k in ("originalSourcesStable","scratchConfirmedAbsent","totalDeadlineRetained")):
+            receipt["state"] = "NO_ACCEPTANCE"
+        (out/"mechanical-receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
+    if receipt["state"] != "MECHANICAL_PROPOSAL_ONLY":
+        raise RuntimeError("No qualified mechanical proposal")
+    (out/"mechanical.patch").write_bytes(patch)
+    return receipt
+
+
 def safe_xml(reports, out):
     inventory = {}
     for path in sorted(reports.glob("TEST-*.xml")):
@@ -206,7 +319,8 @@ def main():
         wrapper = str(user / "mvnw")
         common = [wrapper, "-B", "-ntp", "-q", "-Dmaven.wagon.http.retryHandler.count=3"]
         compile_end = min(time.monotonic() + 420, overall)
-        report["plannedGroups"] = ["toolchain", "user-compile", "user-tests"] if args.role == "user" else ["toolchain", "lifecycle-compile", "otp-compile", "native-test"]
+        report["plannedGroups"] = planned_groups(args.role)
+        report["executedGroupNames"] = ["toolchain"]
         report["toolchainExit"] = support.bounded([wrapper, "--version"], user, env,
             private / "toolchain.log", 60, compile_end)
         version = (private / "toolchain.log").read_text(errors="replace")
@@ -218,14 +332,23 @@ def main():
                 raise RuntimeError("Fresh user compiled output required")
             scoped = "|".join(re.escape(str(user / p)) for p in USER_FILES)
             command = [*common, "-DspotlessFiles=" + scoped, "test-compile"]
+            report["executedGroupNames"].append("user-compile")
             report["compileExit"] = support.bounded(command, user, env, private / "user-compile.log", 420, compile_end)
             if report["compileExit"]:
+                report["compileDiagnostics"] = compile_diagnostics(private/"user-compile.log")
+                if report["compileDiagnostics"]["spotlessConfirmed"]:
+                    report["formatterAttempted"] = True
+                    report["plannedGroups"] = planned_groups(args.role,True)
+                    report["testsNotStartedBecauseCompileFailed"] = True
+                    report["formatProposal"] = mechanical_proposal(user,args.user_ref,support,env,private,out,compile_end,report)
+                    report["classification"] = "MECHANICAL_PROPOSAL_ONLY_NO_FEATURE_RED"
                 return 1
             compiled = user / "target/test-classes" / Path(USER_SUITE.replace(".", "/") + ".class")
             report["compiledTestSHA256"] = hashlib.sha256(compiled.read_bytes()).hexdigest()
             reports = user / "target/surefire-reports"
             if reports.exists():
                 raise RuntimeError("Fresh user XML directory required")
+            report["executedGroupNames"].append("user-tests")
             report["testExit"] = support.bounded([*common, "-Dtest=" + USER_SUITE,
                 "-DfailIfNoTests=true", "-DforkCount=1", "-DreuseForks=false",
                 "-DargLine=-Xmx384m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2", "test"],
@@ -245,10 +368,12 @@ def main():
             for name, folder, goal in (("lifecycle", module, "install"), ("otp", otp, "package")):
                 if (folder / "target").exists():
                     raise RuntimeError("Fresh native compiled output required")
+                report["executedGroupNames"].append(name+"-compile")
                 report[name + "CompileExit"] = support.bounded([*common, "-f", str(folder / "pom.xml"),
                     "-DargLine=-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2", goal],
                     root, env, private / (name + "-compile.log"), 420, compile_end)
                 if report[name + "CompileExit"]:
+                    report[name+"CompileDiagnostics"] = compile_diagnostics(private/(name+"-compile.log"))
                     return 1
                 phase = out / (name + "-units")
                 phase.mkdir()
@@ -293,6 +418,9 @@ def main():
                        "--cpus", "2", "-p", "127.0.0.1::8080"]
             values = {"KC_BOOTSTRAP_ADMIN_USERNAME": "synthetic-installer", "KC_BOOTSTRAP_ADMIN_PASSWORD": native.INSTALLER,
                 "JAVA_OPTS_APPEND": "-Xms128m -Xmx384m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2",
+                "IDENTITY_ACCOUNT_ADMIN_CLIENT_ID": "backend-account-admin",
+                "ORISO_APP_BASE_URL": "https://otp-fixture.internal",
+                "EMAIL_BRANDING_NAME": "OTP Fixture", "EMAIL_LEGAL_ORGANISATION_NAME": "Fixture Operator",
                 "TASK_IDENTITY_MODEL": "FIVE_ACTORS", "ORISO_ACCOUNT_LIFECYCLE_ENABLED": "true",
                 "ORISO_ACCOUNT_LIFECYCLE_REALM": native.REALM,
                 "IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT": native.SUBJECTS["ACCOUNT_CREATE"],
@@ -331,6 +459,7 @@ def main():
                 raise RuntimeError("Finite native readiness unavailable")
             report["nativeResourcesStarted"] = True
             env.update(S1_NATIVE_BASE=base, S1_INSTALLER_BEARER=installer, S1_CHILD_EVIDENCE=str(out))
+            report["executedGroupNames"].append("native-test")
             report["testExit"] = support.bounded([sys.executable, str(Path(__file__).resolve()), "--native-child"],
                 root, env, private / "native-tests.log", 300, overall)
             receipt = json.loads((out / "native-observation.json").read_text())
@@ -345,6 +474,11 @@ def main():
         if owned is not None:
             try:
                 report["ownedMemory"] = support.owned_memory_snapshot(owned, container)
+                if not report.get("nativeResourcesStarted") or report.get("testExit"):
+                    try:
+                        report["safeNativeFailureFrames"] = native_failure_frames(support.resources.docker("logs","--tail","300",container))
+                    except Exception as failure:
+                        report["nativeFailureFramesUnavailable"] = type(failure).__name__
                 report["cleanup"] = owned.cleanup()
             except Exception as failure:
                 report["cleanupFailureType"] = type(failure).__name__
@@ -364,7 +498,15 @@ def main():
         groups_file = out / "process-cleanup.jsonl"
         groups = [json.loads(row) for row in groups_file.read_text().splitlines()] if groups_file.exists() else []
         report["groups"] = groups
-        report["groupsAbsent"] = groups_ok(groups, 3 if args.role == "user" else 4)
+        report["groupsAbsent"] = named_groups_ok(groups,report.get("executedGroupNames"),report.get("plannedGroups"))
+        try:
+            support.memory_lease.check()
+            report["finalWholeLeaseMemoryCheck"] = True
+        except Exception as failure:
+            report["finalWholeLeaseMemoryCheck"] = False
+            report["classification"] = "FINAL_RESOURCE_REFUSAL"
+            report["failureType"] = type(failure).__name__
+            status = 1
         report["totalDeadlineRetained"] = time.monotonic() <= overall
         report["runtimeKnown"] = args.role == "user" or runtime_known(report.get("cleanup",[]))
         if not report["sourceStable"] or not report["totalDeadlineRetained"] or not report["groupsAbsent"] or not report["runtimeKnown"]:
@@ -377,4 +519,6 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(child() if sys.argv[1:] == ["--native-child"] else main())
+    if sys.argv[1:] == ["--native-child"]:
+        raise SystemExit(child())
+    raise SystemExit(main())
