@@ -447,7 +447,7 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.phase("scoped-otp-expired-sent-outcome-preconditions", actual_committed_sent=True,
                    original_deadline_elapsed=True, fresh_native_human=True,
                    canonical_admin=True, stock_native_denied=True, one_actual_smtp=True)
-        status, recovered = self.scoped_mutation(fresh_human, start, "otp.email-start-outcome", "POST", "email-delivery-outcome", 200)
+        status, recovered = self.scoped_mutation(fresh_human, start, "otp.email-start", "PUT", "send-verification-mail", 200)
         self.assertEqual(200, status)
         self.assertEqual(original_result, recovered)
         encoded, signature = recovered["receipt"].split(".")
@@ -458,17 +458,22 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual("SENT", facts["deliveryState"])
         self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], facts["ownerSubject"])
         missing = json.loads(json.dumps(start)); missing["operationId"] = str(uuid.uuid4())
-        self.assertEqual(409, self.scoped_mutation(fresh_human, missing, "otp.email-start-outcome", "POST", "email-delivery-outcome", 409)[0])
+        self.assertEqual(409, self.scoped_mutation(fresh_human, missing, "otp.email-start", "PUT", "send-verification-mail", 409)[0])
+        # A separate absent-intent diagnostic isolates expiry from the unchanged stale CAS.
+        missing_current = json.loads(json.dumps(missing))
+        missing_current["expectedState"] = self.invoke("read", {"target": start["target"]}, fresh_human, 200)[1]["state"]
+        self.assertEqual(403, self.scoped_mutation(fresh_human, missing_current, "otp.email-start", "PUT", "send-verification-mail", 403)[0])
         changed = json.loads(json.dumps(start)); changed["otp"]["email"] = "unowned@fixture.invalid"
-        self.assertEqual(409, self.scoped_mutation(fresh_human, changed, "otp.email-start-outcome", "POST", "email-delivery-outcome", 409)[0])
-        self.assertEqual(401, self.scoped_mutation(None, start, "otp.email-start-outcome", "POST", "email-delivery-outcome", 401)[0])
+        self.assertEqual(409, self.scoped_mutation(fresh_human, changed, "otp.email-start", "PUT", "send-verification-mail", 409)[0])
+        self.assertEqual(401, self.scoped_mutation(None, start, "otp.email-start", "PUT", "send-verification-mail", 401)[0])
         self.assertEqual(original, self.admin("GET", "/users/" + self.account_id).get("email"))
         mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
         self.assertEqual(1, len(mail)); self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
         self.assertEqual(0, json.loads(mail[0]["credentialData"])["failedVerifications"])
         self.assertEqual(before_mail + 1, len(self.mail.messages))
         self.phase("scoped-otp-expired-sent-outcome-effect", original_mac_deadline=True,
-                   exact_saved_outcome=True, missing_and_changed_refused=True, current_human_required=True,
+                   exact_saved_outcome=True, original_route_and_body=True,
+                   missing_expired_refused_before_prepare=True, changed_refused=True, current_human_required=True,
                    no_smtp=True, no_profile_effect=True, no_credential_effect=True)
 
     def email_start_body(self, human, target, email):
