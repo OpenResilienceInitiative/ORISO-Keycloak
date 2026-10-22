@@ -32,8 +32,8 @@ PAIR_FLAGS = {"childGroupInherited", "firstNative200Dropped", "secondNative200Fo
 USER_SUITE = "de.caritas.cob.userservice.api.config.auth.SessionExchangeTokenBoundaryTest"
 USER_SUITES = {
     USER_SUITE: 3,
-    "de.caritas.cob.userservice.api.service.auth.MagicLinkLoginServiceTest": 41,
-    "de.caritas.cob.userservice.api.adapters.keycloak.KeycloakIdentitySessionExchangeTest": 16,
+    "de.caritas.cob.userservice.api.service.auth.MagicLinkLoginServiceTest": 44,
+    "de.caritas.cob.userservice.api.adapters.keycloak.KeycloakIdentitySessionExchangeTest": 19,
 }
 NATIVE_SUITE = "session_exchange_native.SessionExchangeNative"
 USER_FILES = (

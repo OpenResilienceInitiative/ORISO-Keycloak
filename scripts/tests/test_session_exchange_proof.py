@@ -162,7 +162,7 @@ class SessionProofControls(unittest.TestCase):
 
     def test_user_inventory_preserves_three_original_and_all_adjacent_cases(self):
         good={name:{"tests":count,"failures":0,"errors":0,"skipped":0} for name,count in p.USER_SUITES.items()}
-        self.assertEqual(60,sum(x["tests"] for x in good.values()))
+        self.assertEqual(66,sum(x["tests"] for x in good.values()))
         self.assertEqual(0,p.user_inventory(good))
         red=copy.deepcopy(good);red[p.USER_SUITE]["failures"]=1
         self.assertEqual(1,p.user_inventory(red))
