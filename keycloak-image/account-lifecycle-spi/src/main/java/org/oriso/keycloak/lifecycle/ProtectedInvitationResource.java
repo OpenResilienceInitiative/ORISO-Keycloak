@@ -163,7 +163,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         .executeProtected(command, attempt, translated, machine.actor(), policy);
   }
 
-  private JsonNode internalScope(ProtectedInvitationApproval row, JsonNode scope,
+  static JsonNode internalScope(ProtectedInvitationApproval row, JsonNode scope,
       JsonNode enriched, JsonNode acceptance) {
     var frozenProfile = enriched.path("profile");
     var internalScope = JSON.createObjectNode();
@@ -363,6 +363,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         String immutable = canonical(consumed);
         if (immutable.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
         approval.state = "CONSUMED"; approval.transitionReceipt = immutable;
+        new ProtectedPeerDelegation(session, config, crypto).recordConsumed(approval, current);
       } else deny();
       // Same request/JPA transaction as the native user, proof and attempt. A
       // callback/flush failure rolls every effect back; no separate transaction.
@@ -414,7 +415,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     return "enc." + encoded;
   }
 
-  private static String protectedAttemptKey(String realm, String approval, String attempt) {
+  static String protectedAttemptKey(String realm, String approval, String attempt) {
     var tuple = JSON.createObjectNode(); tuple.put("realmId", realm); tuple.put("approvalId", approval); tuple.put("attemptId", attempt);
     try {
       return "protected-attempt:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
@@ -428,15 +429,15 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     fields(request, "scope");
     var scope = request.path("scope");
     var em = lockedRealm();
+    // The verified native subject may resolve one consumed origin. Lock that
+    // origin/attempt before any fresh human authorization projection.
+    var peers = new ProtectedPeerDelegation(session, config, crypto);
+    var resolved = peers.resolve(NativeHumanBearer.require(session), em);
+    var binding = resolved.binding();
     String key = key(config.realmId, approval);
     var row = em.find(ProtectedInvitationApproval.class, key, LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
-    // Native authentication is independent of the task context key. The explicit
-    // subject selects one installed policy; a token never selects authority data.
-    var nativeHuman = NativeHumanBearer.require(session);
-    var binding = config.bindings.get(nativeHuman.getUser().getId());
-    if (binding == null) deny();
-    var human = CurrentHumanAuthorization.require(session, binding.policy());
+    var human = peers.require(resolved);
     if (row != null && !"AUTHORIZED".equals(row.state)) conflict();
     if (row != null && !Instant.parse(row.validUntil).isAfter(Instant.now())) conflict();
     var profile = validateScope(scope, binding, human);
