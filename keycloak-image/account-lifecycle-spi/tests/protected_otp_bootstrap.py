@@ -20,6 +20,7 @@ import uuid
 
 from lifecycle_fixture import ACTORS, CONTEXT_KEY, IMAGE, REALM, SUBJECTS, call, canonical, mac
 from protected_binding_readiness import NativeFixture
+import otp_writer_fixture
 
 
 class BootstrapFixture(NativeFixture):
@@ -28,13 +29,14 @@ class BootstrapFixture(NativeFixture):
         jar = Path(os.environ.get("OTP_C_TEST_JAR", ""))
         if not jar.is_file():
             raise AssertionError("Actual paired OTP provider required")
+        otp_writer_fixture.setup(cls)
         cls.otp_jar = jar.resolve()
         cls.otp_jar_sha256 = hashlib.sha256(cls.otp_jar.read_bytes()).hexdigest()
         source = Path(__file__).resolve().parents[2] / "otp-config-spi/tests/scenario_c_otp_fixture.py"
         spec = importlib.util.spec_from_file_location("bootstrap_otp_mail_fixture", source)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        cls.mail = module.MailSink(("0.0.0.0", 0), module.MailSink.Handler)
+        cls.mail = module.MailSink(("0.0.0.0", 0), otp_writer_fixture.handler(module.MailSink.Handler))
         cls.mail.messages = []
         cls.addClassCleanup(cls.mail.server_close)
         cls.addClassCleanup(cls.mail.shutdown)
@@ -43,7 +45,7 @@ class BootstrapFixture(NativeFixture):
 
         def launch(args, *positional, **keywords):
             if isinstance(args, list) and args[:2] == ["docker", "run"]:
-                args = args.copy()
+                args = otp_writer_fixture.launch(cls, args, IMAGE).copy()
                 index = args.index(IMAGE)
                 args[index:index] = [
                     "-v", str(cls.otp_jar) + ":/opt/keycloak/providers/otp-config-spi.jar:ro",
@@ -501,17 +503,35 @@ class BootstrapRead(unittest.TestCase):
             "otp": {"initialCode": None, "secret": None, "email": scope["recipient"]}}
         observed["emailNoCredentialOrMailBeforeStart"] = baseline == helper.admin(
             "GET", "/users/" + account + "/credentials") and before == len(BootstrapFixture.mail.messages)
-        status, ready = invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt)
+        inflight = fenced_cleanup and getattr(BootstrapFixture, "writer_enabled", False)
+        concurrent_cancel = None
+        if inflight:
+            cancel_body = {"cancellationId": str(uuid.uuid4()), "scopeDigest": approved["scopeDigest"],
+                "workflowId": scope["workflowId"], "inviteId": scope["inviteId"],
+                "authorizationRevision": scope["authorizationRevision"], "reason": "REVOKED",
+                "absentScope": None, "approvalRequestDigest": approved["approvalRequestDigest"]}
+            control = {"realmId": helper.realm_id, "accountId": account, "approvalId": approval,
+                "attemptId": attempt, "executionId": create["execution"]["executionId"], "operationId": start["operationId"]}
+            started, concurrent_cancel = otp_writer_fixture.concurrent_start(
+                BootstrapFixture, control,
+                lambda: invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt),
+                lambda: helper.protected_machine_request("cancel", approval, cancel_body), observed)
+            status, ready = started
+        else:
+            status, ready = invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt)
         observed["emailStartStatus"] = status
         if status == 403:
             self.assertEqual(baseline, helper.admin("GET", "/users/" + account + "/credentials"))
             self.assertEqual(before, len(BootstrapFixture.mail.messages))
         self.assertEqual(202, status)
         self.assertEqual("READY", ready["deliveryState"])
-        status, sent = invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt)
-        observed["emailSentStatus"] = status
-        self.assertEqual(200, status)
-        self.assertEqual("SENT", sent["deliveryState"])
+        if not inflight:
+            status, sent = invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt)
+            observed["emailSentStatus"] = status
+            self.assertEqual(200, status)
+            self.assertEqual("SENT", sent["deliveryState"])
+        else:
+            observed["inflightOneActualSmtp"] = before + 1 == len(BootstrapFixture.mail.messages)
         self.assertEqual(before + 1, len(BootstrapFixture.mail.messages))
         credentials = helper.admin("GET", "/users/" + account + "/credentials")
         mail = [row for row in credentials if row["type"] == "MAIL_OTP_CM"]
@@ -523,7 +543,10 @@ class BootstrapRead(unittest.TestCase):
                 "workflowId": scope["workflowId"], "inviteId": scope["inviteId"],
                 "authorizationRevision": scope["authorizationRevision"], "reason": "REVOKED",
                 "absentScope": None, "approvalRequestDigest": approved["approvalRequestDigest"]}
-            status, cancelled = helper.protected_machine_request("cancel", approval, cancel)
+            if inflight:
+                status, cancelled = concurrent_cancel
+            else:
+                status, cancelled = helper.protected_machine_request("cancel", approval, cancel)
             observed["fencedEmailCancelStatus"] = status
             self.assertEqual(200, status)
             self.assertEqual("CANCELLED", cancelled["state"])
