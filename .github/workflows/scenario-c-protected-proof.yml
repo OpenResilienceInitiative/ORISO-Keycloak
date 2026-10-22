@@ -107,6 +107,7 @@ jobs:
       max-parallel: 2
       matrix:
         case:
+          - independent-cleanup-status
           - direct-authentication-before-realm-lock
           - committed-peer-policy-withdrawal
           - committed-peer-policy-revision
@@ -163,7 +164,12 @@ jobs:
           set -euo pipefail
           docker info > /dev/null
           export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
-          if [ "$PROTECTED_INSTALLATION_CASE" = direct-authentication-before-realm-lock ]; then
+          if [ "$PROTECTED_INSTALLATION_CASE" = independent-cleanup-status ]; then
+            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
+              -p test_protected_cleanup_status_controls.py -q
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_cleanup_status.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/cleanup-status.json
+          elif [ "$PROTECTED_INSTALLATION_CASE" = direct-authentication-before-realm-lock ]; then
             export LIFECYCLE_AUTH_LOCK_COMPANION_JAR="$RUNNER_TEMP/oriso-proof-auth-lock-companion.jar"
             python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
               -p 'test_protected_auth_lock*controls.py' -q
