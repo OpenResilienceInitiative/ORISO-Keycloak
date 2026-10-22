@@ -116,4 +116,9 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
             self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(value, **{key: False})))
         value['protectedSelfOtpReadStatus'] = 200
         self.assertEqual('BEHAVIOR_FAILURE', classify(value))
-        self.assertEqual('GREEN', classify(dict(value, closedOriginalOtpSetupResultVerified=True)))
+        read = dict(value, closedOriginalOtpSetupResultVerified=True)
+        self.assertEqual('GENUINE_PROTECTED_SELF_MAINTENANCE_READ403_RED',
+                         classify(dict(read, protectedSelfMaintenanceReadStatus=403)))
+        self.assertEqual('BEHAVIOR_FAILURE', classify(dict(read, protectedSelfMaintenanceReadStatus=200)))
+        self.assertEqual('GREEN', classify(dict(read, protectedSelfMaintenanceReadStatus=200,
+                                               closedProtectedCurrentStateVerified=True)))

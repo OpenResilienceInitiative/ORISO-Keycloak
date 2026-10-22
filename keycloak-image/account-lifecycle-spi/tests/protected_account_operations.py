@@ -10,6 +10,7 @@ from lifecycle_fixture import REALM, call
 from protected_otp_bootstrap import BootstrapFixture
 from protected_peer_readiness import PeerFixture, PeerReadiness, PROFILE, POLICY, TENANT
 from test_otp_scoped import ScopedOtpRead
+from maintenance_human_fixture import HumanMaintenanceFixture
 
 
 class OperationFixture(BootstrapFixture, PeerFixture):
@@ -18,7 +19,7 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         value = PeerFixture.prepare_installation.__func__(cls, helper, configuration)
         value['peerDelegationPolicies'][0]['accountOperations'] = [{
             'authority': 'TENANT_PEER', 'targetProfiles': [PROFILE], 'selfOnly': True,
-            'operations': ['otp.app-setup', 'otp.delete', 'otp.email-finish', 'otp.email-start', 'otp.read'],
+            'operations': ['account.read', 'otp.app-setup', 'otp.delete', 'otp.email-finish', 'otp.email-start', 'otp.read'],
         }]
         cls.installed_configuration = copy.deepcopy(value)
         return value
@@ -69,6 +70,17 @@ class ProtectedOperationRead(PeerReadiness):
         self.assertTrue(result['otpSecret'])
         self.assertTrue(result['otpSecretQrCode'])
         o['closedOriginalOtpSetupResultVerified'] = True
+        helper.phase = lambda phase, **facts: o.update(
+            maintenancePhase=phase, maintenanceCommand=facts.get('command'),
+            maintenanceStatus=facts.get('status'))
+        status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, human, 200)
+        o['protectedSelfMaintenanceReadStatus'] = status
+        self.assertEqual(200, status)
+        self.assertEqual(account, current['id'])
+        self.assertEqual(native['username'], current['username'])
+        self.assertEqual(str(TENANT), current['tenantId'])
+        self.assertRegex(current['state'], r'^[a-f0-9]{64}$')
+        o['closedProtectedCurrentStateVerified'] = True
 
 
 def classify(observed):
@@ -80,5 +92,8 @@ def classify(observed):
     if observed.get('protectedSelfOtpReadStatus') == 403:
         return 'GENUINE_PROTECTED_SELF_OTP_READ403_RED'
     if observed.get('protectedSelfOtpReadStatus') == 200 and observed.get('closedOriginalOtpSetupResultVerified') is True:
-        return 'GREEN'
+        if observed.get('protectedSelfMaintenanceReadStatus') == 403:
+            return 'GENUINE_PROTECTED_SELF_MAINTENANCE_READ403_RED'
+        if observed.get('protectedSelfMaintenanceReadStatus') == 200 and observed.get('closedProtectedCurrentStateVerified') is True:
+            return 'GREEN'
     return 'BEHAVIOR_FAILURE'
