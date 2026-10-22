@@ -116,12 +116,22 @@ def classify(summary):
         and observed.get("emailExactlyOneRealSmtpAndNativeInactiveCredential") is True
         and observed.get("emailFinishStatus") == 403):
         return "GENUINE_PROTECTED_PENDING_OTP_EMAIL_FINISH_RED"
+    if (summary.get("failures") == 1 and email_ready
+        and observed.get("emailFinishActiveDisabledAndExactRetryVerified") is True
+        and observed.get("fencedEmailCancelStatus") == 200
+        and observed.get("fencedEmailRecoveryStatus") == 200
+        and observed.get("fencedEmailTwoGenerationFenceVerified") is True
+        and observed.get("fencedEmailOldStartStatus") in (403, 409)
+        and observed.get("fencedEmailOldWriteAndSmtpUnchanged") is True
+        and observed.get("fencedEmailCompensateStatus") == 409):
+        return "GENUINE_FENCED_PENDING_EMAIL_COMPENSATION_RED"
     if (summary.get("failures") == 0 and observed.get("otpPrepareStatus") == 200
         and observed.get("appMutationStatus") == 201
         and all(observed.get(key) is True for key in (
             "preparedReceiptMacVerified", "appNativeCredentialAndDisabledStateVerified",
             "exactAppRetryPreservesOneCredential", "completedPhaseRefusesNewEnrollment",
-            "expiredOriginalPrepareRetryPreservesExactCausalReceipt", "emailFinishActiveDisabledAndExactRetryVerified"))):
+            "expiredOriginalPrepareRetryPreservesExactCausalReceipt", "emailFinishActiveDisabledAndExactRetryVerified",
+            "fencedEmailPendingCompensationExactRetryVerified"))):
         return "GREEN"
     return "BEHAVIOR_FAILURE"
 
@@ -398,8 +408,9 @@ class BootstrapRead(unittest.TestCase):
         observed["completedPhaseRefusesNewEnrollment"] = True
 
         self.email_pending(helper, observed)
+        self.email_pending(helper, observed, fenced_cleanup=True)
 
-    def email_pending(self, helper, observed):
+    def email_pending(self, helper, observed, fenced_cleanup=False):
         from email import policy as email_policy
         from email.parser import BytesParser
         import re
@@ -507,6 +518,52 @@ class BootstrapRead(unittest.TestCase):
         self.assertEqual(1, len(mail))
         self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
         observed["emailExactlyOneRealSmtpAndNativeInactiveCredential"] = True
+        if fenced_cleanup:
+            cancel = {"cancellationId": str(uuid.uuid4()), "scopeDigest": approved["scopeDigest"],
+                "workflowId": scope["workflowId"], "inviteId": scope["inviteId"],
+                "authorizationRevision": scope["authorizationRevision"], "reason": "REVOKED",
+                "absentScope": None, "approvalRequestDigest": approved["approvalRequestDigest"]}
+            status, cancelled = helper.protected_machine_request("cancel", approval, cancel)
+            observed["fencedEmailCancelStatus"] = status
+            self.assertEqual(200, status)
+            self.assertEqual("CANCELLED", cancelled["state"])
+            fence = cancelled["fencedExecution"]
+            self.assertEqual(1, fence["generation"])
+            self.assertNotEqual(create["execution"]["executionId"], fence["executionId"])
+            recover = {key: copy.deepcopy(create[key]) for key in (
+                "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint", "acceptanceClaim")}
+            recover.update(expectedGeneration=fence["generation"], recoveryId=str(uuid.uuid4()))
+            status, claimed = helper.protected_machine_request(
+                "recover", approval, recover, actor="ACCOUNT_ADMIN", attempt=attempt)
+            observed["fencedEmailRecoveryStatus"] = status
+            self.assertEqual(200, status)
+            self.assertEqual("RECOVERY_CLAIMED", claimed["state"])
+            self.assertEqual({"executionId": recover["recoveryId"], "generation": 2}, claimed["execution"])
+            self.assertEqual(opened["creationProof"], claimed["creationProof"])
+            observed["fencedEmailTwoGenerationFenceVerified"] = True
+            frozen_credentials = helper.admin("GET", "/users/" + account + "/credentials")
+            old_status, _ = invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt)
+            observed["fencedEmailOldStartStatus"] = old_status
+            self.assertIn(old_status, (403, 409))
+            self.assertEqual(frozen_credentials, helper.admin("GET", "/users/" + account + "/credentials"))
+            self.assertEqual(before + 1, len(BootstrapFixture.mail.messages))
+            observed["fencedEmailOldWriteAndSmtpUnchanged"] = True
+            cleanup = {key: copy.deepcopy(create[key]) for key in (
+                "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint")}
+            cleanup.update(execution=claimed["execution"], accountId=account,
+                creationProof=opened["creationProof"], localCleanup={"journalVersion": 1,
+                "outboxId": str(uuid.uuid4()), "effectsDigest": "c" * 64})
+            status, terminal = helper.protected_machine_request(
+                "compensate", approval, cleanup, actor="ACCOUNT_ADMIN", attempt=attempt)
+            observed["fencedEmailCompensateStatus"] = status
+            self.assertEqual(200, status)
+            self.assertEqual("COMPENSATED", terminal["state"])
+            self.assertEqual((200, terminal), helper.protected_machine_request(
+                "compensate", approval, cleanup, actor="ACCOUNT_ADMIN", attempt=attempt))
+            self.assertEqual([], helper.admin("GET", "/users?username=" + quote(username, safe="") + "&exact=true"))
+            self.assertEqual(before + 1, len(BootstrapFixture.mail.messages))
+            observed["fencedEmailPendingCompensationExactRetryVerified"] = True
+            return
         message = BytesParser(policy=email_policy.default).parsebytes(BootstrapFixture.mail.messages[-1])
         codes = set()
         for part in message.walk():
