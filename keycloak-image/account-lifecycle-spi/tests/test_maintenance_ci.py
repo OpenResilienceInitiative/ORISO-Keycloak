@@ -112,6 +112,15 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, bothUnavailableNoStore=False)))
         self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, ordinaryMachineCreationReadDeleteVerified=False)))
 
+    def test_native_mount_identity_ignores_docker_listing_order_but_preserves_ownership(self):
+        from maintenance_readiness import mounts
+        first = [{"Type": "bind", "Source": "/actual/provider.jar", "Destination": "/providers/a.jar", "RW": False},
+                 {"Type": "volume", "Name": "owned-volume", "Source": "/actual/owned", "Destination": "/data", "RW": True}]
+        self.assertEqual(mounts(first), mounts(list(reversed(first))))
+        changed = [dict(first[0], Source="/foreign/provider.jar"), first[1]]
+        self.assertNotEqual(mounts(first), mounts(changed))
+        self.assertNotEqual(mounts(first), mounts([dict(first[0], RW=True), first[1]]))
+
     def test_manifests_exclude_compiled_outputs_but_bind_real_source(self):
         (self.root / "target").mkdir()
         (self.root / "target/private.jar").write_bytes(b"compiled")

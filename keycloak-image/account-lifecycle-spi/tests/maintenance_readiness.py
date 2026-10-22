@@ -12,6 +12,11 @@ from lifecycle_fixture import ACTORS, IMAGE, REALM, SUBJECTS, call
 from maintenance_human_fixture import HumanMaintenanceFixture
 
 
+def mounts(rows):
+    fields = ("Destination", "Type", "Name", "Source", "RW", "Propagation", "Driver")
+    return sorted(tuple(row.get(key) for key in fields) for row in rows)
+
+
 def classify(o):
     required = ("reviewedUnusedProfileInstalled", "exactUnusedGroupNameOnlyDrift",
                 "primaryHumanAndOrdinaryMappingUnchanged", "sameJarImageConfigVolumeAndCaps")
@@ -115,7 +120,7 @@ class HumanBindingReadiness(unittest.TestCase):
         self.assertEqual(before["HostConfig"]["Memory"], after["HostConfig"]["Memory"])
         self.assertEqual(before["HostConfig"]["NanoCpus"], after["HostConfig"]["NanoCpus"])
         self.assertEqual(config, next(v for v in after["Config"]["Env"] if v.startswith("ORISO_ACCOUNT_MAINTENANCE_CONFIG=")))
-        self.assertEqual(before["Mounts"], after["Mounts"])
+        self.assertEqual(mounts(before["Mounts"]), mounts(after["Mounts"]))
         self.assertEqual(h.jar_sha256, hashlib.sha256(h.jar_path.read_bytes()).hexdigest())
         o["sameJarImageConfigVolumeAndCaps"] = True
         try:

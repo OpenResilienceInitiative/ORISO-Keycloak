@@ -163,7 +163,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
             var row = (Object[]) raw;
             String sql = row[3] == null ? "" : row[3].toString().toLowerCase(java.util.Locale.ROOT)
                 .replace('"', ' ').replaceAll("\\s+", " ").trim();
-            boolean exact = sql.matches("select .+ from (public\\.)?realm [a-z0-9_]+ where [a-z0-9_]+\\.id=\\? for update \\{1: '"
+            boolean exact = sql.matches("select .+ from (public\\.)?realm [a-z0-9_]+ where [a-z0-9_]+\\s*\\.\\s*id\\s*=\\s*\\? for update \\{1: '"
                 + java.util.regex.Pattern.quote(witness.realm) + "'\\}");
             if (!sampled) {
               waitObservation(rows.size(), "BLOCKED".equals(row[1]),
