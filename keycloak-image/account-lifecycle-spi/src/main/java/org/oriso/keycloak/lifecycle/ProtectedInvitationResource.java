@@ -163,7 +163,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         .executeProtected(command, attempt, translated, machine.actor(), policy);
   }
 
-  private JsonNode internalScope(ProtectedInvitationApproval row, JsonNode scope,
+  static JsonNode internalScope(ProtectedInvitationApproval row, JsonNode scope,
       JsonNode enriched, JsonNode acceptance) {
     var frozenProfile = enriched.path("profile");
     var internalScope = JSON.createObjectNode();
@@ -363,6 +363,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
         String immutable = canonical(consumed);
         if (immutable.getBytes(StandardCharsets.UTF_8).length > 24000) bad();
         approval.state = "CONSUMED"; approval.transitionReceipt = immutable;
+        new ProtectedPeerDelegation(session, config, crypto).recordConsumed(approval, current);
       } else deny();
       // Same request/JPA transaction as the native user, proof and attempt. A
       // callback/flush failure rolls every effect back; no separate transaction.
@@ -414,7 +415,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     return "enc." + encoded;
   }
 
-  private static String protectedAttemptKey(String realm, String approval, String attempt) {
+  static String protectedAttemptKey(String realm, String approval, String attempt) {
     var tuple = JSON.createObjectNode(); tuple.put("realmId", realm); tuple.put("approvalId", approval); tuple.put("attemptId", attempt);
     try {
       return "protected-attempt:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
@@ -428,15 +429,15 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     fields(request, "scope");
     var scope = request.path("scope");
     var em = lockedRealm();
+    // The verified native subject may resolve one consumed origin. Lock that
+    // origin/attempt before any fresh human authorization projection.
+    var peers = new ProtectedPeerDelegation(session, config, crypto);
+    var resolved = peers.resolve(NativeHumanBearer.require(session), em);
+    var binding = resolved.binding();
     String key = key(config.realmId, approval);
     var row = em.find(ProtectedInvitationApproval.class, key, LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
-    // Native authentication is independent of the task context key. The explicit
-    // subject selects one installed policy; a token never selects authority data.
-    var nativeHuman = NativeHumanBearer.require(session);
-    var binding = config.bindings.get(nativeHuman.getUser().getId());
-    if (binding == null) deny();
-    var human = CurrentHumanAuthorization.require(session, binding.policy());
+    var human = peers.require(resolved);
     if (row != null && !"AUTHORIZED".equals(row.state)) conflict();
     if (row != null && !Instant.parse(row.validUntil).isAfter(Instant.now())) conflict();
     var profile = validateScope(scope, binding, human);
@@ -452,6 +453,17 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
           || !"AUTHORIZED".equals(row.state)) conflict();
       return result(row, 200);
     }
+    // A different URL cannot reissue the same immutable workflow revision.
+    // Use a current locking scalar read under the realm lock, not an RR snapshot.
+    if (!em.createNativeQuery(
+            "select ID from ORISO_PROTECTED_INVITATION_APPROVAL where REALM_ID = :realm"
+                + " and WORKFLOW_ID = :workflow and INVITE_ID = :invite"
+                + " and AUTHORIZATION_REVISION = :revision for update")
+        .setParameter("realm", config.realmId)
+        .setParameter("workflow", scope.path("workflowId").asText())
+        .setParameter("invite", scope.path("inviteId").asText())
+        .setParameter("revision", scope.path("authorizationRevision").asLong())
+        .getResultList().isEmpty()) conflict();
     Instant expires = Instant.parse(text(scope, "validUntil", 30, false)), now = Instant.now();
     // Actual AccountInviteService.validExpiryDays permits at most365days.
     if (!expires.isAfter(now) || expires.isAfter(now.plusSeconds(365L * 24 * 60 * 60))) deny();
@@ -511,6 +523,9 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     String reason = text(body, "reason", 30, false);
     if (!Set.of("REVOKED", "SUPERSEDED", "ISSUANCE_ABORTED").contains(reason)) bad();
     var em = lockedRealm();
+    var peers = new ProtectedPeerDelegation(session, config, crypto);
+    // A delegated origin and its attempt precede the target approval/attempt and user locks.
+    var resolved = proof == null ? peers.resolve(NativeHumanBearer.require(session), em) : null;
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
     var boundAttempt = lockedBoundAttempt(row, em);
@@ -522,10 +537,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       crypto.verifyProtectedCommand(proof, machine, "protected-invitation.cancel", "POST",
           "realm/" + config.realmId + "/protected-invitation/" + approval, body);
     } else {
-      var nativeHuman = NativeHumanBearer.require(session);
-      binding = config.bindings.get(nativeHuman.getUser().getId());
-      if (binding == null) deny();
-      human = CurrentHumanAuthorization.require(session, binding.policy());
+      binding = resolved.binding();
+      human = peers.require(resolved);
     }
     boolean absent = row == null;
     if (absent) {
@@ -543,10 +556,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var storedScope = parse(row.request).path("scope");
     if (machine != null && (!machine.clientId().equals(storedScope.path("setupClient").asText())
         || !machine.subject().equals(storedScope.path("setupSubject").asText()))) deny();
-    if (binding != null && "TENANT_PEER".equals(binding.authority())
-        && (!"TENANT_ADMIN".equals(storedScope.path("protectedKind").asText())
-            || !storedScope.path("targetTenantIds").get(0).isIntegralNumber()
-            || storedScope.path("targetTenantIds").get(0).asLong() != human.tenantId())) deny();
+    // Restriction does not expand a human's installed profile, tenant or mode reach.
+    if (binding != null) validateScope(storedScope, binding, human);
     if (!row.workflowId.equals(body.path("workflowId").asText()) || !row.inviteId.equals(body.path("inviteId").asText())
         || row.authorizationRevision != body.path("authorizationRevision").asLong()
         || !LifecycleAuthorization.equal(row.requestDigest, body.path("approvalRequestDigest").asText())

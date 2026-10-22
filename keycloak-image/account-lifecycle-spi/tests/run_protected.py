@@ -20,6 +20,7 @@ import xml.etree.ElementTree as ET
 
 from protected_resources import evidence as resource_evidence
 from lifecycle_fixture import IMAGE
+from protected_native_tls import cleanup_native_tls
 
 
 class ProofDeadlineReached(RuntimeError):
@@ -58,6 +59,13 @@ class SanitizedResult(unittest.TestResult):
             "protected_fence_cases.py",
             "protected_expiry_cases.py",
             "protected_reconciliation_cases.py",
+            "protected_binding_readiness.py",
+            "protected_rollback_readiness.py",
+            "protected_corrected_readiness.py",
+            "protected_commit_readiness.py",
+            "protected_approval_replay_cases.py",
+            "protected_impersonation_cases.py",
+            "protected_native_tls.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }
@@ -237,6 +245,7 @@ def cleanup_owned(fixture):
                 timeout=30,
             )
         result["volume"] = "REMOVED_OR_ALREADY_ABSENT"
+    result["nativeTls"] = cleanup_native_tls(fixture)
     data = getattr(fixture, "data", None)
     if data is not None:
         data = Path(data)
@@ -326,9 +335,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 17:
+        if discovered != 19:
             raise AssertionError(
-                "Exactly seventeen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence/reconciliation cases required"
+                "Exactly nineteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence/reconciliation/workflow/impersonation cases required"
             )
 
         def deadline(signum, frame):
@@ -403,6 +412,12 @@ def main():
                 "creationReconciliationObservation": getattr(
                     fixture, "creation_reconciliation_observation", None
                 ),
+                "duplicateWorkflowObservation": getattr(
+                    fixture, "duplicate_workflow_observation", None
+                ),
+                "impersonationObservation": getattr(
+                    fixture, "impersonation_observation", None
+                ),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -451,6 +466,38 @@ def main():
             and len({v["control"] for v in summary["protectedProofControls"]}) == 14
             and all(v["status"] == 403 for v in summary["protectedProofControls"])
         )
+        duplicate = summary["duplicateWorkflowObservation"] or {}
+        valid_duplicate = duplicate.get("expectedDuplicateStatus") == 409 and all(
+            duplicate.get(k) is True
+            for k in (
+                "sameExactNativeHumanAndOriginalRequest",
+                "firstApprovalAndRequestMacVerified",
+                "differentCanonicalApprovalIds",
+                "originalApprovalUnchangedAfterCollision",
+                "duplicateApprovalAbsentAfterRollback",
+                "originalExactRetryStillImmutable",
+                "noAccountCreated",
+            )
+        )
+        impersonation = summary["impersonationObservation"] or {}
+        valid_impersonation = (
+            impersonation.get("expectedApprovalStatus") == 403
+            and impersonation.get("nativeImpersonationStatus") == 200
+            and impersonation.get("nativeAuthorizationStatus") == 302
+            and impersonation.get("nativeCodeExchangeStatus") == 200
+            and all(
+                impersonation.get(k) is True
+                for k in (
+                    "nativeHttpsVerified",
+                    "nativeIdentityCookieSecure",
+                    "nativeIdentityCookieTransmitted",
+                    "actualNativeImpersonationCreatedOneSession",
+                    "nativeCodeTokenUsesActualImpersonationSession",
+                    "allCurrentNativeHumanPreconditionsPassed",
+                    "noAccountCreated",
+                )
+            )
+        )
         if (
             result.wasSuccessful()
             and result.testsRun == discovered
@@ -459,6 +506,11 @@ def main():
             and observation.get("actualStatus") == 201
             and observation.get("noAccountCreated") is True
             and valid_controls
+            and valid_duplicate
+            and duplicate.get("actualDuplicateStatus") == 409
+            and valid_impersonation
+            and impersonation.get("actualApprovalStatus") == 403
+            and impersonation.get("approvalAbsentAfterRefusal") is True
             and valid_proof_controls
             and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
             and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
@@ -489,6 +541,41 @@ def main():
             is True
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and valid_duplicate
+            and duplicate.get("actualDuplicateStatus") == 409
+            and valid_impersonation
+            and impersonation.get("actualApprovalStatus") == 201
+            and impersonation.get("signedApprovalNamesImpersonatedTarget") is True
+            and result.testsRun == discovered == 19
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and result.failures[0][0].id()
+            == "test_protected_invitations.ProtectedInvitations.test_actual_impersonated_native_session_cannot_issue_human_approval"
+        ):
+            summary["classification"] = (
+                "GENUINE_NATIVE_IMPERSONATION_APPROVAL201_COUNTERFACTUAL_RED"
+            )
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and valid_duplicate
+            and duplicate.get("actualDuplicateStatus") == 503
+            and result.testsRun == discovered == 18
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and result.failures[0][0].id()
+            == "test_protected_invitations.ProtectedInvitations.test_duplicate_workflow_revision_conflicts_without_second_approval"
+        ):
+            summary["classification"] = (
+                "GENUINE_DUPLICATE_APPROVAL_WORKFLOW503_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls

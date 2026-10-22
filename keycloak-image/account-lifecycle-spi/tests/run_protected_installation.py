@@ -12,6 +12,7 @@ import subprocess
 import time
 import unittest
 import uuid
+from urllib.error import HTTPError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -379,10 +380,48 @@ class Installation(protected.ProtectedInvitations):
             self.installation_observation.update(
                 {"actualHumanApproveStatus": status, "noAccountCreated": True}
             )
-        else:
-            # An accepted startup is an actual negative-policy failure, not a
-            # missing-fixture success. Paired seed preconditions still apply.
+        elif self.case == "allowlisted-denied-human":
+            # Invalid overlap is still rejected by strict init construction.
             self.assertTrue(self.installation_refused)
+        else:
+            # Native binding failures isolate this configured provider. Human
+            # login/userinfo must work, while every approval stays unavailable.
+            self.assertFalse(self.installation_refused)
+            bearer = self.human(record=False)
+            before = self.admin("GET", "/users/count")
+            try:
+                response = urlopen(
+                    Request(
+                        self.base + self.endpoint(str(uuid.uuid4())),
+                        method="PUT",
+                        data=json.dumps({"scope": self.scope()}).encode(),
+                        headers={
+                            "Content-Type": "application/json",
+                            "Authorization": "Bearer " + bearer,
+                        },
+                    ),
+                    timeout=30,
+                )
+            except HTTPError as error:
+                response = error
+            with response:
+                status = response.code
+                no_store = "no-store" in {
+                    value.strip().lower()
+                    for value in response.headers.get("Cache-Control", "").split(",")
+                }
+                response.read()
+            self.installation_observation.update(
+                {
+                    "actualHumanNativeLoginAndUserinfoVerified": True,
+                    "protectedUnavailableStatus": status,
+                    "protectedUnavailableNoStore": no_store,
+                }
+            )
+            self.assertEqual(503, status)
+            self.assertTrue(no_store)
+            self.assertEqual(before, self.admin("GET", "/users/count"))
+            self.installation_observation["noAccountCreated"] = True
 
 
 def main():
@@ -475,16 +514,34 @@ def main():
             if result.wasSuccessful():
                 summary["classification"] = "GREEN"
             elif (
+                summary["installationObservation"].get(
+                    "actualHumanNativeLoginAndUserinfoVerified"
+                )
+                is True
+                and summary["installationObservation"].get("protectedUnavailableStatus")
+                == 503
+                and summary["installationObservation"].get(
+                    "protectedUnavailableNoStore"
+                )
+                is False
+            ):
+                summary["classification"] = "GENUINE_PROTECTED_UNAVAILABLE_NO_STORE_RED"
+            elif (
                 args.case == "extra-denies-prepared-five"
                 and summary["installationObservation"].get("refusalStage")
                 == "CURRENT_NATIVE_INSTALLATION_VALIDATION"
             ):
                 summary["classification"] = "GENUINE_DENY_EXTRAS_INSTALLATION_RED"
-            elif args.case in {
-                "unregistered-technical-human",
-                "unregistered-task-role-human",
-                "unregistered-inherited-task-human",
-            } and not getattr(Installation, "installation_refused", False):
+            elif (
+                args.case
+                in {
+                    "unregistered-technical-human",
+                    "unregistered-task-role-human",
+                    "unregistered-inherited-task-human",
+                }
+                and summary["installationObservation"].get("protectedUnavailableStatus")
+                == 201
+            ):
                 summary["classification"] = "GENUINE_MISSING_TECHNICAL_COVERAGE_RED"
             else:
                 summary["classification"] = "BEHAVIOR_FAILURE"

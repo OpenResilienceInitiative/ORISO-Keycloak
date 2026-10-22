@@ -2,7 +2,7 @@ name: Scenario C installed image diagnostic proof
 
 on:
   push:
-    branches: [codex/367-c-receiver-finish-20261021]
+    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021]
     paths:
       - keycloak-image/**
       - scripts/ci/scenario-c-image-proof.py

@@ -14,13 +14,21 @@ final class ProtectedInvitationConfiguration {
   final Map<String, String> actors;
   final Map<String, Binding> bindings;
   final Map<String, Profile> profiles;
+  final Map<String, PeerPolicy> peerPolicies;
 
   record Binding(String authority, Set<Long> tenants, Set<String> profiles, CurrentHumanAuthorization.Policy policy) {}
   record Profile(String id, long version, String kind, Set<String> modes, String groupId, String groupPath,
       Set<String> realmRoles, Map<String, Set<String>> clientRoles, JsonNode snapshot) {}
+  record PeerPolicy(String id, long version, String sourceProfileId, long sourceProfileVersion,
+      Set<String> clients, Set<Set<String>> audiences, Set<String> profiles,
+      Set<String> realmRoles, Map<String, Set<String>> clientRoles,
+      CurrentNativeHumanIdentity.NativePolicy nativePolicy, JsonNode snapshot) {}
 
   ProtectedInvitationConfiguration(JsonNode config) {
-    fields(config, "realmId", "realmName", "issuer", "technicalSubjects", "technicalGroupIds", "technicalRoles",
+    // The optional installed rule is metadata, never a public human binding.
+    var required = config.deepCopy();
+    if (required.isObject()) ((com.fasterxml.jackson.databind.node.ObjectNode) required).remove("peerDelegationPolicies");
+    fields(required, "realmId", "realmName", "issuer", "technicalSubjects", "technicalGroupIds", "technicalRoles",
         "actorSubjects", "machineAudienceSets", "bindings", "profiles");
     installation = config.deepCopy();
     realmId = text(config, "realmId", 255, false);
@@ -80,12 +88,53 @@ final class ProtectedInvitationConfiguration {
     }
     profiles = Map.copyOf(byProfile);
     for (var binding : bindings.values()) if (!profiles.keySet().containsAll(binding.profiles())) bad();
+    peerPolicies = peerPolicies(config);
+  }
+
+  private Map<String, PeerPolicy> peerPolicies(JsonNode config) {
+    if (!config.has("peerDelegationPolicies")) return Map.of();
+    var configured = config.path("peerDelegationPolicies");
+    if (!configured.isArray() || configured.size() > 100) bad();
+    var result = new TreeMap<String, PeerPolicy>();
+    var sources = new HashSet<Map.Entry<String, Long>>();
+    for (var entry : configured) {
+      fields(entry, "id", "version", "sourceProfileId", "sourceProfileVersion", "humanClientIds",
+          "audienceSets", "protectedProfileIds", "realmRoles", "clientRoles");
+      String id = text(entry, "id", 255, false);
+      long version = number(entry, "version", true);
+      String sourceId = text(entry, "sourceProfileId", 255, false);
+      long sourceVersion = number(entry, "sourceProfileVersion", true);
+      var source = profiles.get(sourceId);
+      if (source == null || !"TENANT_ADMIN".equals(source.kind()) || source.version() != sourceVersion
+          || !sources.add(Map.entry(sourceId, sourceVersion))) bad();
+      var clients = HumanPolicyJson.strings(entry.get("humanClientIds"), 1, 30, 255);
+      if (!Collections.disjoint(clients, CurrentNativeHumanIdentity.ROUTINE_CLIENTS.values())) bad();
+      var audiences = HumanPolicyJson.audiences(entry.get("audienceSets"));
+      var targets = HumanPolicyJson.strings(entry.get("protectedProfileIds"), 1, 100, 255);
+      for (String targetId : targets) {
+        var target = profiles.get(targetId);
+        if (target == null || !"TENANT_ADMIN".equals(target.kind()) || !target.modes().contains("EXISTING")) bad();
+      }
+      var roles = HumanPolicyJson.strings(entry.get("realmRoles"), 1, 100, 255);
+      var clientRoles = HumanPolicyJson.clientRoles(entry.get("clientRoles"));
+      if (!source.realmRoles().equals(roles) || !source.clientRoles().equals(clientRoles)) bad();
+      var common = JSON.createObjectNode();
+      for (String name : List.of("realmId", "issuer", "technicalSubjects", "technicalGroupIds", "technicalRoles"))
+        common.set(name, config.get(name));
+      common.set("clientIds", entry.get("humanClientIds"));
+      common.set("audienceSets", entry.get("audienceSets"));
+      var nativePolicy = CurrentNativeHumanIdentity.nativePolicy(common);
+      if (result.put(id, new PeerPolicy(id, version, sourceId, sourceVersion, clients, audiences, targets,
+          roles, clientRoles, nativePolicy, entry.deepCopy())) != null) bad();
+    }
+    return Map.copyOf(result);
   }
 
   void validateInstallation(KeycloakSession session) {
     if (!realmId.equals(session.getContext().getRealm().getId()) || !realmName.equals(session.getContext().getRealm().getName())) deny();
     for (var binding : bindings.values()) CurrentHumanAuthorization.validateInstallation(session, binding.policy());
     if (!actors.equals(CurrentNativeHumanIdentity.currentRoutineSubjects(CurrentNativeHumanIdentity.entityManager(session), realmId))) deny();
+    for (var peer : peerPolicies.values()) CurrentNativeHumanIdentity.validateInstallation(session, peer.nativePolicy());
     for (var profile : profiles.values()) validateProfile(session, profile);
   }
 
