@@ -1,0 +1,75 @@
+import copy
+import importlib.util
+from pathlib import Path
+import unittest
+
+spec = importlib.util.spec_from_file_location("s1_proof", Path(__file__).parents[1] / "ci/session-exchange-proof.py")
+p = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p)
+
+
+class SessionProofControls(unittest.TestCase):
+    def row(self):
+        observed = dict.fromkeys(p.OBSERVATION_FLAGS, True)
+        observed["magicStatus"] = 401
+        return {"observed": observed, "counts": {"tests":1,"failures":1,"errors":0,"skipped":0},
+                "cases":[{"name":"test_checked_claim_enters_native_session_path", "outcome":"failure"}]}
+
+    def test_only_full_proved_precondition_inventory_earns_assertion_red(self):
+        self.assertEqual("ACTUAL_NATIVE_SESSION_ASSERTION_RED", p.native_classification(self.row()))
+        good = self.row()
+        good["observed"].update(magicStatus=200,nativeRouterSelected=False)
+        good["counts"]["failures"] = 0
+        good["cases"][0]["outcome"] = "pass"
+        self.assertEqual("NATIVE_TRACER_GREEN_INCOMPLETE",p.native_classification(good))
+
+    def test_failed_unknown_and_missing_preconditions_never_count_as_native_red(self):
+        for key in p.OBSERVATION_FLAGS:
+            for value in (False,None,1,"true"):
+                row = self.row()
+                row["observed"][key] = value
+                with self.subTest(key=key,value=value), self.assertRaises(RuntimeError):
+                    p.native_classification(row)
+
+    def test_wrong_counts_skips_errors_and_names_never_count_as_native_red(self):
+        for key in ("tests","failures","errors","skipped"):
+            for value in (True,-1,2):
+                row = self.row()
+                row["counts"][key] = value
+                with self.subTest(key=key,value=value), self.assertRaises(RuntimeError):
+                    p.native_classification(row)
+        row = self.row()
+        row["cases"][0]["name"] = "unrelated"
+        with self.assertRaises(RuntimeError): p.native_classification(row)
+
+    def test_arbitrary_attributes_and_private_values_are_refused_before_export(self):
+        for field,value in (("rawToken","private-do-not-export"),("magicStatus","private"),
+                            ("commandMacValid","private")):
+            row = self.row()["observed"]
+            row[field] = value
+            with self.subTest(field=field),self.assertRaises(RuntimeError):
+                p.checked_observation(row)
+
+    def test_groups_require_all_distinct_positive_integer_known_absent(self):
+        good=[{"processGroup":1,"confirmedAbsent":True},{"processGroup":2,"confirmedAbsent":True}]
+        self.assertTrue(p.groups_ok(good,2))
+        for mutate in (lambda x:x.pop(),lambda x:x[1].update(processGroup=1),
+                       lambda x:x[0].update(processGroup=True),lambda x:x[0].update(processGroup=0),
+                       lambda x:x[0].update(confirmedAbsent=False),lambda x:x[0].pop("confirmedAbsent")):
+            bad=copy.deepcopy(good);mutate(bad)
+            self.assertFalse(p.groups_ok(bad,2))
+
+    def test_runtime_requires_one_known_false_oom_integer_zero_restart(self):
+        good=[{"kind":"container","runtime":{"oomKilled":False,"restartCount":0}}]
+        self.assertTrue(p.runtime_known(good))
+        for mutate in (lambda x:x.clear(),lambda x:x.append(copy.deepcopy(x[0])),
+                       lambda x:x[0]["runtime"].pop("oomKilled"),
+                       lambda x:x[0]["runtime"].update(oomKilled=None),
+                       lambda x:x[0]["runtime"].update(oomKilled=True),
+                       lambda x:x[0]["runtime"].update(restartCount=False),
+                       lambda x:x[0]["runtime"].update(restartCount=1)):
+            bad=copy.deepcopy(good);mutate(bad)
+            self.assertFalse(p.runtime_known(bad))
+
+
+if __name__ == "__main__": unittest.main()

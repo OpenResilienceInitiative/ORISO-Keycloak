@@ -1,0 +1,80 @@
+name: Scenario C finite session exchange tracer
+
+on:
+  push:
+    branches: [codex/367-c-s1-keycloak-20261022]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenario-c-session-exchange-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  finite-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [user, native]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_NOSYSTEM: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: host
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out exact User broker counterfactual source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-UserService
+          ref: 1049c8e938559f725e7b5bd2c8f32984c57f8a29
+          path: subject
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the immutable reviewed resource adapter
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-TenantService
+          ref: a1a1eb1ce51728e0ad60f7f07660f8c87b96815b
+          path: support
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+          cache-dependency-path: |
+            subject/pom.xml
+            subject/.mvn/wrapper/maven-wrapper.properties
+            host/keycloak-image/account-lifecycle-spi/pom.xml
+            host/keycloak-image/otp-config-spi/pom.xml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Verify finite inventory privacy and reviewed resource controls
+        run: |
+          python3 -m unittest discover -s host/scripts/tests -p test_session_exchange_proof.py -q
+          python3 -m unittest discover -s support/scripts/tests -q
+      - name: Run only the selected source-qualified finite tracer
+        env:
+          S1_ROLE: ${{ matrix.role }}
+        run: |
+          python3 host/scripts/ci/session-exchange-proof.py "$S1_ROLE" \
+            --source host --source-ref "$GITHUB_SHA" \
+            --support support --support-ref a1a1eb1ce51728e0ad60f7f07660f8c87b96815b \
+            --user subject --user-ref 1049c8e938559f725e7b5bd2c8f32984c57f8a29 \
+            --evidence "$RUNNER_TEMP/s1-finite-proof-${S1_ROLE}"
+      - name: Retain only bounded sanitized source and outcome receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scenario-c-session-exchange-${{ matrix.role }}
+          path: ${{ runner.temp }}/s1-finite-proof-${{ matrix.role }}
+          if-no-files-found: error
+          retention-days: 14
