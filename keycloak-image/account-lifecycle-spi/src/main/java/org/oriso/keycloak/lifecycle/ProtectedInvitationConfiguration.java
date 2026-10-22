@@ -15,6 +15,12 @@ final class ProtectedInvitationConfiguration {
   final Map<String, Binding> bindings;
   final Map<String, Profile> profiles;
   final Map<String, PeerPolicy> peerPolicies;
+  final Map<String, List<OperationGrant>> bindingAccountOperations, peerAccountOperations;
+  final Map<String, Adoption> adoptedAccounts;
+
+  private static final Set<String> ACCOUNT_OPERATIONS = Set.of("account.read", "account.profile",
+      "account.email", "account.locale", "account.password", "account.deactivate", "account.reactivate",
+      "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish");
 
   record Binding(String authority, Set<Long> tenants, Set<String> profiles, CurrentHumanAuthorization.Policy policy) {}
   record Profile(String id, long version, String kind, Set<String> modes, String groupId, String groupPath,
@@ -23,11 +29,13 @@ final class ProtectedInvitationConfiguration {
       Set<String> clients, Set<Set<String>> audiences, Set<String> profiles,
       Set<String> realmRoles, Map<String, Set<String>> clientRoles,
       CurrentNativeHumanIdentity.NativePolicy nativePolicy, JsonNode snapshot) {}
+  record OperationGrant(String authority, Set<String> profiles, Set<String> operations,
+      boolean selfOnly, Set<String> targetSubjects) {}
+  record Adoption(String accountId, String profileId, long profileVersion) {}
 
   ProtectedInvitationConfiguration(JsonNode config) {
     // The optional installed rule is metadata, never a public human binding.
-    var required = config.deepCopy();
-    if (required.isObject()) ((com.fasterxml.jackson.databind.node.ObjectNode) required).remove("peerDelegationPolicies");
+    var required = without(config, "peerDelegationPolicies", "adoptedAccounts");
     fields(required, "realmId", "realmName", "issuer", "technicalSubjects", "technicalGroupIds", "technicalRoles",
         "actorSubjects", "machineAudienceSets", "bindings", "profiles");
     installation = config.deepCopy();
@@ -49,7 +57,7 @@ final class ProtectedInvitationConfiguration {
     if (configuredBindings == null || !configuredBindings.isArray() || configuredBindings.isEmpty() || configuredBindings.size() > 100) bad();
     var bySubject = new TreeMap<String, Binding>();
     for (var binding : configuredBindings) {
-      fields(binding, "subject", "authority", "authorizerTenantIds", "humanClientIds", "audienceSets", "protectedProfileIds", "realmRoles", "clientRoles", "version");
+      fields(without(binding, "accountOperations"), "subject", "authority", "authorizerTenantIds", "humanClientIds", "audienceSets", "protectedProfileIds", "realmRoles", "clientRoles", "version");
       String authority = text(binding, "authority", 20, false);
       var tenants = HumanPolicyJson.tenants(binding.get("authorizerTenantIds"));
       var roles = HumanPolicyJson.strings(binding.get("realmRoles"), 1, 100, 255);
@@ -89,6 +97,17 @@ final class ProtectedInvitationConfiguration {
     profiles = Map.copyOf(byProfile);
     for (var binding : bindings.values()) if (!profiles.keySet().containsAll(binding.profiles())) bad();
     peerPolicies = peerPolicies(config);
+    var primaryOperations = new TreeMap<String, List<OperationGrant>>();
+    for (var binding : configuredBindings) {
+      String subject = text(binding, "subject", 36, false);
+      primaryOperations.put(subject, operations(binding, bindings.get(subject).authority()));
+    }
+    bindingAccountOperations = Map.copyOf(primaryOperations);
+    var peerOperations = new TreeMap<String, List<OperationGrant>>();
+    if (config.has("peerDelegationPolicies")) for (var peer : config.path("peerDelegationPolicies"))
+      peerOperations.put(text(peer, "id", 255, false), operations(peer, "TENANT_PEER"));
+    peerAccountOperations = Map.copyOf(peerOperations);
+    adoptedAccounts = adoptions(config);
   }
 
   private Map<String, PeerPolicy> peerPolicies(JsonNode config) {
@@ -98,7 +117,7 @@ final class ProtectedInvitationConfiguration {
     var result = new TreeMap<String, PeerPolicy>();
     var sources = new HashSet<Map.Entry<String, Long>>();
     for (var entry : configured) {
-      fields(entry, "id", "version", "sourceProfileId", "sourceProfileVersion", "humanClientIds",
+      fields(without(entry, "accountOperations"), "id", "version", "sourceProfileId", "sourceProfileVersion", "humanClientIds",
           "audienceSets", "protectedProfileIds", "realmRoles", "clientRoles");
       String id = text(entry, "id", 255, false);
       long version = number(entry, "version", true);
@@ -125,9 +144,60 @@ final class ProtectedInvitationConfiguration {
       common.set("audienceSets", entry.get("audienceSets"));
       var nativePolicy = CurrentNativeHumanIdentity.nativePolicy(common);
       if (result.put(id, new PeerPolicy(id, version, sourceId, sourceVersion, clients, audiences, targets,
-          roles, clientRoles, nativePolicy, entry.deepCopy())) != null) bad();
+          roles, clientRoles, nativePolicy, without(entry, "accountOperations"))) != null) bad();
     }
     return Map.copyOf(result);
+  }
+
+  private List<OperationGrant> operations(JsonNode owner, String authority) {
+    if (!owner.has("accountOperations")) return List.of();
+    var configured = owner.path("accountOperations");
+    if (!configured.isArray() || configured.size() > 20) bad();
+    var result = new ArrayList<OperationGrant>();
+    var unique = new HashSet<OperationGrant>();
+    for (var grant : configured) {
+      fields(without(grant, "targetSubjects"), "authority", "targetProfiles", "operations", "selfOnly");
+      if (!authority.equals(text(grant, "authority", 20, false)) || !grant.path("selfOnly").isBoolean()) bad();
+      var targets = HumanPolicyJson.strings(grant.get("targetProfiles"), 1, 100, 255);
+      for (String id : targets) {
+        var profile = profiles.get(id);
+        if (profile == null || "TENANT_PEER".equals(authority)
+            && (!"TENANT_ADMIN".equals(profile.kind()) || !profile.modes().contains("EXISTING"))) bad();
+      }
+      var selected = HumanPolicyJson.strings(grant.get("operations"), 1, ACCOUNT_OPERATIONS.size(), 80);
+      if (!ACCOUNT_OPERATIONS.containsAll(selected)) bad();
+      var subjects = grant.has("targetSubjects")
+          ? HumanPolicyJson.strings(grant.get("targetSubjects"), 0, 1000, 36) : Set.<String>of();
+      for (String subject : subjects) uuid(subject);
+      var parsed = new OperationGrant(authority, targets, selected, grant.path("selfOnly").booleanValue(), subjects);
+      if (!unique.add(parsed)) bad();
+      result.add(parsed);
+    }
+    return List.copyOf(result);
+  }
+
+  private Map<String, Adoption> adoptions(JsonNode config) {
+    if (!config.has("adoptedAccounts")) return Map.of();
+    var configured = config.path("adoptedAccounts");
+    if (!configured.isArray() || configured.size() > 1000) bad();
+    var result = new TreeMap<String, Adoption>();
+    for (var entry : configured) {
+      fields(entry, "accountId", "protectedProfileId", "profileVersion");
+      String account = uuid(text(entry, "accountId", 36, false));
+      String profileId = text(entry, "protectedProfileId", 255, false);
+      long version = number(entry, "profileVersion", true);
+      var profile = profiles.get(profileId);
+      if (profile == null || profile.version() != version
+          || result.put(account, new Adoption(account, profileId, version)) != null) bad();
+    }
+    return Map.copyOf(result);
+  }
+
+  private static JsonNode without(JsonNode value, String... optional) {
+    var copy = value.deepCopy();
+    if (copy.isObject()) for (String name : optional)
+      ((com.fasterxml.jackson.databind.node.ObjectNode) copy).remove(name);
+    return copy;
   }
 
   void validateInstallation(KeycloakSession session) {

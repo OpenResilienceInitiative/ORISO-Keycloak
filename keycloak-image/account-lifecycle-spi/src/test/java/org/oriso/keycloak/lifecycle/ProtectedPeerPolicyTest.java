@@ -19,6 +19,11 @@ public class ProtectedPeerPolicyTest {
         .put("accountId", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         .put("protectedProfileId", "platform-v1").put("profileVersion", 1);
     assertAccepted(operations);
+    var parsed = new ProtectedInvitationConfiguration(operations);
+    assertEquals(1, parsed.bindingAccountOperations.values().iterator().next().size());
+    assertEquals("platform-v1", parsed.adoptedAccounts.get("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").profileId());
+    assertTrue(new ProtectedInvitationConfiguration(base()).adoptedAccounts.isEmpty());
+    assertTrue(new ProtectedInvitationConfiguration(base()).bindingAccountOperations.values().stream().allMatch(java.util.List::isEmpty));
   }
 
   @Test
@@ -34,6 +39,7 @@ public class ProtectedPeerPolicyTest {
     var operations = configured();
     policy(operations).putArray("accountOperations").add(operationGrant("TENANT_PEER", "tenant-v1"));
     assertAccepted(operations);
+    assertEquals(1, new ProtectedInvitationConfiguration(operations).peerAccountOperations.get("own-tenant-admin-v1").size());
     assertEquals(LifecycleJson.canonical(new ProtectedInvitationConfiguration(configured()).peerPolicies.get("own-tenant-admin-v1").snapshot()),
         LifecycleJson.canonical(new ProtectedInvitationConfiguration(operations).peerPolicies.get("own-tenant-admin-v1").snapshot()));
   }

@@ -28,7 +28,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
     delegateObservation("CONSTRUCTION_ENTERED", false, false);
     return new Sender(session, nativeFactory.create(session));
   }
-  public void init(Config.Scope scope) { nativeFactory.init(scope); }
+  public void init(Config.Scope scope) { checkSelectorGrammar(); nativeFactory.init(scope); }
   public void postInit(KeycloakSessionFactory factory) { nativeFactory.postInit(factory); }
   public String getId() { return "oriso-proof-otp-writer"; }
   public void close() { nativeFactory.close(); }
@@ -198,8 +198,23 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
     String tail = ordered ? sql.substring(update + 12).trim() : "";
     return Map.of("selectStatement", sql.startsWith("select "),
         "onlyRealmTable", table.matches("(public\\.)?realm(?: [a-z0-9_]+)?"),
-        "singlePrimaryKeyPredicate", predicate.matches("(?:[a-z0-9_]+\\.)?id\\s*=\\s*\\?"),
+        "singlePrimaryKeyPredicate", predicate.matches("(?:[a-z0-9_]+\\.)?id(?:\\s*=\\s*\\?|\\s+in\\s*\\(\\s*\\?\\s*\\))"),
         "onlyForUpdateAndExactRealmBind", tail.equals("{1: '" + realm + "'}"));
+  }
+
+  private static void checkSelectorGrammar() {
+    String before = "select tbl.id from realm tbl where ", after = " for update {1: 'synthetic'}";
+    for (String predicate : new String[] {"tbl.id=?", "tbl.id in (?)"})
+      if (!realmSelector(before + predicate + after, "synthetic").values().stream().allMatch(Boolean::booleanValue))
+        throw new IllegalStateException("Single native realm selector required");
+    for (String sql : new String[] {before + "tbl.id in (?,?)" + after, before + "tbl.idin (?)" + after,
+        before + "tbl.id in (?) and tbl.enabled=?" + after,
+        before + "tbl.id in (?) or tbl.id=?" + after,
+        "select tbl.id from realm tbl join realm other on tbl.id=other.id where tbl.id in (?)" + after,
+        "select tbl.id from user_entity tbl where tbl.id in (?)" + after,
+        before + "tbl.id in (?) for update {1: 'different'}"})
+      if (realmSelector(sql, "synthetic").values().stream().allMatch(Boolean::booleanValue))
+        throw new IllegalStateException("Expanded native selector refused");
   }
 
   private static void sqlTemplate(String sql) {
