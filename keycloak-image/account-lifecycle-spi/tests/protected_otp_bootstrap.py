@@ -37,6 +37,8 @@ class BootstrapFixture(NativeFixture):
                     "-v", str(cls.otp_jar) + ":/opt/keycloak/providers/otp-config-spi.jar:ro",
                     "-e", "IDENTITY_ACCOUNT_ADMIN_CLIENT_ID=backend-account-admin",
                     "-e", "ORISO_APP_BASE_URL=https://otp-fixture.internal",
+                    "-e", "EMAIL_BRANDING_NAME=OTP Fixture",
+                    "-e", "EMAIL_LEGAL_ORGANISATION_NAME=Fixture Operator",
                 ]
             return original(args, *positional, **keywords)
 
