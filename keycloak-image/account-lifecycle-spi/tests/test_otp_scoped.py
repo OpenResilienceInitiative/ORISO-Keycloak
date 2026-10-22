@@ -323,6 +323,107 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.phase("scoped-otp-linked-email-finish-effect", native_email_and_verified=True,
                    exact_sent_workflow_receipt=True, one_smtp=True, exact_retry_no_reapplication=True)
 
+    def linked_finish_fixture(self):
+        from email import policy as email_policy
+        from email.parser import BytesParser
+        import re
+        human, start_target = self.human(), self.target()
+        realm = self.admin("GET", "")
+        realm["emailTheme"] = "oriso"
+        realm["smtpServer"] = {"host": "host.docker.internal", "port": str(self.mail.server_address[1]),
+                               "from": "otp-fixture@oriso.org", "auth": "false", "ssl": "false", "starttls": "false"}
+        self.admin("PUT", "", realm)
+        before_mail = len(self.mail.messages)
+        destination = "linked-controls-" + uuid.uuid4().hex + "@oriso.org"
+        start = self.email_start_body(human, start_target, destination)
+        self.assertEqual(202, self.scoped_mutation(human, start, "otp.email-start", "PUT", "send-verification-mail", 202)[0])
+        status, sent = self.scoped_mutation(human, start, "otp.email-start", "PUT", "send-verification-mail", 200)
+        self.assertEqual(200, status)
+        self.assertEqual("SENT", sent["deliveryState"])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        message = BytesParser(policy=email_policy.default).parsebytes(self.mail.messages[-1])
+        codes = set()
+        for part in message.walk():
+            if part.get_content_type() in {"text/plain", "text/html"}:
+                text = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8")
+                codes.update(re.findall(r"(?<![0-9])[0-9]{6}(?![0-9])", text))
+        self.assertEqual(1, len(codes), "One actual native delivered code is required")
+        target = self.target()
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        self.assertEqual(403, call(self.base, "GET", "/admin/realms/" + REALM + "/users/" + self.account_id,
+                                  token=self.token("ACCOUNT_ADMIN"))[0])
+        original = self.admin("GET", "/users/" + self.account_id).get("email")
+        self.assertNotEqual(destination, original)
+        finish = {"target": target, "operationId": str(uuid.uuid4()), "expectedState": current["state"],
+                  "emailStartOperationId": start["operationId"],
+                  "otp": {"initialCode": next(iter(codes)), "secret": None, "email": None}}
+        return human, finish, destination, original, before_mail
+
+    def test_linked_email_invalid_attempt_then_new_intent_activates_same_owned_incarnation(self):
+        human, finish, destination, original, before_mail = self.linked_finish_fixture()
+        invalid = json.loads(json.dumps(finish))
+        code = invalid["otp"]["initialCode"]
+        invalid["otp"]["initialCode"] = str((int(code) + 1) % 1000000).zfill(6)
+        status, refused = self.scoped_mutation(human, invalid, "otp.email-finish", "POST", "setup-otp-mail", 401)
+        self.assertEqual(401, status)
+        self.assertEqual(refused, self.scoped_mutation(human, invalid, "otp.email-finish", "POST", "setup-otp-mail", 401)[1])
+        mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail))
+        self.assertEqual(1, json.loads(mail[0]["credentialData"])["failedVerifications"])
+        self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
+        self.assertEqual(original, self.admin("GET", "/users/" + self.account_id).get("email"))
+        finish["operationId"] = str(uuid.uuid4())
+        finish["expectedState"] = self.invoke("read", {"target": finish["target"]}, human, 200)[1]["state"]
+        status, result = self.scoped_mutation(human, finish, "otp.email-finish", "POST", "setup-otp-mail", 201)
+        self.assertEqual(201, status)
+        self.assertEqual(destination, self.admin("GET", "/users/" + self.account_id).get("email"))
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        self.phase("scoped-otp-linked-invalid-new-intent", one_failed_attempt=True,
+                   cached_refusal=True, same_owned_incarnation=True, new_valid_intent=True, no_resend=True)
+
+    def test_linked_email_foreign_reference_and_origin_refuse_without_attempt_or_profile_effect(self):
+        human, finish, destination, original, before_mail = self.linked_finish_fixture()
+        foreign = json.loads(json.dumps(finish))
+        foreign["emailStartOperationId"] = str(uuid.uuid4())
+        self.assertEqual(409, self.scoped_mutation(human, foreign, "otp.email-finish", "POST", "setup-otp-mail", 409)[0])
+        mixed = json.loads(json.dumps(finish))
+        mixed["target"]["origin"]["humanIssuer"] = "https://foreign.invalid/realms/other"
+        self.assertEqual(409, self.scoped_mutation(human, mixed, "otp.email-finish", "POST", "setup-otp-mail", 409)[0])
+        self.assertEqual(401, self.scoped_mutation(None, finish, "otp.email-finish", "POST", "setup-otp-mail", 401)[0])
+        mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail))
+        self.assertEqual(0, json.loads(mail[0]["credentialData"])["failedVerifications"])
+        self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
+        self.assertEqual(original, self.admin("GET", "/users/" + self.account_id).get("email"))
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        self.phase("scoped-otp-linked-origin-refusal", absent_owned_reference=True,
+                   origin_mismatch=True, missing_human=True, no_attempt=True, no_profile_effect=True)
+
+    def test_linked_email_changed_credential_ttl_cannot_be_adopted_as_sent_incarnation(self):
+        human, finish, destination, original, before_mail = self.linked_finish_fixture()
+        native = self.admin("GET", "/users/" + self.account_id)
+        mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail))
+        data = json.loads(mail[0]["credentialData"])
+        old_ttl = data["ttlInSeconds"]
+        data["ttlInSeconds"] = old_ttl + 1
+        mail[0]["credentialData"] = canonical(data).decode()
+        native["credentials"] = mail
+        self.admin("PUT", "/users/" + self.account_id, native)
+        actual = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual([mail[0]["id"]], [c["id"] for c in actual])
+        self.assertEqual(old_ttl + 1, json.loads(actual[0]["credentialData"])["ttlInSeconds"])
+        finish["expectedState"] = self.invoke("read", {"target": finish["target"]}, human, 200)[1]["state"]
+        self.assertEqual(409, self.scoped_mutation(human, finish, "otp.email-finish", "POST", "setup-otp-mail", 409)[0])
+        current = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
+        self.assertFalse(json.loads(current[0]["credentialData"])["active"])
+        self.assertEqual(0, json.loads(current[0]["credentialData"])["failedVerifications"])
+        self.assertEqual(original, self.admin("GET", "/users/" + self.account_id).get("email"))
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        self.phase("scoped-otp-linked-incarnation-refusal", exact_native_drift_proven=True,
+                   fresh_cas=True, no_adoption=True, no_attempt=True, no_profile_effect=True)
+
     def email_start_body(self, human, target, email):
         status, current = self.invoke("read", {"target": target}, human, 200)
         self.assertEqual(200, status)
