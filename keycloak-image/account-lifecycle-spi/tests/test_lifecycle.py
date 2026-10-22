@@ -29,6 +29,11 @@ from lifecycle_fixture import LifecycleFixture
 
 
 class LifecyclePermissions(LifecycleFixture, unittest.TestCase):
+    def setUp(self):
+        # Match the existing Maria fixture: use a current master installer grant.
+        type(self).ready()
+        super().setUp()
+
     def test_disabled_create_then_atomic_first_commit_and_no_enable_replay(self):
         attempt = str(uuid.uuid4())
         create = self.creation()

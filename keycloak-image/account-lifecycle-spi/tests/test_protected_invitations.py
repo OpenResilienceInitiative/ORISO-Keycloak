@@ -32,6 +32,13 @@ from protected_cleanup_cases import ProtectedCleanupCases
 from protected_fence_cases import ProtectedFenceCases
 from protected_expiry_cases import ProtectedExpiryCases
 from protected_reconciliation_cases import ProtectedReconciliationCases
+from protected_approval_replay_cases import ProtectedApprovalReplayCases
+from protected_impersonation_cases import ProtectedImpersonationCases
+from protected_native_tls import (
+    add_native_tls_arguments,
+    prepare_native_tls,
+    refresh_native_tls_endpoint,
+)
 
 HUMAN = None  # Set only from the actual native user lookup, never a proposed UUID.
 ISSUER = "http://protected-fixture.invalid/realms/" + REALM
@@ -39,6 +46,8 @@ HUMAN_PASSWORD = "synthetic-human-password-0001"
 
 
 class ProtectedInvitations(
+    ProtectedImpersonationCases,
+    ProtectedApprovalReplayCases,
     ProtectedCreationCases,
     ProtectedTerminalCases,
     ProtectedCleanupCases,
@@ -76,6 +85,8 @@ class ProtectedInvitations(
         cls.bound_cancel_observation = None
         cls.expired_commit_observation = None
         cls.creation_reconciliation_observation = None
+        cls.duplicate_workflow_observation = None
+        cls.impersonation_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -106,6 +117,7 @@ class ProtectedInvitations(
             cls.data.chmod(0o777)
             cls.addClassCleanup(lambda: shutil.rmtree(cls.data))
             cls.data_mount = str(cls.data) + ":/opt/keycloak/data"
+        prepare_native_tls(cls)
         original_run = subprocess.run
 
         def launch(args, *a, **kw):
@@ -120,6 +132,9 @@ class ProtectedInvitations(
                     "-v",
                     cls.data_mount,
                 ]
+                add_native_tls_arguments(cls, args, args.index(
+                    "quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992"
+                ))
                 args.extend(["--hostname=http://protected-fixture.invalid"])
             return original_run(args, *a, **kw)
 
@@ -403,6 +418,11 @@ class ProtectedInvitations(
         cls.phase = "configured-native-ready"
 
     @classmethod
+    def refresh_endpoint(cls, phase):
+        super().refresh_endpoint(phase)
+        refresh_native_tls_endpoint(cls)
+
+    @classmethod
     def prepare_installation(cls, helper, configuration):
         """Separate native installation suite supplies one explicit counterfactual."""
         return configuration
@@ -489,25 +509,35 @@ class ProtectedInvitations(
     def setUp(self):
         pass
 
-    def human(self, username="reviewed-human", expected_subject=None, record=True):
+    def human(
+        self,
+        username="reviewed-human",
+        expected_subject=None,
+        record=True,
+        native_bearer=None,
+    ):
         expected_subject = HUMAN if expected_subject is None else expected_subject
         require_active("human-preconditions")
         type(self).phase = "human-preconditions"
-        status, value = call(
-            self.base,
-            "POST",
-            "/realms/" + REALM + "/protocol/openid-connect/token",
-            {
-                "client_id": "protected-human-web",
-                "grant_type": "password",
-                "username": username,
-                "password": HUMAN_PASSWORD,
-                "scope": "openid",
-            },
-            form=True,
-        )
-        self.assertEqual(200, status)
-        bearer = value["access_token"]
+        if native_bearer is None:
+            status, value = call(
+                self.base,
+                "POST",
+                "/realms/" + REALM + "/protocol/openid-connect/token",
+                {
+                    "client_id": "protected-human-web",
+                    "grant_type": "password",
+                    "username": username,
+                    "password": HUMAN_PASSWORD,
+                    "scope": "openid",
+                },
+                form=True,
+            )
+            self.assertEqual(200, status)
+            bearer = value["access_token"]
+        else:
+            self.assertIsInstance(native_bearer, str)
+            bearer = native_bearer
         payload = bearer.split(".")[1]
         claims = json.loads(
             base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))

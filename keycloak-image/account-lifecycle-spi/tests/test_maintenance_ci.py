@@ -10,6 +10,13 @@ from run_maintenance import EXPECTED_UNITS, missing_native, sanitize_units, sour
 
 
 class MaintenanceEvidenceGate(unittest.TestCase):
+    def test_existing_consultant_profile_is_the_default_native_human_fixture(self):
+        from maintenance_human_fixture import HumanMaintenanceFixture
+        self.assertEqual(
+            {"kind": "CONSULTANT", "group": "consultant", "roles": ["consultant", "group-chat-consultant"], "id": "consultant-v1"},
+            HumanMaintenanceFixture.reviewed_human_profile(),
+        )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -30,11 +37,11 @@ class MaintenanceEvidenceGate(unittest.TestCase):
                     ET.SubElement(case, "error", message="private-do-not-copy").text = "private-do-not-copy"
             ET.ElementTree(suite).write(self.reports / ("TEST-" + name + ".xml"))
 
-    def test_exact_thirteen_plus_eight_plus_four_plus_ten_successes_are_required(self):
+    def test_exact_composed_forty_six_successes_are_required(self):
         self.units()
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertTrue(result["accepted"])
-        self.assertEqual(35, result["tests"])
+        self.assertEqual(46, result["tests"])
 
     def test_missing_reports_cannot_pass(self):
         self.assertFalse(sanitize_units(self.reports, self.root / "safe.xml")["accepted"])
@@ -50,7 +57,7 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertFalse(result["accepted"])
         self.assertNotIn("private-do-not-copy", (self.root / "safe.xml").read_text())
-        self.assertEqual(35, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
+        self.assertEqual(46, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
 
     def test_suite_counters_cannot_hide_a_failure_without_a_method_node(self):
         self.units()
@@ -68,6 +75,15 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         (self.reports / "TEST-duplicate.xml").write_bytes(source.read_bytes())
         with self.assertRaises(ValueError):
             sanitize_units(self.reports, self.root / "safe.xml")
+
+    def test_duplicate_method_cannot_replace_a_required_case(self):
+        self.units()
+        report = next(self.reports.glob("TEST-*.xml"))
+        tree = ET.parse(report)
+        cases = tree.getroot().findall("testcase")
+        cases[1].set("name", cases[0].get("name"))
+        tree.write(report)
+        self.assertFalse(sanitize_units(self.reports, self.root / "safe.xml")["accepted"])
 
     def test_native_source_contains_all_six_prepared_methods(self):
         tree = ast.parse(Path(__file__).with_name("test_maintenance.py").read_text())

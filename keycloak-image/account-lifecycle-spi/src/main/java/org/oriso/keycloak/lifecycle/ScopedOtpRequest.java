@@ -8,9 +8,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 record ScopedOtpRequest(String operation, String accountId, String operationId,
     String expectedState, JsonNode target, JsonNode otp, JsonNode body) {
   static ScopedOtpRequest parse(String operation, String accountId, JsonNode body) {
-    if (!java.util.Set.of("otp.app-setup", "otp.delete", "otp.email-finish").contains(operation)) deny();
+    if (!java.util.Set.of("otp.app-setup", "otp.delete", "otp.email-finish", "otp.email-start").contains(operation)) deny();
     uuid(accountId);
-    fields(body, "target", "operationId", "expectedState", "otp");
+    if ("otp.email-start".equals(operation))
+      fields(body, "target", "operationId", "expectedState", "otp", "authorityValidUntil");
+    else if ("otp.email-finish".equals(operation) && body.has("emailStartOperationId")) {
+      fields(body, "target", "operationId", "expectedState", "otp", "emailStartOperationId");
+      uuid(text(body, "emailStartOperationId", 36, false));
+    } else fields(body, "target", "operationId", "expectedState", "otp");
     var read = JSON.createObjectNode();
     read.set("target", body.path("target"));
     var checkedTarget = MaintenanceRequest.parse("read", accountId, read).target();
@@ -24,6 +29,16 @@ record ScopedOtpRequest(String operation, String accountId, String operationId,
           checkedTarget.deepCopy(), otp.deepCopy(), body.deepCopy());
     }
     fields(otp, "initialCode", "secret", "email");
+    if ("otp.email-start".equals(operation)) {
+      var deadline = body.path("authorityValidUntil");
+      if (!deadline.isIntegralNumber() || !deadline.canConvertToLong() || deadline.longValue() <= 0) bad();
+      String email = text(otp, "email", 320, false);
+      if (!otp.path("initialCode").isNull() || !otp.path("secret").isNull()
+          || !email.equals(email.strip()) || email.chars().anyMatch(c -> c < 33 || c == 127)
+          || !email.matches("[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")) bad();
+      return new ScopedOtpRequest(operation, accountId, operationId, state,
+          checkedTarget.deepCopy(), otp.deepCopy(), body.deepCopy());
+    }
     String initialCode = text(otp, "initialCode", 8, false);
     boolean finish = "otp.email-finish".equals(operation);
     String secret = text(otp, "secret", 512, finish);

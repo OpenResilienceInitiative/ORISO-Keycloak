@@ -1,0 +1,107 @@
+name: Scenario C peer installation policy proof
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - keycloak-image/account-lifecycle-spi/**
+      - .github/workflows/scenario-c-peer-policy-proof.yml
+  push:
+    branches: [codex/367-c-protected-receiver-20261021, codex/367-c-maintenance-keycloak-20261021]
+    paths:
+      - keycloak-image/account-lifecycle-spi/**
+      - .github/workflows/scenario-c-peer-policy-proof.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: peer-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-policy-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+          cache-dependency-path: keycloak-image/account-lifecycle-spi/pom.xml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Install verified Maven 3.9.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://archive.apache.org/dist/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.tar.gz \
+            --output "$RUNNER_TEMP/maven.tar.gz"
+          printf '%s  %s\n' \
+            d50af8ab5e6005b46a07f0ce9d3719e67cfdf898da988a84871304cd59fb1af0fef2f99dea709e6e66f21f732f905979b5c2dce6b6860406f60a70e84d9cf0b8 \
+            "$RUNNER_TEMP/maven.tar.gz" | sha512sum --check
+          tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
+      - name: Run original parser and finite peer-policy contract with immutable source evidence
+        env:
+          MAVEN_OPTS: -Xmx512m -XX:MaxMetaspaceSize=256m -XX:ActiveProcessorCount=2
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,signal,subprocess,sys,xml.etree.ElementTree as ET
+          root=pathlib.Path.cwd()
+          module=root/'keycloak-image/account-lifecycle-spi'
+          proof=root/'peer-policy-proof';proof.mkdir()
+          sha=lambda value:hashlib.sha256(value).hexdigest()
+          def manifest():
+              return {str(p.relative_to(root)):sha(p.read_bytes()) for p in sorted(module.rglob('*'))
+                  if p.is_file() and not {'target','__pycache__','proof-output'}.intersection(p.relative_to(module).parts)
+                  and p.suffix!='.pyc'}
+          before=manifest()
+          command=['mvn','-B','-q','clean','test','-Dtest=LifecycleJsonTest,ProtectedPeerPolicyTest',
+              '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2']
+          with (proof/'maven.log').open('w') as output:
+              child=subprocess.Popen(command,cwd=module,stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
+              try: status=child.wait(timeout=360)
+              except subprocess.TimeoutExpired:
+                  os.killpg(child.pid,signal.SIGTERM)
+                  try: child.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      os.killpg(child.pid,signal.SIGKILL);child.wait()
+                  status=124
+          after=manifest()
+          expected={'org.oriso.keycloak.lifecycle.LifecycleJsonTest':13,
+              'org.oriso.keycloak.lifecycle.ProtectedPeerPolicyTest':10}
+          totals={key:0 for key in ('tests','failures','errors','skipped')}
+          inventory={};cases=[]
+          for report in sorted((module/'target/surefire-reports').glob('TEST-*.xml')):
+              suite=ET.parse(report).getroot();name=suite.get('name')
+              inventory[name]=int(suite.get('tests','0'))
+              for key in totals: totals[key]+=int(suite.get(key,'0'))
+              cases.extend((case.get('classname'),case.get('name')) for case in suite.findall('testcase'))
+          valid=inventory==expected and len(cases)==len(set(cases))==23 and totals['tests']==23
+          complete=valid and totals['failures']==totals['errors']==totals['skipped']==0
+          record={'head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+              'before':before,'after':after,'stable':before==after,'mavenExit':status,
+              'expected':expected,'unitInventory':inventory,'counts':totals,'exactCatalog':valid,'complete':complete,
+              'workflowSHA256':sha((root/'.github/workflows/scenario-c-peer-policy-proof.yml').read_bytes()),
+              'scope':'Installation parsing only; no native human authority, account, container or deployment.'}
+          (proof/'source-evidence.json').write_text(json.dumps(record,indent=2)+'\n')
+          sys.exit(0 if status==0 and before==after and complete else 1)
+          PY
+      - name: Preserve actual XML and immutable source evidence on failure or success
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: peer-policy-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            peer-policy-proof/
+            keycloak-image/account-lifecycle-spi/target/surefire-reports/TEST-*.xml

@@ -7,7 +7,7 @@ on:
       - keycloak-image/**
       - .github/workflows/scenario-c-protected-proof.yml
   push:
-    branches: [codex/367-c-protected-receiver-20261021, codex/367-c-receiver-finish-20261021]
+    branches: [codex/367-c-protected-receiver-20261021, codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021]
     paths:
       - keycloak-image/**
       - .github/workflows/scenario-c-protected-proof.yml
@@ -107,6 +107,12 @@ jobs:
       max-parallel: 2
       matrix:
         case:
+          - committed-own-tenant-peer-cancel
+          - committed-own-tenant-peer
+          - binding-rollback-only-unavailable
+          - binding-corrected-restart-available
+          - binding-commit-failure-unavailable
+          - binding-commit-ordering-available
           - extra-denies-prepared-five
           - missing-required-client
           - missing-required-service-account
@@ -114,6 +120,7 @@ jobs:
           - unregistered-task-role-human
           - unregistered-inherited-task-human
           - allowlisted-denied-human
+          - binding-drift-login-available
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -153,9 +160,44 @@ jobs:
           set -euo pipefail
           docker info > /dev/null
           export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
-          python keycloak-image/account-lifecycle-spi/tests/run_protected_installation.py \
-            --case "$PROTECTED_INSTALLATION_CASE" \
-            --report keycloak-image/account-lifecycle-spi/proof-output/installation.json
+          if [ "$PROTECTED_INSTALLATION_CASE" = binding-rollback-only-unavailable ] ||
+             [ "$PROTECTED_INSTALLATION_CASE" = binding-commit-failure-unavailable ] ||
+             [ "$PROTECTED_INSTALLATION_CASE" = binding-commit-ordering-available ]; then
+            export LIFECYCLE_PROOF_COMPANION_JAR="$RUNNER_TEMP/oriso-proof-readiness-companion.jar"
+            python keycloak-image/account-lifecycle-spi/tests/build_readiness_companion.py \
+              --jar "$LIFECYCLE_PROOF_COMPANION_JAR"
+            case "$PROTECTED_INSTALLATION_CASE" in
+              binding-rollback-only-unavailable)
+                python keycloak-image/account-lifecycle-spi/tests/run_protected_rollback.py \
+                  --report keycloak-image/account-lifecycle-spi/proof-output/rollback.json ;;
+              binding-commit-failure-unavailable)
+                python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_failure.py \
+                  --report keycloak-image/account-lifecycle-spi/proof-output/commit-failure-readiness.json ;;
+              binding-commit-ordering-available)
+                python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_ordering.py \
+                  --report keycloak-image/account-lifecycle-spi/proof-output/commit-ordering-readiness.json ;;
+            esac
+          elif [ "$PROTECTED_INSTALLATION_CASE" = committed-own-tenant-peer-cancel ]; then
+            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
+              -p test_protected_peer_cancel_controls.py -q
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_peer_cancel.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/peer-cancel.json
+          elif [ "$PROTECTED_INSTALLATION_CASE" = committed-own-tenant-peer ]; then
+            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
+              -p test_protected_peer_controls.py -q
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_peer.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/peer.json
+          elif [ "$PROTECTED_INSTALLATION_CASE" = binding-corrected-restart-available ]; then
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_corrected_readiness.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/corrected-readiness.json
+          elif [ "$PROTECTED_INSTALLATION_CASE" = binding-drift-login-available ]; then
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_readiness.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/readiness.json
+          else
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_installation.py \
+              --case "$PROTECTED_INSTALLATION_CASE" \
+              --report keycloak-image/account-lifecycle-spi/proof-output/installation.json
+          fi
       - name: Clean up only this fresh job's labelled native resources
         if: always()
         shell: bash
@@ -193,5 +235,6 @@ jobs:
             keycloak-image/account-lifecycle-spi/proof-output/*.json
             keycloak-image/account-lifecycle-spi/proof-output/*.xml
             keycloak-image/account-lifecycle-spi/target/surefire-reports/TEST-*.xml
+            ${{ runner.temp }}/oriso-proof-readiness-companion.jar
           if-no-files-found: error
           retention-days: 14

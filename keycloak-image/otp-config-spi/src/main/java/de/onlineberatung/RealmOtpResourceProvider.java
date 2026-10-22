@@ -215,8 +215,46 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("send-verification-mail/{username}")
   @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
-  public Response sendVerificationMail(@PathParam("username") final String username,
-      final OtpSetupDTO mailSetup) {
+  public Response sendVerificationMailRequest(@PathParam("username") final String username,
+      final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfEmailStart(
+          session, username, raw, headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+            var context = new CredentialContext(target.session(), target.realm(), target.user());
+            var emailOwner = target.session().users().getUserByEmail(target.realm(), target.email());
+            if (emailOwner != null && !target.user().getId().equals(emailOwner.getId()))
+              throw new jakarta.ws.rs.ClientErrorException("Email is not available", 412);
+            if (!mailCredentialService.getAllCredentials(context).isEmpty())
+              throw new jakarta.ws.rs.ClientErrorException("Current mail OTP credential conflicts", 409);
+            var otp = otpService.createOtp(target.email());
+            var credential = mailCredentialService.createCredential(otp, context);
+            target.bindEmailStartCredential(credential);
+            return Response.accepted(new Success().info("OTP mail pending")).build();
+          }, target -> deliverScopedMail(target, mailSender));
+    }
+    try {
+      return sendVerificationMail(username, org.keycloak.util.JsonSerialization.readValue(raw, OtpSetupDTO.class));
+    } catch (java.io.IOException rejected) {
+      throw new jakarta.ws.rs.BadRequestException("Invalid OTP request");
+    }
+  }
+
+  private static Response deliverScopedMail(
+      org.oriso.keycloak.lifecycle.ScopedOtpAccess.VerifiedOtpTarget target,
+      de.onlineberatung.otp.OtpMailSender sender) {
+    var selected = MailOtpCredentialModel.createFromCredentialModel(target.emailCredentialForDelivery());
+    if (selected.isActive()) throw new jakarta.ws.rs.ClientErrorException("Current mail OTP credential conflicts", 409);
+    try {
+      sender.sendOtpCode(selected.getOtp(), new CredentialContext(target.session(), target.realm(), target.user()));
+      return Response.ok(new Success().info("OTP mail sent")).build();
+    } catch (MailSendingException unknown) {
+      throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery outcome is unknown");
+    }
+  }
+
+  public Response sendVerificationMail(final String username, final OtpSetupDTO mailSetup) {
     verifyAuthentication();
 
     final var realm = this.session.getContext().getRealm();
@@ -298,19 +336,30 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
     }
     var credential = credentials.get(0);
     var validation = otpService.validate(target.initialCode(), credential.getOtp());
-    if (validation != ValidationResult.VALID && validation != ValidationResult.INVALID) {
+    if (validation != ValidationResult.VALID && validation != ValidationResult.INVALID
+        && validation != ValidationResult.EXPIRED) {
       throw new jakarta.ws.rs.ClientErrorException("Current mail OTP verification conflicts", 409);
     }
     target.bindEmailFinishCredential(credential);
-    if (validation == ValidationResult.INVALID) {
+    if (validation == ValidationResult.INVALID || validation == ValidationResult.EXPIRED) {
       mailCredentialService.incrementFailedAttempts(
           credential, context, credential.getOtp().getFailedVerifications());
       // Return the refusal so its one attempt and the shared immutable receipt commit together.
       return Response.status(Status.UNAUTHORIZED)
-          .entity(new Error().error(INVALID_GRANT_ERROR).errorDescription("Invalid code")).build();
+          .entity(new Error().error(INVALID_GRANT_ERROR).errorDescription(
+              validation == ValidationResult.EXPIRED ? "Code expired" : "Invalid code")).build();
+    }
+    if (target.hasLinkedEmailStart()) {
+      var owner = target.session().users().getUserByEmail(target.realm(), credential.getOtp().getEmail());
+      if (owner != null && !target.user().getId().equals(owner.getId()))
+        throw new jakarta.ws.rs.ClientErrorException("Email is not available", 412);
     }
     mailCredentialService.activate(credential, context);
     appCredentialService.deleteCredentials(context);
+    if (target.hasLinkedEmailStart()) {
+      target.user().setEmail(credential.getOtp().getEmail());
+      target.user().setEmailVerified(true);
+    }
     return Response.status(Status.CREATED).entity(new Success().info("OTP setup created")).build();
   }
 

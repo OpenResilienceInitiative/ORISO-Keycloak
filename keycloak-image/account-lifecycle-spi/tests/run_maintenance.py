@@ -17,7 +17,8 @@ EXPECTED_UNITS = {
     "org.oriso.keycloak.lifecycle.LifecycleJsonTest": 13,
     "org.oriso.keycloak.lifecycle.MaintenanceRequestTest": 8,
     "org.oriso.keycloak.lifecycle.GeneralPolicyTest": 4,
-    "org.oriso.keycloak.lifecycle.ScopedOtpRequestTest": 10,
+    "org.oriso.keycloak.lifecycle.ScopedOtpRequestTest": 11,
+    "org.oriso.keycloak.lifecycle.ProtectedPeerPolicyTest": 10,
 }
 NATIVE_FLOOR = 8
 
@@ -42,6 +43,8 @@ def sanitize_units(reports, destination):
     actual = {}
     counts = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
     consistent_counts = True
+    case_ids = set()
+    unique_cases = True
     for path in sorted(reports.glob("TEST-*.xml")):
         original = ET.parse(path).getroot()
         name = original.get("name", "")
@@ -52,6 +55,10 @@ def sanitize_units(reports, destination):
         suite = ET.SubElement(root, "testsuite", name=name)
         suite_counts = {key: 0 for key in counts}
         for case in cases:
+            case_id = (case.get("classname", name), case.get("name", ""))
+            if case_id in case_ids:
+                unique_cases = False
+            case_ids.add(case_id)
             clean = ET.SubElement(suite, "testcase", classname=case.get("classname", name),
                                   name=case.get("name", ""), time=case.get("time", "0"))
             suite_counts["tests"] += 1
@@ -66,10 +73,11 @@ def sanitize_units(reports, destination):
             counts[key] += value
     destination.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(root).write(destination, encoding="utf-8", xml_declaration=True)
-    accepted = consistent_counts and actual == EXPECTED_UNITS and counts["tests"] == 35 and not any(
+    accepted = consistent_counts and unique_cases and actual == EXPECTED_UNITS and counts["tests"] == 46 and not any(
         counts[key] for key in ("failures", "errors", "skipped"))
     return {"suite_counts": actual, **counts, "required_suites": EXPECTED_UNITS,
-            "required_total": 35, "consistent_declared_counts": consistent_counts, "accepted": accepted,
+            "required_total": 46, "consistent_declared_counts": consistent_counts,
+            "unique_cases": unique_cases, "accepted": accepted,
             "diagnostic_boundary": "Java schema units only; not native maintenance acceptance"}
 
 
