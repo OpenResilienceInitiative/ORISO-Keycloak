@@ -39,7 +39,11 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         jar = Path(os.environ.get("OTP_C_TEST_JAR", ""))
         if not jar.is_file():
             raise AssertionError("Actual compiled OTP provider is required")
+        fixture = Path(os.environ.get("SCOPED_OTP_READY_FIXTURE_JAR", ""))
+        if not fixture.is_file():
+            raise AssertionError("Separately built READY completion fixture is required")
         return [
+            "-v", str(fixture.resolve()) + ":/opt/keycloak/providers/scoped-otp-ready-fixture.jar:ro",
             "-v", str(jar.resolve()) + ":/opt/keycloak/providers/otp-config-spi.jar:ro",
             "-e", "IDENTITY_ACCOUNT_ADMIN_CLIENT_ID=backend-account-admin",
             "-e", "ORISO_APP_BASE_URL=https://otp-fixture.internal",
@@ -142,7 +146,7 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
     def scoped_app_setup(self, human, body):
         return self.scoped_mutation(human, body, "otp.app-setup", "PUT", "setup-otp", 201)
 
-    def scoped_mutation(self, human, body, operation, method, route, expected, actor="ACCOUNT_ADMIN", bearer=None):
+    def scoped_mutation(self, human, body, operation, method, route, expected, actor="ACCOUNT_ADMIN", bearer=None, fixture_operation=None):
         username = self.creation_input["account"]["username"]
         materialized = {**body, "username": username}
         now = int(time.time())
@@ -163,17 +167,22 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
             "Authorization": "Bearer " + (self.token(actor) if bearer is None else bearer),
             "X-ORISO-Task-Context": encoded + "." + signature,
         }
+        if fixture_operation is not None:
+            headers["X-ORISO-Ready-Fixture"] = fixture_operation
         if human is not None:
             headers["X-ORISO-Human-Authorization"] = "Bearer " + human
         request = Request(
             self.base + "/realms/" + REALM + "/otp-config/" + route + "/" + quote(username, safe=""),
             data=canonical(body), method=method, headers=headers,
         )
+        observation_headers = {"State", "Tx", "Revoked", "Expired"}
         try:
             with urlopen(request, timeout=30) as response:
                 status, raw = response.status, response.read()
+                self._ready_observation = {key: response.headers.get("X-ORISO-Ready-Fixture-" + key) for key in observation_headers}
         except HTTPError as error:
             status, raw = error.code, error.read()
+            self._ready_observation = {key: error.headers.get("X-ORISO-Ready-Fixture-" + key) for key in observation_headers}
             error.close()
         phase = {"otp.app-setup": "scoped-otp-app-setup-http",
                  "otp.delete": "scoped-otp-delete-http",
@@ -475,6 +484,47 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
                    exact_saved_outcome=True, original_route_and_body=True,
                    missing_expired_refused_before_prepare=True, changed_refused=True, current_human_required=True,
                    no_smtp=True, no_profile_effect=True, no_credential_effect=True)
+
+    def test_expired_committed_ready_cannot_claim_send_or_extend_original_deadline(self):
+        human, target = self.human(), self.target()
+        realm = self.admin("GET", "")
+        realm["emailTheme"] = "oriso"
+        realm["smtpServer"] = {"host": "host.docker.internal", "port": str(self.mail.server_address[1]),
+                               "from": "otp-fixture@oriso.org", "auth": "false", "ssl": "false", "starttls": "false"}
+        self.admin("PUT", "", realm)
+        original = self.admin("GET", "/users/" + self.account_id).get("email")
+        before_mail = len(self.mail.messages)
+        body = self.email_start_body(human, target, "ready-" + uuid.uuid4().hex + "@oriso.org")
+        body["authorityValidUntil"] = int(time.time()) + 15
+        frozen = canonical(body)
+        self.phase("scoped-otp-ready-fixture-start", original_public_route=True, exact_native_preconditions=True)
+        status, ready = self.scoped_mutation(human, body, "otp.email-start", "PUT", "send-verification-mail", 202,
+                                             fixture_operation=body["operationId"])
+        self.assertEqual(202, status)
+        self.assertEqual({"State": "READY", "Tx": "true", "Revoked": "true", "Expired": "false"}, self._ready_observation)
+        self.assertEqual("READY", ready["deliveryState"])
+        self.assertEqual(before_mail, len(self.mail.messages), "Failed original fresh-auth callback must not send")
+        self.assertEqual(401, self.scoped_mutation(human, body, "otp.email-start", "PUT", "send-verification-mail", 401)[0])
+        credentials = self.admin("GET", "/users/" + self.account_id + "/credentials")
+        mail = [c for c in credentials if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail)); self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
+        remaining = body["authorityValidUntil"] + 1 - time.time()
+        self.assertLessEqual(remaining, 17)
+        time.sleep(max(0, remaining))
+        fresh = self.human()
+        self.phase("scoped-otp-expired-ready-preconditions", actual_committed_ready=True,
+                   original_fresh_auth_callback_refused=True, original_deadline_elapsed=True,
+                   current_native_human=True, no_smtp=True)
+        status, _ = self.scoped_mutation(fresh, body, "otp.email-start", "PUT", "send-verification-mail", 503,
+                                        fixture_operation=body["operationId"])
+        self.assertEqual(503, status)
+        self.assertEqual({"State": "READY", "Tx": "true", "Revoked": None, "Expired": "true"}, self._ready_observation)
+        self.assertEqual(frozen, canonical(body))
+        self.assertEqual(credentials, self.admin("GET", "/users/" + self.account_id + "/credentials"))
+        self.assertEqual(original, self.admin("GET", "/users/" + self.account_id).get("email"))
+        self.assertEqual(before_mail, len(self.mail.messages))
+        self.phase("scoped-otp-expired-ready-refusal", original_body_id_cas_deadline=True,
+                   no_prepare_or_claim_or_send=True, no_native_effect=True, actual_committed_ready=True)
 
     def email_start_body(self, human, target, email):
         status, current = self.invoke("read", {"target": target}, human, 200)

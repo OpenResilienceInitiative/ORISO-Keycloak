@@ -62,6 +62,17 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
         self.assertEqual(3, result["failure_observations"])
         self.assertEqual(0, result["errors"])
 
+    def test_completion_fixture_requires_its_exact_class_and_registration_without_product_classes(self):
+        proof = importlib.util.module_from_spec(SPEC)
+        SPEC.loader.exec_module(proof)
+        exact = ["META-INF/", "META-INF/MANIFEST.MF", "META-INF/beans.xml",
+                 "org/oriso/keycloak/lifecycle/ScopedOtpReadyCompletionFixture.class"]
+        proof.validate_ready_fixture_entries(exact)
+        for entries in [[], exact[:-1], exact + [exact[-1]],
+                        exact + ["org/oriso/keycloak/lifecycle/ScopedOtpAccess.class"]]:
+            with self.assertRaises(ValueError):
+                proof.validate_ready_fixture_entries(entries)
+
     def test_actual_source_suite_passes(self):
         code, result, _ = self.gate()
         self.assertEqual(0, code)
