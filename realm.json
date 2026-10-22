@@ -2284,20 +2284,16 @@
       "builtIn": false,
       "authenticationExecutions": [
         {
+          "authenticator": "oriso-claimed-magic-link",
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
-          "priority": 10,
-          "autheticatorFlow": false,
-          "userSetupAllowed": false,
-          "authenticator": "direct-grant-validate-username"
+          "priority": 0
         },
         {
-          "authenticatorFlow": false,
-          "requirement": "REQUIRED",
-          "priority": 20,
-          "autheticatorFlow": false,
-          "userSetupAllowed": false,
-          "authenticator": "direct-grant-validate-password"
+          "flowAlias": "oriso-ordinary-password",
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 10
         },
         {
           "authenticatorFlow": true,
@@ -2314,6 +2310,42 @@
           "autheticatorFlow": true,
           "userSetupAllowed": false,
           "flowAlias": "email-otp-conditional"
+        },
+        {
+          "authenticator": "oriso-claimed-magic-link-attach",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 50
+        }
+      ]
+    },
+    {
+      "alias": "oriso-ordinary-password",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "oriso-magic-link-ordinary-password",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 0
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-username"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-password"
         }
       ]
     },

@@ -13,7 +13,7 @@ class SessionProofControls(unittest.TestCase):
     def row(self):
         observed = dict.fromkeys(p.OBSERVATION_FLAGS, True)
         observed["magicStatus"] = 401
-        return {"observed": observed,"sessionChecks":dict.fromkeys(p.SESSION_CHECK_FLAGS,True), "counts": {"tests":1,"failures":1,"errors":0,"skipped":0},
+        return {"observed": observed,"sessionChecks":dict.fromkeys(p.SESSION_CHECK_FLAGS,True),"tenantKinds":{"zero":200,"unassigned":200}, "counts": {"tests":1,"failures":1,"errors":0,"skipped":0},
                 "cases":[{"name":"test_checked_claim_enters_native_session_path", "outcome":"failure"}]}
 
     def test_only_full_proved_precondition_inventory_earns_assertion_red(self):
@@ -144,6 +144,10 @@ class SessionProofControls(unittest.TestCase):
         with self.assertRaises(RuntimeError):p.checked_token_facts(facts)
         facts=dict.fromkeys(p.TOKEN_FACT_FLAGS,False);facts["subjectPresent"]=1
         with self.assertRaises(RuntimeError):p.checked_token_facts(facts)
+        self.assertEqual({"zero":200,"unassigned":401},p.checked_tenant_kinds({"zero":200,"unassigned":401}))
+        for bad in ({"zero":True,"unassigned":200},{"zero":200},{"zero":200,"unassigned":600},
+                    {"zero":200,"unassigned":200,"private":"never-export"}):
+            with self.assertRaises(RuntimeError):p.checked_tenant_kinds(bad)
 
     def test_runtime_requires_both_exact_owned_known_false_oom_integer_zero_restart(self):
         planned=[{"kind":"container","name":"kc"},{"kind":"container","name":"redis"},{"kind":"network","name":"net"}]
@@ -207,6 +211,29 @@ class SessionProofControls(unittest.TestCase):
         for counts,status in ((green,1),(red,0),(green,124),(red,-9),(green,True),(red,None),
                               ({**green,"errors":1},1),({**green,"skipped":1},0)):
             self.assertFalse(p.native_exit_agrees(counts,status))
+
+    def test_product_realm_installs_the_measured_magic_route_and_original_otp_objects(self):
+        import json
+        source=json.loads((Path(__file__).parents[2]/"realm.json").read_text())
+        self.assertEqual("direct-grant-2fa",source["directGrantFlow"])
+        flows={row["alias"]:row for row in source["authenticationFlows"]}
+        simple=lambda provider,priority:{"authenticator":provider,"authenticatorFlow":False,
+            "requirement":"REQUIRED","priority":priority}
+        otp=lambda alias,priority:{"authenticatorFlow":True,"requirement":"CONDITIONAL",
+            "priority":priority,"autheticatorFlow":True,"userSetupAllowed":False,"flowAlias":alias}
+        expected=[simple("oriso-claimed-magic-link",0),
+            {"flowAlias":"oriso-ordinary-password","authenticatorFlow":True,"requirement":"CONDITIONAL","priority":10},
+            otp("app-otp-conditional",30),otp("email-otp-conditional",40),
+            simple("oriso-claimed-magic-link-attach",50)]
+        # First assertion is the real missing product-source router, not a missing alias setup error.
+        self.assertEqual(expected,flows["direct-grant-2fa"]["authenticationExecutions"])
+        credentials=[{"authenticatorFlow":False,"requirement":"REQUIRED","priority":priority,
+            "autheticatorFlow":False,"userSetupAllowed":False,"authenticator":provider}
+            for provider,priority in (("direct-grant-validate-username",10),("direct-grant-validate-password",20))]
+        ordinary=flows["oriso-ordinary-password"]
+        self.assertEqual({"alias":"oriso-ordinary-password","providerId":"basic-flow",
+            "topLevel":False,"builtIn":False,"authenticationExecutions":[
+            simple("oriso-magic-link-ordinary-password",0),*credentials]},ordinary)
 
     def test_only_exact_new_fixture_path_joins_failure_only_formatter_allowlist(self):
         fixture="src/test/java/de/caritas/cob/userservice/api/service/auth/MagicLinkSessionNativeFixture.java"

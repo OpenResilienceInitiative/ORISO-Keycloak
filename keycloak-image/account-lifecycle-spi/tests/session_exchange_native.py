@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """One finite native SPI tracer; actor/claim are fixture inputs, not final User authority proof."""
 import base64
-import copy
 from collections import Counter
 import hashlib
 import hmac
@@ -30,8 +29,10 @@ SESSION_CHECKS = dict.fromkeys(("nativeSubjectClientTenantExpiry","actualNativeS
     "sameWorkflowSameSession","changedTupleRefused","unboundBodyRefused","wrongActorRefused",
     "wrongProofAudienceRefused","expiredCommandRefused","currentDisabledRefused",
     "requiredActionRefused","concurrentSameWorkflowOneSession","mfaMissingWrongAndCorrect",
-    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan"),False)
+    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan","nativeZeroAndUnassignedTenantBound"),False)
 
+
+TENANT_KINDS = {"zero":0,"unassigned":0}
 
 PAIRED_EXPORT = None
 
@@ -95,22 +96,7 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             if method == "POST" and path == "/admin/realms":
                 self.assertFalse(imported)
                 imported.append(True)
-                wired = copy.deepcopy(selected)
-                direct = next(flow for flow in wired if flow["alias"] == "direct-grant-2fa")
-                credentials = [step for step in direct["authenticationExecutions"]
-                               if step.get("authenticator") in {"direct-grant-validate-username","direct-grant-validate-password"}]
-                self.assertEqual(2,len(credentials))
-                direct["authenticationExecutions"] = [
-                    {"authenticator":"oriso-claimed-magic-link","authenticatorFlow":False,"requirement":"REQUIRED","priority":0},
-                    {"flowAlias":"oriso-ordinary-password","authenticatorFlow":True,"requirement":"CONDITIONAL","priority":10},
-                    *[step for step in direct["authenticationExecutions"] if step not in credentials],
-                    {"authenticator":"oriso-claimed-magic-link-attach","authenticatorFlow":False,"requirement":"REQUIRED","priority":50},
-                ]
-                wired.append({"alias":"oriso-ordinary-password","providerId":"basic-flow","topLevel":False,"builtIn":False,
-                              "authenticationExecutions":[
-                                  {"authenticator":"oriso-magic-link-ordinary-password","authenticatorFlow":False,"requirement":"REQUIRED","priority":0},
-                                  *credentials]})
-                body = {**body, "clientScopes": source_scopes, "authenticationFlows": wired,
+                body = {**body, "clientScopes": source_scopes, "authenticationFlows": selected,
                         "authenticatorConfig": source.get("authenticatorConfig", []),
                         "directGrantFlow": "direct-grant-2fa"}
             return original(base, method, path, body, token, form, proof)
@@ -120,11 +106,11 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
         finally:
             native.call = original
         self.assertEqual([True], imported)
+        self.magic_providers = {"oriso-claimed-magic-link","oriso-claimed-magic-link-attach","oriso-magic-link-ordinary-password"}
         self.expected_executions = Counter((step["authenticator"], step["requirement"])
             for flow in selected for step in flow.get("authenticationExecutions", [])
-            if step.get("authenticator"))
+            if step.get("authenticator") and step["authenticator"] not in self.magic_providers)
         actual = self.admin("GET", "/authentication/flows/direct-grant-2fa/executions")
-        self.magic_providers = {"oriso-claimed-magic-link","oriso-claimed-magic-link-attach","oriso-magic-link-ordinary-password"}
         self.assertEqual(self.expected_executions, Counter((step["providerId"],step["requirement"])
             for step in actual if step.get("providerId") and not step.get("authenticationFlow")
             and step["providerId"] not in self.magic_providers))
@@ -423,3 +409,49 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
         self.assertEqual(401,exchange(body)[0])
         self.assertEqual(expected_sessions,session_ids())
         SESSION_CHECKS["currentDisabledRefused"]=True
+        outcomes=[]
+        for kind,value in (("zero",0),("unassigned",None)):
+            try:
+                attributes=dict(target.get("attributes",{}))
+                if value is None: attributes.pop("tenantId",None)
+                else: attributes["tenantId"]=[str(value)]
+                self.admin("PUT","/users/"+target["id"],{**target,"attributes":attributes})
+                current=self.admin("GET","/users/"+target["id"])
+                self.assertIs(True,current["enabled"])
+                for field in ("username","email","firstName","lastName"):
+                    self.assertEqual(target[field],current[field])
+                if value is None: self.assertNotIn("tenantId",current.get("attributes",{}))
+                else: self.assertEqual([str(value)],current["attributes"]["tenantId"])
+            except AssertionError as failure:
+                raise RuntimeError("Native tenant-kind fixture precondition") from failure
+            candidate={**body,"tenantId":value,"workflowId":str(uuid.uuid4()),
+                "claimDigest":native.mac("magic-link-capability/v1",{"token":uuid.uuid4().hex})}
+            status,reply=exchange(candidate)
+            TENANT_KINDS[kind]=status
+            outcomes.append(status==200)
+            if status==200:
+                token_claims=claims(reply)
+                self.assertEqual(target["id"],token_claims.get("sub"))
+                self.assertEqual("app",token_claims.get("azp"))
+                if value is None: self.assertNotIn("tenantId",token_claims)
+                else: self.assertEqual(str(value),token_claims.get("tenantId"))
+                new_sid=token_claims["sid"]
+                self.assertNotIn(new_sid,expected_sessions)
+                expected_sessions={*expected_sessions,new_sid}
+                self.assertEqual(expected_sessions,session_ids())
+                retried_status,retried=exchange(candidate)
+                self.assertEqual(200,retried_status)
+                self.assertEqual(new_sid,claims(retried).get("sid"))
+                self.assertEqual(expected_sessions,session_ids())
+                changed={**candidate,"tenantId":0 if value is None else None}
+                self.assertEqual(401,exchange(changed)[0])
+                self.assertEqual(expected_sessions,session_ids())
+            else:
+                self.assertEqual(expected_sessions,session_ids())
+        try:
+            self.admin("PUT","/users/"+target["id"],target)
+            self.assertEqual(target.get("attributes",{}),self.admin("GET","/users/"+target["id"]).get("attributes",{}))
+        except AssertionError as failure:
+            raise RuntimeError("Native tenant-kind fixture restoration") from failure
+        self.assertTrue(all(outcomes),"Both exact current zero and unassigned tenant bindings must authenticate")
+        SESSION_CHECKS["nativeZeroAndUnassignedTenantBound"]=True

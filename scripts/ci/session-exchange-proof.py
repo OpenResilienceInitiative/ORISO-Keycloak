@@ -126,7 +126,7 @@ SESSION_CHECK_FLAGS = {"nativeSubjectClientTenantExpiry","actualNativeSessionBou
     "changedTupleRefused","unboundBodyRefused","wrongActorRefused","wrongProofAudienceRefused",
     "expiredCommandRefused","currentDisabledRefused",
     "requiredActionRefused","concurrentSameWorkflowOneSession","mfaMissingWrongAndCorrect",
-    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan"}
+    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan","nativeZeroAndUnassignedTenantBound"}
 
 
 def checked_session_checks(value):
@@ -139,6 +139,13 @@ TOKEN_FACT_FLAGS = {"subjectPresent","subjectMatchesTarget","subjectMatchesCanon
     "clientMatchesApp","tenantPresent","tenantMatchesTarget","sessionIdPresent"}
 
 
+def checked_tenant_kinds(value):
+    if (not isinstance(value,dict) or set(value)!={"zero","unassigned"}
+            or any(type(v) is not int or not 0<=v<=599 for v in value.values())):
+        raise RuntimeError("Only fixed tenant-kind HTTP statuses may be exported")
+    return value
+
+
 def checked_token_facts(value):
     if not isinstance(value,dict) or set(value)!=TOKEN_FACT_FLAGS or any(type(v) is not bool for v in value.values()):
         raise RuntimeError("Exact fixed native token facts required")
@@ -148,6 +155,7 @@ def checked_token_facts(value):
 def native_classification(receipt):
     observed = checked_observation(receipt["observed"])
     session_checks = checked_session_checks(receipt["sessionChecks"])
+    tenant_kinds = checked_tenant_kinds(receipt["tenantKinds"])
     preconditions = OBSERVATION_FLAGS - {"nativeRouterSelected"}
     counts = receipt.get("counts")
     if (not isinstance(counts, dict) or set(counts) != {"tests", "failures", "errors", "skipped"}
@@ -158,7 +166,7 @@ def native_classification(receipt):
         raise RuntimeError("Complete actual native preconditions/inventory required")
     if counts == {"tests":1,"failures":1,"errors":0,"skipped":0} and observed["nativeRouterSelected"] is True and observed["magicStatus"] == 401 and receipt["cases"][0]["outcome"] == "failure":
         return "ACTUAL_NATIVE_SESSION_ASSERTION_RED"
-    if counts == {"tests":1,"failures":0,"errors":0,"skipped":0} and observed["magicStatus"] == 200 and receipt["cases"][0]["outcome"] == "pass" and all(session_checks.values()):
+    if counts == {"tests":1,"failures":0,"errors":0,"skipped":0} and observed["magicStatus"] == 200 and receipt["cases"][0]["outcome"] == "pass" and all(session_checks.values()) and all(status==200 for status in tenant_kinds.values()):
         return "NATIVE_TRACER_GREEN_INCOMPLETE"
     if counts == {"tests":1,"failures":1,"errors":0,"skipped":0} and observed["magicStatus"] > 0 and receipt["cases"][0]["outcome"] == "failure":
         return "ACTUAL_NATIVE_SESSION_ASSERTION_FAILURE"
@@ -430,7 +438,7 @@ def child():
         paired={**paired,"suites":safe_xml(reports,target),"sourceFrames":frames[:8]}
     (out / "native-observation.json").write_text(json.dumps({
         "counts": counts, "cases": result.rows, "observed": checked_observation(module.OBSERVATIONS),
-        "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS),"tokenFacts":checked_token_facts(module.TOKEN_FACTS),"paired":paired}, sort_keys=True) + "\n")
+        "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS),"tokenFacts":checked_token_facts(module.TOKEN_FACTS),"tenantKinds":checked_tenant_kinds(module.TENANT_KINDS),"paired":paired}, sort_keys=True) + "\n")
     return 0 if result.wasSuccessful() else 1
 
 
