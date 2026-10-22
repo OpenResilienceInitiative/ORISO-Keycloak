@@ -113,7 +113,7 @@ class HumanBindingReadiness(unittest.TestCase):
         o["primaryHumanAndOrdinaryMappingUnchanged"] = True
         subprocess.run(["docker", "stop", "-t", "5", h.name], check=True, capture_output=True, timeout=30)
         subprocess.run(["docker", "rm", h.name], check=True, capture_output=True, timeout=30)
-        subprocess.run(h.configured_command, check=True, capture_output=True, timeout=30)
+        subprocess.run([*h.configured_command, "--verbose"], check=True, capture_output=True, timeout=30)
         ReadinessFixture.refresh_endpoint("human-only-drift-third-boot")
         after = inspect()
         self.assertEqual(before["Image"], after["Image"])
@@ -132,8 +132,9 @@ class HumanBindingReadiness(unittest.TestCase):
             text = logs.stdout + logs.stderr
             o["nativeExitedNonzeroWithoutOom"] = (not state["Running"] and state["ExitCode"] != 0
                 and state["OOMKilled"] is False and state.get("Error", "") == "")
-            o["bindingValidationSourceWitness"] = all(frame in text for frame in (
-                "AccountLifecycleFactory", "GeneralPolicy.validateInstallation", "LifecycleJson.deny"))
+            o["bindingValidationSourceFrames"] = {frame: frame in text for frame in (
+                "AccountLifecycleFactory", "GeneralPolicy.validateInstallation", "LifecycleJson.deny")}
+            o["bindingValidationSourceWitness"] = all(o["bindingValidationSourceFrames"].values())
             try:
                 status, _ = call(ReadinessFixture.base, "POST", "/realms/" + REALM
                     + "/protocol/openid-connect/token", {"client_id": "ordinary-human-web", "grant_type": "password",

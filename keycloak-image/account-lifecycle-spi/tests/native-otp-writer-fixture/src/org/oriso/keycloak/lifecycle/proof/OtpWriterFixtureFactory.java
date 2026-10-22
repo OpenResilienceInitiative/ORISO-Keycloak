@@ -165,35 +165,50 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
                 .replace('"', ' ').replaceAll("\\s+", " ").trim();
             boolean exact = sql.matches("select .+ from (public\\.)?realm [a-z0-9_]+ where [a-z0-9_]+\\s*\\.\\s*id\\s*=\\s*\\? for update \\{1: '"
                 + java.util.regex.Pattern.quote(witness.realm) + "'\\}");
+            var selector = realmSelector(sql, witness.realm);
             if (!sampled) {
               waitObservation(rows.size(), "BLOCKED".equals(row[1]),
                   row[2] instanceof Number blocker && blocker.longValue() == witness.connection,
                   ((Number) row[0]).longValue() != witness.connection,
                   sql.matches(".* from (public\\.)?realm [a-z0-9_]+ .*"),
-                  sql.contains(" for update"), sql.endsWith("{1: '" + witness.realm + "'}"), exact);
+                  sql.contains(" for update"), sql.endsWith("{1: '" + witness.realm + "'}"), exact, selector);
               sampled = true;
             }
             if (((Number) row[0]).longValue() != witness.connection && "BLOCKED".equals(row[1])
-                && row[2] instanceof Number n && n.longValue() == witness.connection && exact) {
+                && row[2] instanceof Number n && n.longValue() == witness.connection && selector.values().stream().allMatch(Boolean::booleanValue)) {
               witness.blocked.set(true); emit("BLOCKED", witness); return;
             }
           }
           Thread.sleep(25);
         }
-        if (!sampled) waitObservation(0, false, false, false, false, false, false, false);
+        if (!sampled) waitObservation(0, false, false, false, false, false, false, false, realmSelector("", witness.realm));
       } finally { if (tx.isActive()) tx.rollback(); }
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt(); witness.failed.set(true); emit("FAILED", witness);
     } catch (RuntimeException failure) { witness.failed.set(true); emit("FAILED", witness); }
   }
 
+  private static Map<String, Boolean> realmSelector(String sql, String realm) {
+    int from = sql.indexOf(" from "), where = sql.lastIndexOf(" where ");
+    int update = sql.lastIndexOf(" for update ");
+    boolean ordered = from >= 0 && where > from && update > where;
+    String table = ordered ? sql.substring(from + 6, where).trim().replaceAll("\\s*\\.\\s*", ".") : "";
+    String predicate = ordered ? sql.substring(where + 7, update).trim().replaceAll("\\s*\\.\\s*", ".") : "";
+    String tail = ordered ? sql.substring(update + 12).trim() : "";
+    return Map.of("selectStatement", sql.startsWith("select "),
+        "onlyRealmTable", table.matches("(public\\.)?realm(?: [a-z0-9_]+)?"),
+        "singlePrimaryKeyPredicate", predicate.matches("(?:[a-z0-9_]+\\.)?id\\s*=\\s*\\?"),
+        "onlyForUpdateAndExactRealmBind", tail.equals("{1: '" + realm + "'}"));
+  }
+
   private static void waitObservation(int count, boolean blocked, boolean blocker, boolean other,
-      boolean realm, boolean update, boolean parameter, boolean exact) {
+      boolean realm, boolean update, boolean parameter, boolean exact, Map<String, Boolean> selector) {
     var values = new TreeMap<String, Object>();
     values.put("schema", 1); values.put("rowCount", count);
     values.put("nativeBlockedState", blocked); values.put("capturedBlockerMatches", blocker);
     values.put("otherSession", other); values.put("realmTable", realm); values.put("forUpdate", update);
     values.put("realmParameterSuffix", parameter); values.put("exactOriginalGrammar", exact);
+    values.putAll(selector);
     try { System.out.println("ORISO_PROOF_OTP_WAIT_V1 " + new ObjectMapper().writeValueAsString(values)); }
     catch (java.io.IOException failure) { throw new IllegalStateException("Proof wait observation unavailable"); }
   }

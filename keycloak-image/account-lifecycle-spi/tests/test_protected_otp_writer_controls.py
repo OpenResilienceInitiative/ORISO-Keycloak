@@ -90,7 +90,8 @@ class WriterControls(unittest.TestCase):
         import json
         row = dict(schema=1, rowCount=1, nativeBlockedState=True, capturedBlockerMatches=True,
                    otherSession=True, realmTable=True, forUpdate=True, realmParameterSuffix=True,
-                   exactOriginalGrammar=False)
+                   exactOriginalGrammar=False, selectStatement=True, onlyRealmTable=True,
+                   singlePrimaryKeyPredicate=True, onlyForUpdateAndExactRealmBind=True)
         self.assertEqual([row], wait_rows("ORISO_PROOF_OTP_WAIT_V1 " + json.dumps(row)))
         with self.assertRaises(AssertionError):
             wait_rows("ORISO_PROOF_OTP_WAIT_V1 " + json.dumps(dict(row, statement="never-copy")))

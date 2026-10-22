@@ -113,7 +113,8 @@ def launch(fixture, arguments, image):
 def wait_rows(output):
     prefix = "ORISO_PROOF_OTP_WAIT_V1 "
     fields = {"schema", "rowCount", "nativeBlockedState", "capturedBlockerMatches", "otherSession",
-              "realmTable", "forUpdate", "realmParameterSuffix", "exactOriginalGrammar"}
+              "realmTable", "forUpdate", "realmParameterSuffix", "exactOriginalGrammar",
+              "selectStatement", "onlyRealmTable", "singlePrimaryKeyPredicate", "onlyForUpdateAndExactRealmBind"}
     rows = []
     for line in output.splitlines():
         if prefix not in line:
