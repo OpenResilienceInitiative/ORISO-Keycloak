@@ -53,6 +53,10 @@ class BootstrapClassifier(unittest.TestCase):
         value["readinessObservation"]["otpPrepareStatus"] = 200
         self.assertEqual("BEHAVIOR_FAILURE", classify(value))
         value["failures"] = 0
+        self.assertNotEqual("GREEN", classify(value))
+        value["readinessObservation"].update(appMutationStatus=201,
+            preparedReceiptMacVerified=True, appNativeCredentialAndDisabledStateVerified=True,
+            exactAppRetryPreservesOneCredential=True, completedPhaseRefusesNewEnrollment=True)
         self.assertEqual("GREEN", classify(value))
         value["readinessObservation"]["otpPrepareStatus"] = 404
         self.assertNotEqual("GREEN", classify(value))

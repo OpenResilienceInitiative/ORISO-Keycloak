@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import time
 import unittest
 from urllib.error import HTTPError
@@ -81,7 +82,16 @@ def classify(summary):
         return "INPUT_OR_FIXTURE_ERROR"
     if summary.get("failures") == 1 and observed.get("otpPrepareStatus") == 403:
         return "GENUINE_PROTECTED_PENDING_OTP_PREPARE_RED"
-    if summary.get("failures") == 0 and observed.get("otpPrepareStatus") == 200:
+    if (summary.get("failures") == 1 and observed.get("otpPrepareStatus") == 200
+        and observed.get("preparedReceiptMacVerified") is True
+        and observed.get("appMutationStatus") == 403
+        and observed.get("noAppCredentialBeforeMutation") is True):
+        return "GENUINE_PROTECTED_PENDING_OTP_APP_RED"
+    if (summary.get("failures") == 0 and observed.get("otpPrepareStatus") == 200
+        and observed.get("appMutationStatus") == 201
+        and all(observed.get(key) is True for key in (
+            "preparedReceiptMacVerified", "appNativeCredentialAndDisabledStateVerified",
+            "exactAppRetryPreservesOneCredential", "completedPhaseRefusesNewEnrollment"))):
         return "GREEN"
     return "BEHAVIOR_FAILURE"
 
@@ -222,3 +232,85 @@ class BootstrapRead(unittest.TestCase):
         self.assertTrue(result["otpInfo"]["otpSecretQrCode"])
         self.assertTrue(result["bootstrapReceipt"])
         self.assertLessEqual(result["authorityValidUntil"], deadline)
+
+        # The native prepare receipt is causal metadata, never a public DTO authority factory.
+        receipt = result["bootstrapReceipt"]
+        encoded, signature = receipt.split(".")
+        self.assertEqual(64, len(signature))
+        expected_mac = hmac.new(CONTEXT_KEY,
+            ("otp-bootstrap-prepare/v1\n" + encoded).encode(), hashlib.sha256).hexdigest()
+        self.assertTrue(hmac.compare_digest(signature, expected_mac))
+        decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        receipt_value = json.loads(decoded)
+        self.assertEqual(canonical(receipt_value), decoded)
+        self.assertEqual({
+            "v": 1, "realmId": helper.realm_id, "approvalId": approval,
+            "attemptId": attempt, "accountId": account,
+            "claimId": create["acceptanceClaim"]["claimId"],
+            "executionId": create["execution"]["executionId"],
+            "bootstrapIncarnation": create["execution"]["executionId"],
+            "ownerClient": ACTORS["ACCOUNT_ADMIN"][0], "ownerSubject": SUBJECTS["ACCOUNT_ADMIN"],
+            "originDigest": mac("otp-bootstrap-origin/v1", target),
+            "authorityValidUntil": result["authorityValidUntil"], "state": "PREPARED",
+        }, receipt_value)
+        observed["preparedReceiptMacVerified"] = True
+        secret = result["otpInfo"]["otpSecret"]
+        digest = hmac.new(secret.encode(), struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
+        offset = digest[-1] & 15
+        code = str((struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7fffffff) % 1000000).zfill(6)
+        mutation_target = {"accountId": account, "tenantId": projection["tenantId"], "origin": {
+            "kind": "INVITATION", "workflowId": scope["workflowId"], "humanSubject": None,
+            "humanIssuer": None, "humanClient": None, "humanAuthority": None,
+        }}
+        mutation = {"target": mutation_target, "operationId": str(uuid.uuid4()),
+            "expectedState": mac("otp-bootstrap-state/v1", receipt),
+            "otp": {"initialCode": code, "secret": secret, "email": None}}
+
+        def app(body):
+            materialized = {**copy.deepcopy(body), "username": projection["username"],
+                            "bootstrapReceipt": receipt}
+            now = int(time.time())
+            claims = {**proof, "operation": "otp.bootstrap-app-setup", "method": "PUT",
+                "payloadDigest": mac("payload", materialized), "jti": str(uuid.uuid4()),
+                "nonce": uuid.uuid4().hex, "iat": now, "exp": min(now + 60, deadline)}
+            payload = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
+            signature = base64.urlsafe_b64encode(hmac.new(CONTEXT_KEY,
+                ("proof\n" + payload).encode(), hashlib.sha256).digest()).decode().rstrip("=")
+            request = Request(helper.base + "/realms/" + REALM + "/otp-config/setup-otp/"
+                + quote(projection["username"], safe=""), method="PUT", data=canonical(body), headers={
+                    "Content-Type": "application/json", "Authorization": "Bearer " + bearer,
+                    "X-ORISO-Task-Context": payload + "." + signature,
+                    "X-ORISO-OTP-Bootstrap": receipt,
+                })
+            try:
+                response = urlopen(request, timeout=30)
+            except HTTPError as error:
+                response = error
+            with response:
+                raw = response.read()
+                return response.code, json.loads(raw) if raw else None
+
+        observed["noAppCredentialBeforeMutation"] = credentials == helper.admin(
+            "GET", "/users/" + account + "/credentials")
+        status, completed = app(mutation)
+        observed["appMutationStatus"] = status
+        self.assertEqual(201, status)
+        self.assertEqual({"status", "result", "receipt"}, set(completed))
+        self.assertEqual(201, completed["status"])
+        self.assertTrue(completed["receipt"])
+        after = helper.admin("GET", "/users/" + account + "/credentials")
+        self.assertEqual(["otp", "password"], sorted(row["type"] for row in after))
+        self.assertFalse(helper.admin("GET", "/users/" + account)["enabled"])
+        self.assertEqual(["/pending-provisioning"], [row["path"] for row in
+            helper.admin("GET", "/users/" + account + "/groups")])
+        observed["appNativeCredentialAndDisabledStateVerified"] = True
+        status, retry = app(copy.deepcopy(mutation))
+        self.assertEqual(201, status)
+        self.assertEqual(completed, retry)
+        self.assertEqual(after, helper.admin("GET", "/users/" + account + "/credentials"))
+        observed["exactAppRetryPreservesOneCredential"] = True
+        changed = copy.deepcopy(mutation)
+        changed["operationId"] = str(uuid.uuid4())
+        self.assertEqual(409, app(changed)[0])
+        self.assertEqual(after, helper.admin("GET", "/users/" + account + "/credentials"))
+        observed["completedPhaseRefusesNewEnrollment"] = True
