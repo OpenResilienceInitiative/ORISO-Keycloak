@@ -224,6 +224,7 @@ final class MaintenanceTarget {
     try {
       if (session.getProvider(org.keycloak.policy.PasswordPolicyManagerProvider.class)
           .validate(realm, user, password) != null) bad();
+      request.requireEffectDeadline();
       if (!user.credentialManager().updateCredential(UserCredentialModel.password(password))) bad();
       user.removeRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
       session.getProvider(JpaConnectionProvider.class).getEntityManager().flush();

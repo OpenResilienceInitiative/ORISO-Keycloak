@@ -12,13 +12,23 @@ record MaintenanceRequest(
     JsonNode target,
     String operationId,
     String expectedState,
-    JsonNode change) {
+    JsonNode change,
+    Long authorityValidUntil) {
   static MaintenanceRequest parse(String command, String accountId, JsonNode body) {
     if (!Set.of("read", "profile", "email", "locale", "password", "self-password", "ordinary-profile",
         "deactivate", "reactivate", "delete").contains(command)) bad();
     boolean read = "read".equals(command);
     if (read) fields(body, "target");
+    else if ("self-password".equals(command) && body.has("authorityValidUntil"))
+      fields(body, "target", "operationId", "expectedState", "change", "authorityValidUntil");
     else fields(body, "target", "operationId", "expectedState", "change");
+    Long deadline = null;
+    if (body.has("authorityValidUntil")) {
+      var value = body.path("authorityValidUntil");
+      if (!"self-password".equals(command) || !value.isIntegralNumber() || !value.canConvertToLong()
+          || value.longValue() <= 0) bad();
+      deadline = value.longValue();
+    }
     var target = body.path("target");
     fields(target, "accountId", "tenantId", "origin");
     String actualId = text(target, "accountId", 255, false);
@@ -40,7 +50,7 @@ record MaintenanceRequest(
         || !human && (subject != null || issuer != null || client != null || authority != null)) deny();
     if ("SELF".equals(kind) && !actualId.equals(subject)
         || "HUMAN_ADMIN".equals(kind) && authority == null) deny();
-    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null);
+    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null, null);
     String operationId = text(body, "operationId", 36, false);
     uuid(operationId);
     String state = text(body, "expectedState", 64, false);
@@ -88,7 +98,12 @@ record MaintenanceRequest(
       case "deactivate", "delete" -> fields(change);
       default -> bad();
     }
-    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy());
+    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy(), deadline);
+  }
+
+  void requireEffectDeadline() {
+    if (authorityValidUntil != null && authorityValidUntil <= java.time.Instant.now().getEpochSecond())
+      throw new jakarta.ws.rs.BadRequestException("Password intent expired");
   }
 
   static JsonNode availability(JsonNode body) {

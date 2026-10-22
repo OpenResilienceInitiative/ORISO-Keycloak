@@ -95,6 +95,12 @@ final class ProtectedPeerDelegation {
     return provenance(origin, attempt, profile);
   }
 
+  // Facts only for the operation resolver. This never constructs a peer/approval binding.
+  long committedOperationTarget(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
+      ProtectedInvitationConfiguration.Profile profile) {
+    return provenance(origin, attempt, profile, true);
+  }
+
   void recordConsumed(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt) {
     if (origin.delegatedSubject != null || origin.delegationSnapshot != null)
       throw new jakarta.ws.rs.ClientErrorException(409);
@@ -132,6 +138,13 @@ final class ProtectedPeerDelegation {
 
   private long provenance(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
       ProtectedInvitationConfiguration.Profile profile) {
+    return provenance(origin, attempt, profile, false);
+  }
+
+  private long provenance(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
+      ProtectedInvitationConfiguration.Profile profile, boolean operationTarget) {
+    boolean platform = operationTarget && "PLATFORM_ADMIN".equals(profile.kind());
+    if (!platform && !"TENANT_ADMIN".equals(profile.kind())) deny();
     if (!config.realmId.equals(origin.realmId) || !"CONSUMED".equals(origin.state)
         || origin.approvalReceipt == null || origin.transitionReceipt == null || origin.boundAttemptId == null
         || !config.realmId.equals(attempt.realmId) || !"COMMITTED".equals(attempt.state)
@@ -151,7 +164,7 @@ final class ProtectedPeerDelegation {
         || !origin.issuerSubject.equals(enriched.path("issuerSubject").asText())
         || !config.issuer.equals(enriched.path("issuer").asText())
         || !LifecycleAuthorization.equal(crypto.mac("protected-approval-scope/v1", enriched), origin.scopeDigest)
-        || !"TENANT_ADMIN".equals(scope.path("protectedKind").asText())
+        || !(platform ? "PLATFORM_ADMIN" : "TENANT_ADMIN").equals(scope.path("protectedKind").asText())
         || !profile.id().equals(scope.path("protectedProfileId").asText())
         || !origin.workflowId.equals(scope.path("workflowId").asText())
         || !origin.inviteId.equals(scope.path("inviteId").asText())
@@ -160,7 +173,7 @@ final class ProtectedPeerDelegation {
         || !scope.path("creatorClient").asText().equals(attempt.ownerClient)
         || !scope.path("creatorSubject").asText().equals(attempt.ownerSubject)) deny();
     var tenants = HumanPolicyJson.tenants(scope.path("targetTenantIds"));
-    if (tenants.size() != 1 || tenants.iterator().next() <= 0) deny();
+    if (tenants.size() != 1 || (platform ? tenants.iterator().next() != 0 : tenants.iterator().next() <= 0)) deny();
     long tenant = tenants.iterator().next();
     var requestBinding = JSON.createObjectNode(); requestBinding.set("request", request);
     requestBinding.put("issuerRealm", origin.realmId); requestBinding.put("issuerSubject", origin.issuerSubject);

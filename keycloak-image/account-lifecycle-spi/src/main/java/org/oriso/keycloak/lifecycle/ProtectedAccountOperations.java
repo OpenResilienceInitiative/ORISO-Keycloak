@@ -69,32 +69,36 @@ final class ProtectedAccountOperations {
         || !locator[1].equals(attempt.scope)) deny();
     var frozen = parse(approval.scope).path("profile");
     var profile = config.profiles.get(text(frozen, "id", 255, false));
-    if (profile == null || !"TENANT_ADMIN".equals(profile.kind())
+    if (profile == null || !Set.of("TENANT_ADMIN", "PLATFORM_ADMIN").contains(profile.kind())
         || !canonical(profile.snapshot()).equals(canonical(frozen))) deny();
     var delegation = new ProtectedPeerDelegation(session, config, crypto);
-    long tenant = delegation.committedTarget(approval, attempt, profile);
+    long tenant = delegation.committedOperationTarget(approval, attempt, profile);
     if (!Long.toString(tenant).equals(request.target().path("tenantId").asText())) deny();
-    var resolved = delegation.resolve(authenticated, em);
-    var human = delegation.require(resolved, rawHuman);
-    var origin = request.target().path("origin");
-    if (!request.accountId().equals(human.subject()) || !human.subject().equals(origin.path("humanSubject").asText())
-        || !human.issuer().equals(origin.path("humanIssuer").asText())
-        || !human.clientId().equals(origin.path("humanClient").asText())) deny();
-    var grants = config.bindingAccountOperations.get(human.subject());
-    if (resolved.sourceProfile() != null) {
-      var policies = config.peerPolicies.values().stream().filter(policy ->
-          policy.sourceProfileId().equals(resolved.sourceProfile().id())
-              && policy.sourceProfileVersion() == resolved.sourceProfile().version()).toList();
-      if (policies.size() != 1) deny();
-      grants = config.peerAccountOperations.get(policies.get(0).id());
+    if ("PLATFORM_ADMIN".equals(profile.kind())) {
+      requireCommittedRecipientSelf(session, config, approval, profile, request, rawHuman, operation, tenant);
+    } else {
+      var resolved = delegation.resolve(authenticated, em);
+      var human = delegation.require(resolved, rawHuman);
+      var origin = request.target().path("origin");
+      if (!request.accountId().equals(human.subject()) || !human.subject().equals(origin.path("humanSubject").asText())
+          || !human.issuer().equals(origin.path("humanIssuer").asText())
+          || !human.clientId().equals(origin.path("humanClient").asText())) deny();
+      var grants = config.bindingAccountOperations.get(human.subject());
+      if (resolved.sourceProfile() != null) {
+        var policies = config.peerPolicies.values().stream().filter(policy ->
+            policy.sourceProfileId().equals(resolved.sourceProfile().id())
+                && policy.sourceProfileVersion() == resolved.sourceProfile().version()).toList();
+        if (policies.size() != 1) deny();
+        grants = config.peerAccountOperations.get(policies.get(0).id());
+      }
+      if (grants == null || grants.stream().noneMatch(grant ->
+          grant.authority().equals(resolved.binding().authority()) && grant.profiles().contains(profile.id())
+              && grant.operations().contains(operation)
+              && (!grant.selfOnly() || human.subject().equals(request.accountId()))
+              && (grant.targetSubjects().isEmpty() || grant.targetSubjects().contains(request.accountId())))) deny();
+      if ("TENANT_PEER".equals(resolved.binding().authority()) && human.tenantId() != tenant
+          || "PLATFORM".equals(resolved.binding().authority()) && human.tenantId() != 0) deny();
     }
-    if (grants == null || grants.stream().noneMatch(grant ->
-        grant.authority().equals(resolved.binding().authority()) && grant.profiles().contains(profile.id())
-            && grant.operations().contains(operation)
-            && (!grant.selfOnly() || human.subject().equals(request.accountId()))
-            && (grant.targetSubjects().isEmpty() || grant.targetSubjects().contains(request.accountId())))) deny();
-    if ("TENANT_PEER".equals(resolved.binding().authority()) && human.tenantId() != tenant
-        || "PLATFORM".equals(resolved.binding().authority()) && human.tenantId() != 0) deny();
     config.validateProfile(session, profile);
     var current = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
     var groups = new TreeSet<String>(); current.path("groups").forEach(value -> groups.add(value.asText()));
@@ -122,6 +126,32 @@ final class ProtectedAccountOperations {
     result.put("passwordChangeRequired", passwordChange);
     result.put("state", crypto.mac("maintenance-state", state));
     return result;
+  }
+
+  private static void requireCommittedRecipientSelf(KeycloakSession session,
+      ProtectedInvitationConfiguration config, ProtectedInvitationApproval approval,
+      ProtectedInvitationConfiguration.Profile profile, MaintenanceRequest request,
+      String rawHuman, String operation, long tenant) {
+    var source = config.bindings.get(approval.issuerSubject);
+    var issued = parse(approval.approvalReceipt);
+    if (source == null || !"PLATFORM".equals(source.authority()) || tenant != 0
+        || source.policy().version != number(issued, "bindingVersion", true)) deny();
+    var grants = config.bindingAccountOperations.get(approval.issuerSubject);
+    if (grants == null || grants.stream().noneMatch(grant ->
+        "PLATFORM".equals(grant.authority()) && grant.selfOnly()
+            && grant.profiles().contains(profile.id()) && grant.operations().contains(operation)
+            && (grant.targetSubjects().isEmpty() || grant.targetSubjects().contains(request.accountId())))) deny();
+    // Reuse only source issuer/client/audience/technical constraints. Its privileged subject and
+    // approval authority are never transferred to this independently committed recipient.
+    var human = CurrentNativeHumanIdentity.require(session, source.policy().nativePolicy, rawHuman);
+    var origin = request.target().path("origin");
+    if (!request.accountId().equals(human.subject())
+        || !human.subject().equals(origin.path("humanSubject").asText())
+        || !human.issuer().equals(origin.path("humanIssuer").asText())
+        || !human.clientId().equals(origin.path("humanClient").asText())
+        || human.tenantId() == null || human.tenantId() != 0
+        || !profile.realmRoles().equals(human.realmRoles())
+        || !profile.clientRoles().equals(human.clientRoles())) deny();
   }
 
   private ProtectedAccountOperations() {}

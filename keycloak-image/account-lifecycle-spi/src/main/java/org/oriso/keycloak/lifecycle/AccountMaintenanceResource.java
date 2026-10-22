@@ -214,6 +214,11 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
         humanPolicy.requireSelf(session, request, rawHumanBearer);
         return Response.ok(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
       }
+      request.requireEffectDeadline();
+      if (machine.nativeAuth().getToken().getExp() == null
+          || machine.nativeAuth().getToken().getExp() <= java.time.Instant.now().getEpochSecond()) deny();
+      auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
+          "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
       if ("locale".equals(command)) targets.locale(request, humanPolicy, rawHumanBearer);
       else if ("profile".equals(command)) targets.profile(request, humanPolicy, rawHumanBearer);
       else if (Set.of("password", "self-password").contains(command)) targets.password(request, humanPolicy, rawHumanBearer);
