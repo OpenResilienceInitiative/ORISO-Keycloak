@@ -1,5 +1,8 @@
 """Closed counterexamples for the held-realm HTTP evidence classifier."""
 import unittest
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
 import protected_auth_lock_readiness as lock
 
 
@@ -15,6 +18,21 @@ def complete(blocked=True):
 
 
 class AuthLockControls(unittest.TestCase):
+    def test_fixed_selector_observation_accepts_only_the_seven_boolean_fields(self):
+        value = {"schema": 1, "index": 0, "phase": "RELEASED", "runtimeH2Pinned": True,
+            "nativeTransactionOwned": True, "actualRealmRowHeld": True,
+            "matchingBlockedRequest": False, "workerFailed": False,
+            "selectorObservation": {key: False for key in lock.SELECTOR_FIELDS}}
+        with patch.object(lock, "inspect_owned", return_value={"Config": {"Labels": {"oriso-protected-receiver-test": "true"}}}):
+            with patch.object(lock.subprocess, "run", return_value=SimpleNamespace(stdout=lock.PREFIX + json.dumps(value), stderr="")):
+                self.assertEqual([value], lock.records(object()))
+            for selector in ({**value["selectorObservation"], "extra": False},
+                             {**value["selectorObservation"], "realmTableObserved": "untrusted-value"}):
+                changed = {**value, "selectorObservation": selector}
+                with patch.object(lock.subprocess, "run", return_value=SimpleNamespace(stdout=lock.PREFIX + json.dumps(changed), stderr="")):
+                    with self.assertRaises(AssertionError):
+                        lock.records(object())
+
     def test_exact_owned_block_and_post_release_denial_is_counterfactual_red(self):
         self.assertEqual("GENUINE_UNAUTHENTICATED_PROTECTED_REQUEST_WAITS_FOR_REALM_ROW_RED", lock.classify(complete()))
 

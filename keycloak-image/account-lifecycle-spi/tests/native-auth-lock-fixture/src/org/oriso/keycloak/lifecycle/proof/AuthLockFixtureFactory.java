@@ -67,6 +67,7 @@ public final class AuthLockFixtureFactory implements RealmResourceProviderFactor
   private void hold(KeycloakSessionFactory factory, int index) throws InterruptedException {
     boolean[] completion = new boolean[3];
     boolean pinned = false, owned = false, held = false, blocked = false;
+    var selector = emptySelector();
     try (var session = factory.create()) {
       var tx = session.getTransactionManager();
       if (tx.isActive()) throw new IllegalStateException("Unexpected active proof transaction");
@@ -85,17 +86,24 @@ public final class AuthLockFixtureFactory implements RealmResourceProviderFactor
         owned = tx.isActive() && em.isJoinedToTransaction() && completion[0];
         held = realm != null && realmId.equals(realm.getId()) && realmName.equals(realm.getName());
         if (!owned || !held) throw new IllegalStateException("Actual native realm lock required");
-        emit(index, "LOCKED", pinned, owned, held, false, false);
+        emit(index, "LOCKED", pinned, owned, held, false, false, selector);
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (!Files.isRegularFile(CONTROL.resolve(index + ".release"))) {
           if (System.nanoTime() >= deadline) throw new IllegalStateException("Proof lock deadline");
           var rows = em.createNativeQuery("select SESSION_ID, SESSION_STATE, BLOCKER_ID, EXECUTING_STATEMENT"
               + " from INFORMATION_SCHEMA.SESSIONS where BLOCKER_ID = :holder")
               .setParameter("holder", holder).getResultList();
+          selector.put("holderWaiterObserved", selector.get("holderWaiterObserved") || !rows.isEmpty());
           for (Object raw : rows) {
             var row = (Object[]) raw;
             String sql = row[3] == null ? "" : row[3].toString().toLowerCase(java.util.Locale.ROOT)
                 .replace('"', ' ').replaceAll("\\s+", " ").trim();
+            selector.put("distinctSessionObserved", selector.get("distinctSessionObserved") || ((Number) row[0]).longValue() != holder);
+            selector.put("blockedStateObserved", selector.get("blockedStateObserved") || "BLOCKED".equals(row[1]));
+            selector.put("realmTableObserved", selector.get("realmTableObserved") || sql.matches(".* from (public\\.)?realm\\b.*"));
+            selector.put("idPredicateObserved", selector.get("idPredicateObserved") || sql.matches(".* where ([a-z0-9_]+\\.)?id\\s*=\\s*\\?.*"));
+            selector.put("forUpdateObserved", selector.get("forUpdateObserved") || sql.contains(" for update"));
+            selector.put("exactBoundRealmParameterObserved", selector.get("exactBoundRealmParameterObserved") || sql.endsWith(" {1: '" + realmId + "'}"));
             // SQL and session identifiers are examined only in this native worker's memory.
             // H2 Command.toString appends Trace.formatParams. Require that one
             // exact parameter to be this holder's actual canonical realm UUID.
@@ -104,7 +112,7 @@ public final class AuthLockFixtureFactory implements RealmResourceProviderFactor
             if (((Number) row[0]).longValue() != holder && "BLOCKED".equals(row[1])
                 && row[2] instanceof Number n && n.longValue() == holder && exactRealmQuery && !blocked) {
               blocked = true;
-              emit(index, "BLOCKED", pinned, owned, held, true, false);
+              emit(index, "BLOCKED", pinned, owned, held, true, false, selector);
             }
           }
           Thread.sleep(25);
@@ -114,17 +122,28 @@ public final class AuthLockFixtureFactory implements RealmResourceProviderFactor
       }
       if (!completion[0] || completion[1] || !completion[2] || tx.isActive())
         throw new IllegalStateException("Actual proof rollback required");
-      emit(index, "RELEASED", pinned, owned, held, blocked, false);
+      emit(index, "RELEASED", pinned, owned, held, blocked, false, selector);
     }
+  }
+
+  private static Map<String, Boolean> emptySelector() {
+    return new java.util.TreeMap<>(Map.of("holderWaiterObserved", false, "distinctSessionObserved", false,
+        "blockedStateObserved", false, "realmTableObserved", false, "idPredicateObserved", false,
+        "forUpdateObserved", false, "exactBoundRealmParameterObserved", false));
   }
 
   private static void emit(int index, String phase, boolean pinned, boolean owned,
       boolean held, boolean blocked, boolean failed) {
+    emit(index, phase, pinned, owned, held, blocked, failed, emptySelector());
+  }
+
+  private static void emit(int index, String phase, boolean pinned, boolean owned,
+      boolean held, boolean blocked, boolean failed, Map<String, Boolean> selector) {
     try {
       System.out.println(PREFIX + new ObjectMapper().writeValueAsString(Map.of(
           "schema", 1, "index", index, "phase", phase, "runtimeH2Pinned", pinned,
           "nativeTransactionOwned", owned, "actualRealmRowHeld", held,
-          "matchingBlockedRequest", blocked, "workerFailed", failed)));
+          "matchingBlockedRequest", blocked, "workerFailed", failed, "selectorObservation", selector)));
     } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
       throw new IllegalStateException("Proof observation unavailable");
     }

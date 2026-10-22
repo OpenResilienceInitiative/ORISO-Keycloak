@@ -23,7 +23,9 @@ PREFIX = "ORISO_PROOF_AUTH_LOCK_V1 "
 COMPANION_TARGET = "/opt/keycloak/providers/oriso-proof-auth-lock.jar"
 CONTROL_TARGET = "/opt/keycloak/proof-auth-lock"
 FIELDS = {"schema", "index", "phase", "runtimeH2Pinned", "nativeTransactionOwned",
-          "actualRealmRowHeld", "matchingBlockedRequest", "workerFailed"}
+          "actualRealmRowHeld", "matchingBlockedRequest", "workerFailed", "selectorObservation"}
+SELECTOR_FIELDS = {"holderWaiterObserved", "distinctSessionObserved", "blockedStateObserved",
+    "realmTableObserved", "idPredicateObserved", "forUpdateObserved", "exactBoundRealmParameterObserved"}
 ROUTES = ("approve", "human-cancel", "machine-cancel", "status", "create", "owned-read",
           "commit", "recover", "compensate")
 PRECONDITIONS = ("allFiveCurrentNativeClientLinksVerified", "currentHumanAndInstalledConfigurationVerified",
@@ -73,7 +75,9 @@ def records(fixture):
         if (set(value) != FIELDS or type(value["schema"]) is not int or value["schema"] != 1
                 or type(value["index"]) is not int or not -1 <= value["index"] <= 9
                 or value["phase"] not in {"INERT", "ARMED", "LOCKED", "BLOCKED", "RELEASED", "COMPLETE", "FAILED"}
-                or any(type(value[k]) is not bool for k in FIELDS - {"schema", "index", "phase"})):
+                or any(type(value[k]) is not bool for k in FIELDS - {"schema", "index", "phase", "selectorObservation"})
+                or type(value["selectorObservation"]) is not dict or set(value["selectorObservation"]) != SELECTOR_FIELDS
+                or any(type(v) is not bool for v in value["selectorObservation"].values())):
             raise AssertionError("Invalid fixed proof process record")
         result.append(value)
     if len(result) != len({(v["index"], v["phase"]) for v in result}):
@@ -249,6 +253,7 @@ class AuthLockReadiness(unittest.TestCase):
                 blocked = released["matchingBlockedRequest"]
                 observations.append({"route": ROUTES[index], "unlockedStatus": unlocked[index], "afterReleaseStatus": status,
                     "completedBeforeRelease": completed, "matchingBlockedRequest": blocked,
+                    "selectorObservation": released["selectorObservation"],
                     "actualRealmLockOwned": all(held[k] for k in ["runtimeH2Pinned", "nativeTransactionOwned", "actualRealmRowHeld"]),
                     "actualRollbackNoCommitVerified": released["nativeTransactionOwned"] and released["actualRealmRowHeld"] and not released["workerFailed"]})
         wait_record(AuthLockFixture, 9, "COMPLETE", time.monotonic() + 2)
