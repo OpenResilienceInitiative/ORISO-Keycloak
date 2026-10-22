@@ -42,11 +42,20 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
   private volatile String stage = "INERT";
   private Thread worker;
   private String realmName;
+  private String commitMode;
+  private volatile int beforeCommitProbeStatus, validationFailureWarningCount;
+  private volatile boolean intentionalCommitFailure;
 
   public void init(Config.Scope ignored) {
     String flag = System.getenv("ORISO_PROOF_READINESS_ROLLBACK_ONLY");
-    if (flag == null || "false".equals(flag)) return;
-    if (!"true".equals(flag)) throw new IllegalStateException("Invalid proof fixture flag");
+    commitMode = System.getenv("ORISO_PROOF_READINESS_COMMIT_CONTROL");
+    if (commitMode != null) {
+      if (!Set.of("PASS", "FAIL").contains(commitMode) || flag != null && !"false".equals(flag))
+        throw new IllegalStateException("Invalid proof commit control");
+    } else {
+      if (flag == null || "false".equals(flag)) return;
+      if (!"true".equals(flag)) throw new IllegalStateException("Invalid proof fixture flag");
+    }
     try {
       realmName = new ObjectMapper().readTree(System.getenv("ORISO_PROTECTED_INVITATIONS_CONFIG"))
           .path("realmName").textValue();
@@ -113,8 +122,16 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
         logger.removeHandler(observer);
       }
       warningsAbsent = warnings.get() == 0;
-      if (!sessionCreated || !rollbackOnly || !began || !rolledBack || committed || !warningsAbsent)
-        throw new IllegalStateException("Actual rollback preconditions not proved");
+      validationFailureWarningCount = warnings.get();
+      if (commitMode == null) {
+        if (!sessionCreated || !rollbackOnly || !began || !rolledBack || committed || !warningsAbsent)
+          throw new IllegalStateException("Actual rollback preconditions not proved");
+      } else if (!sessionCreated || rollbackOnly || !began || beforeCommitProbeStatus != 503
+          || "PASS".equals(commitMode) && (!committed || rolledBack || !warningsAbsent || intentionalCommitFailure)
+          || "FAIL".equals(commitMode) && (committed || !rolledBack || !intentionalCommitFailure
+              || validationFailureWarningCount != 1)) {
+        throw new IllegalStateException("Actual native commit control not proved");
+      }
       stage = "COMPLETE";
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
@@ -164,8 +181,21 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
       try {
         var tx = nativeSession.getTransactionManager();
         if (tx.isActive()) throw unsupported();
-        tx.setRollbackOnly();
+        if (commitMode == null) tx.setRollbackOnly();
         rollbackOnly = tx.getRollbackOnly();
+        if (commitMode != null) tx.enlistPrepare(new AbstractKeycloakTransaction() {
+          protected void commitImpl() {
+            URI probe = URI.create("http://127.0.0.1:8080/realms/" + realmName
+                + "/oriso-protected-invitations/v1/approvals/" + UUID.randomUUID());
+            beforeCommitProbeStatus = unauthenticatedProbe(probe);
+            if (beforeCommitProbeStatus != 503) throw unsupported();
+            if ("FAIL".equals(commitMode)) {
+              intentionalCommitFailure = true;
+              throw new IllegalStateException("Proof controlled native prepare failure");
+            }
+          }
+          protected void rollbackImpl() {}
+        });
         tx.enlistAfterCompletion(new AbstractKeycloakTransaction() {
           protected void beginImpl() { began = true; }
           protected void commitImpl() { committed = true; }
@@ -204,13 +234,19 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
     value.put("observerBegan", began); value.put("observerRolledBack", rolledBack); value.put("observerCommitted", committed);
     value.put("callbackReturnedNormally", returned); value.put("validationWarningsAbsent", warningsAbsent);
     value.put("workerComplete", complete); value.put("workerFailed", failed); value.put("stage", stage);
+    if (commitMode != null) {
+      value.put("commitMode", commitMode); value.put("beforeCommitProbeStatus", beforeCommitProbeStatus);
+      value.put("intentionalCommitFailure", intentionalCommitFailure);
+      value.put("validationFailureWarningCount", validationFailureWarningCount);
+    }
     return value;
   }
 
   private void emitSnapshot() {
     try {
       // Only these closed static/boolean proof facts reach the process record.
-      System.out.println("ORISO_PROOF_READINESS_V1 " + new ObjectMapper().writeValueAsString(snapshot()));
+      String prefix = commitMode == null ? "ORISO_PROOF_READINESS_V1 " : "ORISO_PROOF_READINESS_COMMIT_V1 ";
+      System.out.println(prefix + new ObjectMapper().writeValueAsString(snapshot()));
     } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
       throw new IllegalStateException("Proof observation encoding failed");
     }

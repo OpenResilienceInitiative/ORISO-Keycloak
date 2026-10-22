@@ -61,6 +61,7 @@ class SanitizedResult(unittest.TestResult):
             "protected_binding_readiness.py",
             "protected_rollback_readiness.py",
             "protected_corrected_readiness.py",
+            "protected_commit_readiness.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }

@@ -109,6 +109,8 @@ jobs:
         case:
           - binding-rollback-only-unavailable
           - binding-corrected-restart-available
+          - binding-commit-failure-unavailable
+          - binding-commit-ordering-available
           - extra-denies-prepared-five
           - missing-required-client
           - missing-required-service-account
@@ -156,12 +158,23 @@ jobs:
           set -euo pipefail
           docker info > /dev/null
           export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
-          if [ "$PROTECTED_INSTALLATION_CASE" = binding-rollback-only-unavailable ]; then
+          if [ "$PROTECTED_INSTALLATION_CASE" = binding-rollback-only-unavailable ] ||
+             [ "$PROTECTED_INSTALLATION_CASE" = binding-commit-failure-unavailable ] ||
+             [ "$PROTECTED_INSTALLATION_CASE" = binding-commit-ordering-available ]; then
             export LIFECYCLE_PROOF_COMPANION_JAR="$RUNNER_TEMP/oriso-proof-readiness-companion.jar"
             python keycloak-image/account-lifecycle-spi/tests/build_readiness_companion.py \
               --jar "$LIFECYCLE_PROOF_COMPANION_JAR"
-            python keycloak-image/account-lifecycle-spi/tests/run_protected_rollback.py \
-              --report keycloak-image/account-lifecycle-spi/proof-output/rollback.json
+            case "$PROTECTED_INSTALLATION_CASE" in
+              binding-rollback-only-unavailable)
+                python keycloak-image/account-lifecycle-spi/tests/run_protected_rollback.py \
+                  --report keycloak-image/account-lifecycle-spi/proof-output/rollback.json ;;
+              binding-commit-failure-unavailable)
+                python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_failure.py \
+                  --report keycloak-image/account-lifecycle-spi/proof-output/commit-failure-readiness.json ;;
+              binding-commit-ordering-available)
+                python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_ordering.py \
+                  --report keycloak-image/account-lifecycle-spi/proof-output/commit-ordering-readiness.json ;;
+            esac
           elif [ "$PROTECTED_INSTALLATION_CASE" = binding-corrected-restart-available ]; then
             python keycloak-image/account-lifecycle-spi/tests/run_protected_corrected_readiness.py \
               --report keycloak-image/account-lifecycle-spi/proof-output/corrected-readiness.json
