@@ -231,8 +231,9 @@ final class ProtectedOtpBootstrap {
       return Response.status(status).entity(saved).header("Cache-Control", "no-store").build();
     }
     if (!"PREPARED".equals(bootstrap.state)) conflict();
-    long now = Instant.now().getEpochSecond();
-    if (bootstrap.authorityValidUntil <= now || !Instant.parse(approved.validUntil).isAfter(Instant.now())) deny();
+    // Preparation expiry describes that earlier machine request, not the recipient's live workflow.
+    // This command has its own fresh canonical machine authentication and short bound proof.
+    if (!Instant.parse(approved.validUntil).isAfter(Instant.now())) deny();
     var frozenProfile = parse(approved.scope).path("profile");
     var profile = config.profiles.get(text(frozenProfile, "id", 255, false));
     if (profile == null || !canonical(frozenProfile).equals(canonical(profile.snapshot()))
