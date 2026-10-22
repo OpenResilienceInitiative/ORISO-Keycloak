@@ -78,6 +78,24 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   }
 
   @POST
+  @Path("v1/accounts/{account}/password-reset/read")
+  public Response causalPasswordRead(@PathParam("account") String account, byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String human) {
+    return guarded(() -> {
+      var machine = auth.requireMachine(session, "ACCOUNT_ADMIN"); var body = parse(raw);
+      auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
+          "account.password-reset.read", "POST", "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
+      if (human != null) deny();
+      var causal = CausalPasswordRequest.read(account, body);
+      var current = ProtectedAccountOperations.protectedTarget(session, causal.target())
+          ? ProtectedAccountOperations.readCausal(session, auth, causal)
+          : OrdinaryAccountOperations.readCausal(session, auth, mappings, humanPolicies.get(), causal);
+      return Response.ok(current).header("Cache-Control", "no-store").build();
+    });
+  }
+
+  @POST
   @Path("v1/accounts/{account}/delete")
   public Response delete(@PathParam("account") String account, byte[] raw,
       @HeaderParam("X-ORISO-Task-Context") String proof) {

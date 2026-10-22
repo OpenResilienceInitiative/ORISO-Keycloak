@@ -29,35 +29,49 @@ def invoke(helper, account, operation, body):
 
 def exercise(test, helper, observed):
     records = observed['causalPassword'] = {}
-    for kind in ['EXISTING_SETUP', 'PASSWORD_RESET']:
-        account, creation = committed(test, helper)
+    for profile_kind, kind in [('ORDINARY', 'EXISTING_SETUP'), ('ORDINARY', 'PASSWORD_RESET'),
+                               ('PROTECTED', 'EXISTING_SETUP'), ('PROTECTED', 'PASSWORD_RESET')]:
+        if profile_kind == 'ORDINARY':
+            account, creation = committed(test, helper)
+            profile_id = 'consultant-v1'
+        else:
+            account = type(helper).adopted_account
+            profile_id = type(helper).adopted_profile
         native = helper.admin('GET', '/users/' + account)
-        if kind == 'EXISTING_SETUP':
-            native['requiredActions'] = ['UPDATE_PASSWORD']; helper.admin('PUT', '/users/' + account, native)
+        native['requiredActions'] = ['UPDATE_PASSWORD'] if kind == 'EXISTING_SETUP' else []
+        helper.admin('PUT', '/users/' + account, native)
         workflow = {'v': 1, 'kind': kind, 'claimId': str(uuid.uuid4()), 'claimVersion': 1,
                     'authorityValidUntil': int(time.time()) + 180,
                     'expectedUsername': native['username'],
                     'expectedEmailDigest': mac('maintenance-workflow-email/v1', native['email']),
-                    'profileKind': 'ORDINARY', 'profileId': 'consultant-v1', 'profileVersion': 1}
-        target = {'accountId': account, 'tenantId': '11', 'origin': {'kind': 'PASSWORD_RESET',
+                    'profileKind': profile_kind, 'profileId': profile_id, 'profileVersion': 1}
+        target = {'accountId': account, 'tenantId': native['attributes']['tenantId'][0], 'origin': {'kind': 'PASSWORD_RESET',
                   'workflowId': str(uuid.uuid4()), 'humanSubject': None, 'humanIssuer': None,
                   'humanClient': None, 'humanAuthority': None}}
         read = {'target': target, 'workflow': workflow}
         status, current = invoke(helper, account, 'account.password-reset.read', read)
-        records[kind] = {'readStatus': status, 'preconditions': True, 'withoutHumanHeader': True}
-        with test.subTest(operation='causal.' + kind + '.read'):
+        label = profile_kind + '.' + kind
+        records[label] = {'readStatus': status, 'preconditions': True, 'withoutHumanHeader': True}
+        with test.subTest(operation='causal.' + label + '.read'):
             test.assertEqual(200, status); test.assertEqual(account, current['id'])
             test.assertEqual(kind == 'EXISTING_SETUP', current['passwordChangeRequired'])
         if status != 200:
             continue
         body = {**read, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
-                'change': {'password': 'Native-causal-fixture-new-7391', 'temporary': False}}
+                'change': {'password': 'Native-causal-fixture-' + uuid.uuid4().hex, 'temporary': False}}
         status, result = invoke(helper, account, 'account.password-reset', body)
-        records[kind]['mutationStatus'] = status
-        with test.subTest(operation='causal.' + kind + '.mutation'):
+        records[label]['mutationStatus'] = status
+        with test.subTest(operation='causal.' + label + '.mutation'):
             test.assertEqual(200, status); test.assertEqual('UPDATED', result['result'])
             test.assertEqual((status, result), invoke(helper, account, 'account.password-reset', body))
             test.assertNotIn('UPDATE_PASSWORD', helper.admin('GET', '/users/' + account).get('requiredActions', []))
+            login_status, login = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
+                {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': native['username'],
+                 'password': body['change']['password'], 'scope': 'openid'}, form=True)
+            test.assertEqual(200, login_status)
+            info_status, info = call(helper.base, 'GET', '/realms/' + REALM + '/protocol/openid-connect/userinfo',
+                                     token=login['access_token'])
+            test.assertEqual(200, info_status); test.assertEqual(account, info['sub'])
             changed = copy.deepcopy(body); changed['change']['password'] = 'Changed-flight-payload-937451'
             test.assertEqual(409, invoke(helper, account, 'account.password-reset', changed)[0])
-            records[kind]['effectAndExactRetryVerified'] = True
+            records[label]['effectAndExactRetryVerified'] = True

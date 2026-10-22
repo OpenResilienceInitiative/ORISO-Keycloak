@@ -18,6 +18,12 @@ final class OrdinaryAccountOperations {
     return prepare(session, crypto, mappings, policy, request, human).response;
   }
 
+  static JsonNode readCausal(KeycloakSession session, LifecycleAuthorization crypto, Map<String, Set<String>> mappings,
+      GeneralPolicy policy, CausalPasswordRequest causal) {
+    causal.requireLive();
+    return prepare(session, crypto, mappings, policy, causal.target(), null, causal).response;
+  }
+
   static void mutate(KeycloakSession session, LifecycleAuthorization crypto, Map<String, Set<String>> mappings,
       GeneralPolicy policy, MaintenanceRequest request, JsonNode body, String human) {
     var prepared = prepare(session, crypto, mappings, policy, request, human);
@@ -82,6 +88,12 @@ final class OrdinaryAccountOperations {
 
   private static Prepared prepare(KeycloakSession session, LifecycleAuthorization crypto,
       Map<String, Set<String>> mappings, GeneralPolicy policy, MaintenanceRequest request, String human) {
+    return prepare(session, crypto, mappings, policy, request, human, null);
+  }
+
+  private static Prepared prepare(KeycloakSession session, LifecycleAuthorization crypto,
+      Map<String, Set<String>> mappings, GeneralPolicy policy, MaintenanceRequest request, String human,
+      CausalPasswordRequest causal) {
     if (policy == null || !Set.of("read", "profile", "email", "ordinary-profile", "deactivate", "reactivate")
         .contains(request.command())) deny();
     var realm = session.getContext().getRealm(); var em = CurrentNativeHumanIdentity.entityManager(session);
@@ -111,10 +123,13 @@ final class OrdinaryAccountOperations {
     var profile = policy.profile(lineage.profileId(), lineage.profileVersion());
     var desired = "ordinary-profile".equals(request.command())
         ? policy.desiredProfile(request.change().path("group").asText()) : profile;
-    var source = HumanAdminSource.require(session, crypto, request, human);
-    policy.requireAdmin(source, request, "account." + request.command(), profile, desired);
-    if ("ordinary-profile".equals(request.command()) && request.change().has("profile"))
-      policy.requireAdmin(source, request, "account.profile", profile, desired);
+    if (causal != null) causal.requireProfile("ORDINARY", profile.id, profile.version);
+    else {
+      var source = HumanAdminSource.require(session, crypto, request, human);
+      policy.requireAdmin(source, request, "account." + request.command(), profile, desired);
+      if ("ordinary-profile".equals(request.command()) && request.change().has("profile"))
+        policy.requireAdmin(source, request, "account.profile", profile, desired);
+    }
     // All failures below are definite target/CAS preflight refusals for the actual authorized source.
     try {
       if (!lineage.tenant().equals(request.target().path("tenantId"))
@@ -128,6 +143,7 @@ final class OrdinaryAccountOperations {
       JsonNode actualTenant = tenants.isMissingNode() || tenants.isEmpty() ? JSON.nullNode() : tenants.path(0);
       if (!tenants.isMissingNode() && tenants.size() != 1 || !actualTenant.equals(lineage.tenant())
           || actualTenant.isNull() && !profile.allowUnassignedTenant) deny();
+      if (causal != null) causal.requireNativeBinding(crypto, current);
       var state = JSON.createObjectNode(); state.set("account", current); state.put("realmId", realm.getId());
       state.put("provenance", row.id); state.put("groupId", profile.groupId);
       state.set("effectiveRoles", JSON.valueToTree(new TreeSet<>(profile.realmRoles)));
@@ -147,7 +163,7 @@ final class OrdinaryAccountOperations {
       return new Prepared(result, current, profile, desired, lineage);
     } catch (jakarta.ws.rs.WebApplicationException refused) {
       int status = refused.getResponse().getStatus();
-      if (status == 403 || status == 409) throw MaintenancePreflightRefusal.current(status);
+      if (causal == null && (status == 403 || status == 409)) throw MaintenancePreflightRefusal.current(status);
       throw refused;
     }
   }

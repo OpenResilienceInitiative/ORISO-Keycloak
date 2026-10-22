@@ -118,6 +118,7 @@ class ProtectedOperationRead(PeerReadiness):
         self.assertEqual(apps, [c for c in helper.admin('GET', '/users/' + account + '/credentials')
                                if c['type'] == 'otp'])
         o['protectedSelfAppNativeEffectAndExactRetryVerified'] = True
+        self.factor_projection(helper, target, o, 'app-active', True, True)
         self.remaining_operations(helper, account, human, target, o)
         primary = helper.human(record=False)
         admin_target = copy.deepcopy(target)
@@ -168,7 +169,9 @@ class ProtectedOperationRead(PeerReadiness):
         self.assertEqual(1, len(apps))
         delete = {'target': target, 'operationId': str(uuid.uuid4()),
                   'expectedState': current_state(), 'otp': None}
-        mutation('otp.delete', 'DELETE', 'delete-otp', delete, 200)
+        delete_status, _ = mutation('otp.delete', 'DELETE', 'delete-otp', delete, 200)
+        if delete_status == 200:
+            self.factor_projection(helper, target, observed, 'absent', False, False)
         # Installer-only fixture isolation, never routine native power.
         for row in credentials():
             if row['type'] in {'otp', 'MAIL_OTP_CM'}:
@@ -186,6 +189,7 @@ class ProtectedOperationRead(PeerReadiness):
             mail = [row for row in credentials() if row['type'] == 'MAIL_OTP_CM']
             self.assertEqual([credential], [row['id'] for row in mail])
             self.assertTrue(json.loads(mail[0]['credentialData'])['active'])
+            self.factor_projection(helper, target, observed, 'mail-active', True, True)
         helper.admin('DELETE', '/users/' + account + '/credentials/' + credential)
         realm = helper.admin('GET', '')
         realm['emailTheme'] = 'oriso'
@@ -214,6 +218,7 @@ class ProtectedOperationRead(PeerReadiness):
                 helper, human, start, 'otp.email-start', 'PUT', 'send-verification-mail', 200))
             self.assertEqual(before_mail + 1, len(helper.mail.messages))
             observations['otp.email-start']['effectAndRetryVerified'] = True
+            self.factor_projection(helper, target, observed, 'mail-pending', True, False)
 
         primary = helper.human(record=False)
         admin_target = copy.deepcopy(target)
@@ -223,12 +228,15 @@ class ProtectedOperationRead(PeerReadiness):
         primary_grant = OperationFixture.installed_configuration['bindings'][0]['accountOperations'][1]
         self.assertFalse(primary_grant['selfOnly'])
         self.assertIn(PROFILE, primary_grant['targetProfiles'])
-        for operation, command in [('account.read', 'read'), ('account.profile', 'profile')]:
+        for operation, command in [('account.read', 'read'), ('account.profile', 'profile'), ('account.email', 'email')]:
             body = {'target': admin_target}
             if command == 'profile':
                 body.update(operationId=str(uuid.uuid4()), expectedState=current_state(),
                             change={'firstName': 'Reviewed', 'lastName': 'Recipient',
                                     'email': 'managed-' + uuid.uuid4().hex + '@oriso.org'})
+            if command == 'email':
+                body.update(operationId=str(uuid.uuid4()), expectedState=current_state(),
+                            change={'email': 'separate-' + uuid.uuid4().hex + '@oriso.org'})
             before = helper.admin('GET', '/users/' + account)
             status, result = HumanMaintenanceFixture.invoke(helper, command, body, primary, 200)
             unchanged = before == helper.admin('GET', '/users/' + account)
@@ -249,6 +257,21 @@ class ProtectedOperationRead(PeerReadiness):
                         self.assertEqual(expected, after[field])
                 observations[operation]['effectAndRetryVerified'] = True
 
+
+    def factor_projection(self, helper, target, observed, name, configured, active):
+        primary = helper.human(record=False)
+        admin_target = copy.deepcopy(target)
+        admin_target['origin'].update(kind='HUMAN_ADMIN', humanSubject=helper.human_subject)
+        status, result = HumanMaintenanceFixture.invoke(helper, 'read',
+            {'target': admin_target, 'include': 'TWO_FACTOR_STATUS_V1'}, primary, 200)
+        entry = observed.setdefault('protectedFactor', {})[name] = {'status': status, 'expected': 200}
+        with self.subTest(operation='protected.account.read.factor.' + name):
+            self.assertEqual(200, status)
+            self.assertEqual({'id', 'username', 'email', 'firstName', 'lastName', 'enabled', 'emailVerified',
+                              'tenantId', 'preferredLanguage', 'effectiveRoles', 'passwordChangeRequired', 'state', 'twoFactor'}, set(result))
+            self.assertEqual({'configured': configured, 'active': active}, result['twoFactor'])
+            self.assertTrue(all(type(value) is bool for value in result['twoFactor'].values()))
+            entry['exactNonsecretProjectionVerified'] = True
 
     def new_committed_platform_self(self, helper, observed):
         original_scope = helper.scope

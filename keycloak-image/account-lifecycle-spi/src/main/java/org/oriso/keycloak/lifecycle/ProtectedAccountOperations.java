@@ -33,6 +33,11 @@ final class ProtectedAccountOperations {
     return readCurrent(session, crypto, request, fullHumanHeader, "account.read");
   }
 
+  static JsonNode readCausal(KeycloakSession session, LifecycleAuthorization crypto, CausalPasswordRequest causal) {
+    causal.requireLive();
+    return readChecked(session, crypto, causal.target(), null, "account.password-reset.read", causal).current();
+  }
+
   static boolean protectedTarget(KeycloakSession session, MaintenanceRequest request) {
     var em = CurrentNativeHumanIdentity.entityManager(session); var realm = session.getContext().getRealm();
     var locked = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
@@ -100,17 +105,22 @@ final class ProtectedAccountOperations {
 
   private static CheckedCurrent readChecked(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String fullHumanHeader, String operation) {
-    if (!selected(request.target()) || !Set.of("read", "profile", "email").contains(request.command())
+    return readChecked(session, crypto, request, fullHumanHeader, operation, null);
+  }
+
+  private static CheckedCurrent readChecked(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String fullHumanHeader, String operation, CausalPasswordRequest causal) {
+    if (causal == null && (!selected(request.target()) || !Set.of("read", "profile", "email").contains(request.command())
         || !Set.of("otp.read", "account.read", "account.profile", "account.email", "otp.app-setup",
-            "otp.delete", "otp.email-finish", "otp.email-start").contains(operation)) deny();
-    if (fullHumanHeader == null || fullHumanHeader.length() > 32775
-        || !fullHumanHeader.regionMatches(true, 0, "Bearer ", 0, 7))
+            "otp.delete", "otp.email-finish", "otp.email-start").contains(operation))) deny();
+    if (causal == null && (fullHumanHeader == null || fullHumanHeader.length() > 32775
+        || !fullHumanHeader.regionMatches(true, 0, "Bearer ", 0, 7)))
       throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
-    String rawHuman = fullHumanHeader.substring(7);
+    String rawHuman = causal == null ? fullHumanHeader.substring(7) : null;
     var config = ProtectedInvitationFactory.checkedBootstrapConfiguration(session);
     // This transient authentication supplies a locator only. Fresh operation authority is checked
     // after realm and provenance locks through the shared native current-human implementation.
-    var authenticated = NativeHumanBearer.require(session, rawHuman);
+    var authenticated = causal == null ? NativeHumanBearer.require(session, rawHuman) : null;
     var realm = session.getContext().getRealm();
     if (!config.realmId.equals(realm.getId()) || !config.realmName.equals(realm.getName())
         || realm.getComponentsStream(realm.getId(), "org.keycloak.storage.UserStorageProvider").findAny().isPresent()) deny();
@@ -169,7 +179,9 @@ final class ProtectedAccountOperations {
     }
     if (!Long.toString(tenant).equals(request.target().path("tenantId").asText())) deny();
     long validUntil;
-    if (approval != null && "PLATFORM_ADMIN".equals(profile.kind())
+    if (causal != null) {
+      causal.requireProfile("PROTECTED", profile.id(), profile.version()); validUntil = 0;
+    } else if (approval != null && "PLATFORM_ADMIN".equals(profile.kind())
         && "SELF".equals(request.target().path("origin").path("kind").asText())) {
       validUntil = requireCommittedRecipientSelf(session, config, approval, profile, request, rawHuman, operation, tenant);
     } else {
@@ -208,6 +220,7 @@ final class ProtectedAccountOperations {
         || tenantValues.size() != 1 || !Long.toString(tenant).equals(tenantValues.path(0).asText())) deny();
     for (var technical : config.installation.path("technicalSubjects"))
       if (request.accountId().equals(technical.asText())) deny();
+    if (causal != null) causal.requireNativeBinding(crypto, current);
     var state = JSON.createObjectNode();
     state.put("realmId", config.realmId); state.set("account", current);
     state.put("provenance", provenance); state.set("profile", profile.snapshot());
