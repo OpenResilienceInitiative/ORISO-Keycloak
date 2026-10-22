@@ -29,7 +29,7 @@ SESSION_CHECKS = dict.fromkeys(("nativeSubjectClientTenantExpiry","actualNativeS
     "sameWorkflowSameSession","changedTupleRefused","unboundBodyRefused","wrongActorRefused",
     "wrongProofAudienceRefused","expiredCommandRefused","currentDisabledRefused",
     "requiredActionRefused","concurrentSameWorkflowOneSession","mfaMissingWrongAndCorrect",
-    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan","nativeZeroAndUnassignedTenantBound"),False)
+    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan","nativeZeroAndUnassignedTenantBound","postTokenPolicyReached","postTokenPolicyFailureNoOrphan"),False)
 
 
 TENANT_KINDS = {"zero":0,"unassigned":0}
@@ -455,3 +455,71 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             raise RuntimeError("Native tenant-kind fixture restoration") from failure
         self.assertTrue(all(outcomes),"Both exact current zero and unassigned tenant bindings must authenticate")
         SESSION_CHECKS["nativeZeroAndUnassignedTenantBound"]=True
+
+        # Built-in policy votes NO at the password request, ABSTAIN at its response;
+        # any-client supplies the response YES. The reject executor therefore runs
+        # only after actual native attach/token generation, without a test provider.
+        policy_actor=self.token("ACCOUNT_ADMIN")
+        initial_profiles=self.admin("GET","/client-policies/profiles")
+        initial_policies=self.admin("GET","/client-policies/policies")
+        initial_events=self.admin("GET","/events/config")
+        policy_name="s1-native-late-token-failure"
+        profile={"name":policy_name,"description":"Disposable native response-stage failure",
+                 "executors":[{"executor":"reject-request","configuration":{}}]}
+        policy={"name":policy_name,"description":"Disposable response-only failure","enabled":True,
+                "conditions":[{"condition":"any-client","configuration":{}},
+                              {"condition":"grant-type","configuration":{
+                                  "is-negative-logic":True,"grant_types":["password"]}}],
+                "profiles":[policy_name]}
+        try:
+            try:
+                self.assertNotIn(policy_name,{row["name"] for row in initial_profiles.get("profiles",[])})
+                self.assertNotIn(policy_name,{row["name"] for row in initial_policies.get("policies",[])})
+                self.admin("PUT","/events/config",{**initial_events,"eventsEnabled":True,
+                    "enabledEventTypes":sorted(set(initial_events.get("enabledEventTypes",[]))|{"LOGIN_ERROR"})})
+                self.admin("PUT","/client-policies/profiles",{**initial_profiles,
+                    "profiles":[*initial_profiles.get("profiles",[]),profile]})
+                self.admin("PUT","/client-policies/policies",{**initial_policies,
+                    "policies":[*initial_policies.get("policies",[]),policy]})
+                self.assertEqual(profile,next(row for row in self.admin("GET","/client-policies/profiles")["profiles"]
+                    if row["name"]==policy_name))
+                self.assertEqual(policy,next(row for row in self.admin("GET","/client-policies/policies")["policies"]
+                    if row["name"]==policy_name))
+            except (AssertionError,KeyError,StopIteration) as failure:
+                raise RuntimeError("Native response policy fixture precondition") from failure
+            failed={**body,"workflowId":str(uuid.uuid4()),
+                "claimDigest":native.mac("magic-link-capability/v1",{"token":uuid.uuid4().hex})}
+            def failing_exchange(command):
+                return native.call(self.base,"POST",token_path,{
+                    "client_id":"app","grant_type":"password","oriso_magic_command":native.canonical(command).decode()},
+                    policy_actor,True,proof(command,self.realm_id))
+            before_failure=session_ids()
+            status,error=failing_exchange(failed)
+            events=self.admin("GET","/events?type=LOGIN_ERROR&client=app&user="+target["id"])
+            late_events=[event for event in events if event.get("userId")==target["id"]
+                and event.get("clientId")=="app" and event.get("error")=="invalid_request"
+                and event.get("details",{}).get("reason")=="client_policy_error"
+                and event.get("sessionId") and event["sessionId"] not in before_failure]
+            try:
+                self.assertEqual(400,status)
+                self.assertEqual("invalid_request",error.get("error"))
+                self.assertNotIn("access_token",error)
+                self.assertEqual(1,len(late_events))
+            except (AssertionError,AttributeError) as failure:
+                raise RuntimeError("Native response-stage witness absent") from failure
+            SESSION_CHECKS["postTokenPolicyReached"]=True
+            self.assertEqual(before_failure,session_ids(),"Native response-policy failure must not leave a new session")
+            replay_status,replay_error=failing_exchange(body)
+            self.assertEqual(400,replay_status)
+            self.assertNotIn("access_token",replay_error)
+            self.assertEqual(before_failure,session_ids(),"Failed replay must preserve the original session")
+            SESSION_CHECKS["postTokenPolicyFailureNoOrphan"]=True
+        finally:
+            try:
+                self.admin("PUT","/client-policies/policies",initial_policies)
+                self.admin("PUT","/client-policies/profiles",initial_profiles)
+                self.admin("PUT","/events/config",initial_events)
+                self.assertEqual(initial_policies,self.admin("GET","/client-policies/policies"))
+                self.assertEqual(initial_profiles,self.admin("GET","/client-policies/profiles"))
+            except AssertionError as failure:
+                raise RuntimeError("Native response policy fixture restoration") from failure

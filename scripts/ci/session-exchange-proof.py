@@ -126,7 +126,7 @@ SESSION_CHECK_FLAGS = {"nativeSubjectClientTenantExpiry","actualNativeSessionBou
     "changedTupleRefused","unboundBodyRefused","wrongActorRefused","wrongProofAudienceRefused",
     "expiredCommandRefused","currentDisabledRefused",
     "requiredActionRefused","concurrentSameWorkflowOneSession","mfaMissingWrongAndCorrect",
-    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan","nativeZeroAndUnassignedTenantBound"}
+    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan","nativeZeroAndUnassignedTenantBound","postTokenPolicyReached","postTokenPolicyFailureNoOrphan"}
 
 
 def checked_session_checks(value):
