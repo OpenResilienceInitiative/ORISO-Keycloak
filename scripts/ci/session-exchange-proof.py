@@ -118,7 +118,9 @@ def checked_observation(value):
 
 SESSION_CHECK_FLAGS = {"nativeSubjectClientTenantExpiry","actualNativeSessionBound","sameWorkflowSameSession",
     "changedTupleRefused","unboundBodyRefused","wrongActorRefused","wrongProofAudienceRefused",
-    "expiredCommandRefused","currentDisabledRefused"}
+    "expiredCommandRefused","currentDisabledRefused",
+    "requiredActionRefused","concurrentSameWorkflowOneSession","mfaMissingWrongAndCorrect",
+    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan"}
 
 
 def checked_session_checks(value):

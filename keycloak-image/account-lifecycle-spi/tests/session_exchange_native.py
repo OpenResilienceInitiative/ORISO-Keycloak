@@ -9,6 +9,9 @@ import json
 import os
 from pathlib import Path
 import time
+import struct
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import unittest
 from urllib.parse import quote
 import uuid
@@ -25,7 +28,9 @@ OBSERVATIONS = {
 
 SESSION_CHECKS = dict.fromkeys(("nativeSubjectClientTenantExpiry","actualNativeSessionBound",
     "sameWorkflowSameSession","changedTupleRefused","unboundBodyRefused","wrongActorRefused",
-    "wrongProofAudienceRefused","expiredCommandRefused","currentDisabledRefused"),False)
+    "wrongProofAudienceRefused","expiredCommandRefused","currentDisabledRefused",
+    "requiredActionRefused","concurrentSameWorkflowOneSession","mfaMissingWrongAndCorrect",
+    "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan"),False)
 
 
 TOKEN_FACTS = dict.fromkeys(("subjectPresent","subjectMatchesTarget","subjectMatchesCanonicalAdmin",
@@ -288,8 +293,120 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
         self.assertEqual(200,status)
         self.assertEqual(sid,claims(still_owned).get("sid"))
         self.assertEqual({sid},session_ids())
+        # Existing pending required action is checked before any owned native session attach.
+        try:
+            self.admin("PUT","/users/"+target["id"],{**target,"requiredActions":["UPDATE_PASSWORD"]})
+            self.assertEqual(["UPDATE_PASSWORD"],self.admin("GET","/users/"+target["id"])["requiredActions"])
+        except AssertionError as failure:
+            raise RuntimeError("Required action fixture precondition") from failure
+        self.assertEqual(401,exchange(body)[0])
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["requiredActionRefused"]=True
+        try:
+            self.admin("PUT","/users/"+target["id"],{**target,"requiredActions":[]})
+            self.assertFalse(self.admin("GET","/users/"+target["id"]).get("requiredActions"))
+        except AssertionError as failure:
+            raise RuntimeError("Required action fixture restoration") from failure
+        # Both first sends race on an actual fresh workflow, not just a pre-existing row.
+        concurrent={**body,"workflowId":str(uuid.uuid4()),"claimDigest":native.mac("magic-link-capability/v1",{"token":uuid.uuid4().hex})}
+        barrier=threading.Barrier(2)
+        def race():
+            barrier.wait(timeout=10)
+            return exchange(concurrent)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pending=[pool.submit(race) for _ in range(2)]
+            replies=[future.result(timeout=40) for future in pending]
+        self.assertTrue(all(status in {200,401} for status,_ in replies))
+        successful=[claims(reply)["sid"] for status,reply in replies if status==200]
+        self.assertTrue(successful)
+        self.assertEqual(1,len(set(successful)))
+        concurrent_sid=successful[0]
+        self.assertNotEqual(sid,concurrent_sid)
+        expected_sessions={sid,concurrent_sid}
+        self.assertEqual(expected_sessions,session_ids())
+        status,retried_concurrent=exchange(concurrent)
+        self.assertEqual(200,status)
+        self.assertEqual(concurrent_sid,claims(retried_concurrent).get("sid"))
+        self.assertEqual(expected_sessions,session_ids())
+        SESSION_CHECKS["concurrentSameWorkflowOneSession"]=True
+        # Exact native installer credential import is fixture preparation only. Real HTTP/native
+        # readback must establish it before any MFA result can count as an assertion.
+        seed="native-s1-fixture-"+uuid.uuid4().hex
+        credential_data={"subType":"totp","digits":6,"counter":0,"period":30,"algorithm":"HmacSHA1"}
+        try:
+            before_credentials=self.admin("GET","/users/"+target["id"]+"/credentials")
+            self.assertFalse(any(row["type"]=="otp" for row in before_credentials))
+            self.admin("PUT","/users/"+target["id"],{**target,"credentials":[{
+                "type":"otp","userLabel":"S1 disposable MFA fixture", "secretData":json.dumps({"value":seed}),
+                "credentialData":json.dumps(credential_data)}]})
+            current=self.admin("GET","/users/"+target["id"])
+            for field in ("username","email","firstName","lastName","enabled","attributes"):
+                self.assertEqual(target[field],current[field])
+            after_credentials=self.admin("GET","/users/"+target["id"]+"/credentials")
+            otp=[row for row in after_credentials if row["type"]=="otp"]
+            self.assertEqual(1,len(otp))
+            self.assertTrue({row["id"] for row in before_credentials}.issubset({row["id"] for row in after_credentials}))
+            for field,value in credential_data.items():
+                self.assertEqual(value,json.loads(otp[0]["credentialData"])[field])
+        except AssertionError as failure:
+            raise RuntimeError("Native OTP credential fixture precondition") from failure
+        status,challenge=exchange(body)
+        self.assertEqual(400,status)
+        self.assertEqual("APP",challenge.get("otpType"))
+        self.assertEqual(expected_sessions,session_ids())
+        status,ordinary_challenge=native.call(self.base,"POST",token_path,{
+            "client_id":"app","grant_type":"password","username":username,"password":password},form=True)
+        self.assertEqual(400,status)
+        self.assertEqual("APP",ordinary_challenge.get("otpType"))
+        def otp_code(counter):
+            value=hmac.new(seed.encode(),struct.pack(">Q",counter),hashlib.sha1).digest()
+            offset=value[-1]&15
+            return str((struct.unpack(">I",value[offset:offset+4])[0]&0x7fffffff)%1000000).zfill(6)
+        counter=int(time.time())//30
+        def mfa_exchange(code):
+            return native.call(self.base,"POST",token_path,{
+                "client_id":"app","grant_type":"password","oriso_magic_command":native.canonical(body).decode(),"otp":code},
+                self.token("ACCOUNT_ADMIN"),True,proof(body,self.realm_id))
+        nearby={otp_code(counter+offset) for offset in range(-5,6)}
+        wrong=next(str(value).zfill(6) for value in range(100) if str(value).zfill(6) not in nearby)
+        self.assertEqual(401,mfa_exchange(wrong)[0])
+        self.assertEqual(expected_sessions,session_ids())
+        status,mfa_reply=mfa_exchange(otp_code(counter))
+        self.assertEqual(200,status)
+        self.assertEqual(sid,claims(mfa_reply).get("sid"))
+        self.assertEqual(expected_sessions,session_ids())
+        SESSION_CHECKS["mfaMissingWrongAndCorrect"]=True
+        self.assertEqual(400,exchange(body)[0])
+        self.assertEqual(expected_sessions,session_ids())
+        status,mfa_retry=mfa_exchange(otp_code(counter+1))
+        self.assertEqual(200,status)
+        self.assertEqual(sid,claims(mfa_retry).get("sid"))
+        self.assertEqual(expected_sessions,session_ids())
+        SESSION_CHECKS["mfaReplayRequiresNewValidCode"]=True
+        # Remove only this disposable fixture credential, then activate a real native trigger
+        # which the stock grant evaluates AFTER the final authenticator.
+        try:
+            self.admin("DELETE","/users/"+target["id"]+"/credentials/"+otp[0]["id"])
+            self.assertFalse(any(row["type"]=="otp" for row in self.admin("GET","/users/"+target["id"]+"/credentials")))
+            self.admin("PUT","/users/"+target["id"],{**target,"emailVerified":False,"requiredActions":[]})
+            realm=self.admin("GET","")
+            self.admin("PUT","",{**realm,"verifyEmail":True})
+            self.assertTrue(self.admin("GET","")["verifyEmail"])
+            self.assertIs(False,self.admin("GET","/users/"+target["id"])["emailVerified"])
+            self.assertFalse(self.admin("GET","/users/"+target["id"]).get("requiredActions"))
+        except AssertionError as failure:
+            raise RuntimeError("Native late required action fixture precondition") from failure
+        late={**body,"workflowId":str(uuid.uuid4()),"claimDigest":native.mac("magic-link-capability/v1",{"token":uuid.uuid4().hex})}
+        self.assertEqual(400,exchange(late)[0])
+        self.assertEqual(expected_sessions,session_ids(),"Failed native required-action trigger must not leave an orphan session")
+        SESSION_CHECKS["lateRequiredActionNoOrphan"]=True
+        try:
+            self.admin("PUT","",realm)
+            self.admin("PUT","/users/"+target["id"],target)
+        except AssertionError as failure:
+            raise RuntimeError("Native late required action fixture restoration") from failure
         self.admin("PUT","/users/"+target["id"],{**target,"enabled":False})
         self.assertIs(False,self.admin("GET","/users/"+target["id"])["enabled"])
         self.assertEqual(401,exchange(body)[0])
-        self.assertEqual({sid},session_ids())
+        self.assertEqual(expected_sessions,session_ids())
         SESSION_CHECKS["currentDisabledRefused"]=True
