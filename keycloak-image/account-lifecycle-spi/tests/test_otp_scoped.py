@@ -263,6 +263,66 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
                    one_owned_inactive_credential=True, immutable_final_receipt=True,
                    no_plaintext_destination_in_public_result=True, no_resend=True)
 
+    def test_current_self_linked_email_finish_updates_only_committed_sent_destination(self):
+        from email import policy as email_policy
+        from email.parser import BytesParser
+        import re
+        human, start_target = self.human(), self.target()
+        realm = self.admin("GET", "")
+        realm["emailTheme"] = "oriso"
+        realm["smtpServer"] = {"host": "host.docker.internal", "port": str(self.mail.server_address[1]),
+                               "from": "otp-fixture@oriso.org", "auth": "false", "ssl": "false", "starttls": "false"}
+        self.admin("PUT", "", realm)
+        before_mail = len(self.mail.messages)
+        destination = "linked-" + uuid.uuid4().hex + "@oriso.org"
+        body = self.email_start_body(human, start_target, destination)
+        self.assertEqual(202, self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                                  "send-verification-mail", 202)[0])
+        status, delivered = self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                                 "send-verification-mail", 200)
+        self.assertEqual(200, status)
+        self.assertEqual("SENT", delivered["deliveryState"])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        message = BytesParser(policy=email_policy.default).parsebytes(self.mail.messages[-1])
+        codes = set()
+        for part in message.walk():
+            if part.get_content_type() in {"text/plain", "text/html"}:
+                text = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8")
+                codes.update(re.findall(r"(?<![0-9])[0-9]{6}(?![0-9])", text))
+        self.assertEqual(1, len(codes), "Exactly one actual delivered native OTP is required")
+        target = self.target()
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        self.assertNotEqual(destination, self.admin("GET", "/users/" + self.account_id).get("email"))
+        self.assertEqual(403, call(self.base, "GET", "/admin/realms/" + REALM + "/users/" + self.account_id,
+                                  token=self.token("ACCOUNT_ADMIN"))[0])
+        finish = {"target": target, "operationId": str(uuid.uuid4()), "expectedState": current["state"],
+                  "emailStartOperationId": body["operationId"],
+                  "otp": {"initialCode": next(iter(codes)), "secret": None, "email": None}}
+        self.phase("scoped-otp-linked-email-finish-preconditions", canonical_admin=True,
+                   stock_native_denied=True, actual_self_human=True, committed_ordinary_target=True,
+                   actual_committed_sent_workflow=True, actual_one_smtp=True,
+                   exact_delivered_code=True, frozen_current_state=True, native_email_not_yet_changed=True)
+        status, result = self.scoped_mutation(human, finish, "otp.email-finish", "POST", "setup-otp-mail", 201)
+        self.assertEqual(201, status)
+        current_user = self.admin("GET", "/users/" + self.account_id)
+        self.assertEqual(destination, current_user["email"])
+        self.assertTrue(current_user["emailVerified"])
+        encoded, signature = result["receipt"].split(".")
+        self.assertTrue(hmac.compare_digest(hmac.new(CONTEXT_KEY, ("otp-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest(), signature))
+        receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual(body["operationId"], receipt["emailStartOperationId"])
+        self.assertEqual("otp.email-finish", receipt["operation"])
+        self.assertNotIn(destination, canonical(result).decode())
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        current_user["email"] = "later-" + uuid.uuid4().hex + "@oriso.org"
+        self.admin("PUT", "/users/" + self.account_id, current_user)
+        self.assertEqual(result, self.scoped_mutation(human, finish, "otp.email-finish", "POST", "setup-otp-mail", 201)[1])
+        self.assertEqual(current_user["email"], self.admin("GET", "/users/" + self.account_id)["email"])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        self.phase("scoped-otp-linked-email-finish-effect", native_email_and_verified=True,
+                   exact_sent_workflow_receipt=True, one_smtp=True, exact_retry_no_reapplication=True)
+
     def email_start_body(self, human, target, email):
         status, current = self.invoke("read", {"target": target}, human, 200)
         self.assertEqual(200, status)
