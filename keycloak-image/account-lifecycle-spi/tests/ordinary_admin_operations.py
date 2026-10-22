@@ -153,6 +153,30 @@ def exercise(test, helper, primary, peer, observed):
             helper.admin('PUT', '', {'passwordPolicy': realm.get('passwordPolicy', '')})
         if terminal.get('result') == 'NO_EFFECT':
             test.assertEqual((status, terminal), HumanMaintenanceFixture.invoke(helper, 'reactivate', refused, primary, 400))
+        current_native = helper.admin('GET', '/users/' + account)
+        login_status, login = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
+            {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': current_native['username'],
+             'password': 'Finite-reactivation-fixture-937451', 'scope': 'openid'}, form=True)
+        test.assertEqual(200, login_status)
+        self_target = copy.deepcopy(target); self_target['origin'].update(kind='SELF', humanSubject=account, humanAuthority=None)
+        status, self_current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': self_target}, login['access_token'], 200)
+        records['postRoleSelf'] = {'status': status, 'preconditions': True}
+        with test.subTest(operation='ordinary.post-role.self-read'):
+            test.assertEqual(200, status); test.assertEqual(['consultant'], self_current['effectiveRoles'])
+            records['postRoleSelf']['currentLineageVerified'] = True
+        deletion = MaintenancePermissions.target(account, creation)
+        status, delete_current = MaintenancePermissions.maintenance(helper, 'read', account, {'target': deletion})
+        records['postRoleDeletion'] = {'readStatus': status, 'preconditions': True}
+        with test.subTest(operation='ordinary.post-role.owned-job-read'):
+            test.assertEqual(200, status); test.assertEqual(['consultant'], delete_current['effectiveRoles'])
+        if status == 200:
+            delete = {'target': deletion, 'operationId': str(uuid.uuid4()), 'expectedState': delete_current['state'], 'change': {}}
+            status, deleted = MaintenancePermissions.maintenance(helper, 'delete', account, delete)
+            with test.subTest(operation='ordinary.post-role.owned-job-delete'):
+                test.assertEqual(200, status); test.assertEqual('DELETED', deleted['result'])
+                test.assertEqual((status, deleted), MaintenancePermissions.maintenance(helper, 'delete', account, delete))
+                records['postRoleDeletion']['actualDeleteAndExactRetryVerified'] = True
+
     finally:
         helper.account_id, helper.creation_input = old_account, old_create
 

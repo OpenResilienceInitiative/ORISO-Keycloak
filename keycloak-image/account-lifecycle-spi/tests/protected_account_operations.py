@@ -146,6 +146,8 @@ class ProtectedOperationRead(PeerReadiness):
         inactivity(self, helper, primary, (account, human), o)
         from ordinary_adoption_operations import exercise as ordinary_adoption
         ordinary_adoption(self, helper, o)
+        from protected_adoption_operations import incarnation
+        incarnation(self, helper, primary, o)
 
     def remaining_operations(self, helper, account, human, target, observed):
         """Five finite public receiver assertions; every setup error remains an error."""
