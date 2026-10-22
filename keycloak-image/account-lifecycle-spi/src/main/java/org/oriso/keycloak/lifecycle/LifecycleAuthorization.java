@@ -191,6 +191,11 @@ final class LifecycleAuthorization {
         target, originalHttpBody, "protected-invitation-proof/v1", "protected-invitation-payload/v1");
   }
 
+  void verifyMagicLinkCommand(String proof, CheckedMachine machine, String target, JsonNode body) {
+    verifyCommand(proof, machine, "oriso-session-exchange", "SESSION_EXCHANGE",
+        "session.magic-link.exchange", "POST", target, body, "magic-link-proof/v1", "magic-link-command/v1");
+  }
+
   void requireDistinctNativeSecret(String secret) {
     if (secret == null || MessageDigest.isEqual(key, secret.getBytes(StandardCharsets.UTF_8))
         || MessageDigest.isEqual(encodedKey.getBytes(StandardCharsets.UTF_8), secret.getBytes(StandardCharsets.UTF_8))) deny();
