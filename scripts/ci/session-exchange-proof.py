@@ -125,6 +125,21 @@ def native_failure_frames(value):
     return {"exceptionTypes":types[:8],"sourceFrames":frames[-12:]}
 
 
+def safe_python_failure(err):
+    # Only fixed exception categories and source positions; never exception messages/locals.
+    types = {"AssertionError","KeyError","IndexError","TypeError","ValueError","HTTPError","URLError","TimeoutError"}
+    allowed = {Path(__file__).resolve().parents[2]/"keycloak-image/account-lifecycle-spi/tests"/name
+               for name in ("session_exchange_native.py","lifecycle_fixture.py")}
+    frames = []
+    current = err[2]
+    while current is not None:
+        path = Path(current.tb_frame.f_code.co_filename).resolve()
+        if path in allowed:
+            frames.append({"file":path.name,"line":current.tb_lineno})
+        current = current.tb_next
+    return {"type":err[0].__name__ if err[0].__name__ in types else "OTHER","sourceFrames":frames[-8:]}
+
+
 def format_allowed(changed, untracked):
     return bool(changed) and set(changed).issubset(USER_FILES) and not untracked
 
@@ -250,14 +265,17 @@ def child():
         def __init__(self):
             super().__init__()
             self.rows = []
+            self.safe_failures = []
         def startTest(self, test):
             super().startTest(test)
             self.rows.append({"name": test._testMethodName, "outcome": "pass"})
         def addFailure(self, test, err):
             super().addFailure(test, err)
+            self.safe_failures.append(safe_python_failure(err))
             self.rows[-1]["outcome"] = "failure"
         def addError(self, test, err):
             super().addError(test, err)
+            self.safe_failures.append(safe_python_failure(err))
             if self.rows:
                 self.rows[-1]["outcome"] = "error"
         def addSkip(self, test, reason):
@@ -275,7 +293,8 @@ def child():
             ET.SubElement(row, case["outcome"], message="S1 finite native tracer did not pass")
     ET.ElementTree(tree).write(out / ("TEST-" + NATIVE_SUITE + ".xml"), encoding="utf-8", xml_declaration=True)
     (out / "native-observation.json").write_text(json.dumps({
-        "counts": counts, "cases": result.rows, "observed": checked_observation(module.OBSERVATIONS)}, sort_keys=True) + "\n")
+        "counts": counts, "cases": result.rows, "observed": checked_observation(module.OBSERVATIONS),
+        "safePythonFailures":result.safe_failures}, sort_keys=True) + "\n")
     return 0 if result.wasSuccessful() else 1
 
 

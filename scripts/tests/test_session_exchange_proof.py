@@ -103,6 +103,20 @@ class SessionProofControls(unittest.TestCase):
             (scratch/"foreign").write_text("do not remove")
             self.assertFalse(p.empty_owned_scratch(scratch,owner,root))
 
+    def test_python_failure_exports_only_fixed_type_and_allowlisted_source_position(self):
+        import sys
+        allowed=Path(p.__file__).resolve().parents[2]/"keycloak-image/account-lifecycle-spi/tests/session_exchange_native.py"
+        try:
+            exec(compile("raise KeyError('private-do-not-export')",str(allowed),"exec"))
+        except KeyError:
+            result=p.safe_python_failure(sys.exc_info())
+        self.assertEqual({"type":"KeyError","sourceFrames":[{"file":allowed.name,"line":1}]},result)
+        self.assertNotIn("private",str(result))
+        try:
+            raise RuntimeError("arbitrary-private-message")
+        except RuntimeError:
+            self.assertEqual({"type":"OTHER","sourceFrames":[]},p.safe_python_failure(sys.exc_info()))
+
     def test_runtime_requires_one_known_false_oom_integer_zero_restart(self):
         good=[{"kind":"container","runtime":{"oomKilled":False,"restartCount":0}}]
         self.assertTrue(p.runtime_known(good))
