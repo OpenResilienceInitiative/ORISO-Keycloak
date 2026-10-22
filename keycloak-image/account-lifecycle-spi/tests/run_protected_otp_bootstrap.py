@@ -19,6 +19,10 @@ if __name__ == "__main__":
     otp = root / "keycloak-image/otp-config-spi"
     workflow = root / ".github/workflows/scenario-c-protected-otp-bootstrap-proof.yml"
     jar = Path(os.environ.get("OTP_C_TEST_JAR", ""))
+    theme = root / "keycloak-image/themes/oriso"
+    def theme_manifest():
+        return {str(path.relative_to(root)): digest(path) for path in sorted(theme.rglob("*")) if path.is_file()}
+    theme_before = theme_manifest()
     before = source_manifest(otp)
     workflow_before = digest(workflow)
     jar_before = digest(jar) if jar.is_file() else None
@@ -26,9 +30,12 @@ if __name__ == "__main__":
     def paired_evidence():
         return {
             "otpSourceManifest": before,
+            "themeSourceManifest": theme_before,
+            "themeSourceStable": bool(theme_before) and theme_before == theme_manifest(),
             "otpJarSHA256": jar_before,
             "bothProvidersStable": bool(jar_before) and jar.is_file()
-            and jar_before == digest(jar) and before == source_manifest(otp),
+            and jar_before == digest(jar) and before == source_manifest(otp)
+            and bool(theme_before) and theme_before == theme_manifest(),
             "bootstrapWorkflowSHA256": workflow_before,
             "bootstrapWorkflowStable": workflow_before == digest(workflow),
             "expectedNativeBoots": 2,

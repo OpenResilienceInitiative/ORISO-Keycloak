@@ -30,6 +30,16 @@ class BootstrapClassifier(unittest.TestCase):
         value["readinessObservation"].pop("preparedReceiptMacVerified")
         self.assertEqual("BEHAVIOR_FAILURE", classify(value))
 
+    def test_email_denial_requires_actual_pending_and_smtp_preconditions(self):
+        value = self.valid()
+        observation = value["readinessObservation"]
+        observation.update(otpPrepareStatus=200, emailPendingCreateOwnedReadAndPrepareVerified=True,
+            emailActualSmtpConfigured=True, emailCanonicalAdminAndStockDenialVerified=True,
+            emailNoCredentialOrMailBeforeStart=True, emailStartStatus=403)
+        self.assertEqual("GENUINE_PROTECTED_PENDING_OTP_EMAIL_START_RED", classify(value))
+        observation["emailActualSmtpConfigured"] = False
+        self.assertEqual("BEHAVIOR_FAILURE", classify(value))
+
     def test_missing_any_native_precondition_is_setup(self):
         for key in REQUIRED:
             with self.subTest(key=key):
@@ -65,7 +75,8 @@ class BootstrapClassifier(unittest.TestCase):
         value["readinessObservation"].update(appMutationStatus=201,
             preparedReceiptMacVerified=True, appNativeCredentialAndDisabledStateVerified=True,
             exactAppRetryPreservesOneCredential=True, completedPhaseRefusesNewEnrollment=True,
-            expiredOriginalPrepareRetryPreservesExactCausalReceipt=True)
+            expiredOriginalPrepareRetryPreservesExactCausalReceipt=True,
+            emailFinishActiveDisabledAndExactRetryVerified=True)
         self.assertEqual("GREEN", classify(value))
         value["readinessObservation"]["otpPrepareStatus"] = 404
         self.assertNotEqual("GREEN", classify(value))

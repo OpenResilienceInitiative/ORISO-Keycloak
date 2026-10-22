@@ -4,12 +4,14 @@ import base64
 import copy
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
 import struct
 import time
+import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.parse import quote
@@ -28,6 +30,15 @@ class BootstrapFixture(NativeFixture):
             raise AssertionError("Actual paired OTP provider required")
         cls.otp_jar = jar.resolve()
         cls.otp_jar_sha256 = hashlib.sha256(cls.otp_jar.read_bytes()).hexdigest()
+        source = Path(__file__).resolve().parents[2] / "otp-config-spi/tests/scenario_c_otp_fixture.py"
+        spec = importlib.util.spec_from_file_location("bootstrap_otp_mail_fixture", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cls.mail = module.MailSink(("0.0.0.0", 0), module.MailSink.Handler)
+        cls.mail.messages = []
+        cls.addClassCleanup(cls.mail.server_close)
+        cls.addClassCleanup(cls.mail.shutdown)
+        threading.Thread(target=cls.mail.serve_forever, daemon=True).start()
         original = subprocess.run
 
         def launch(args, *positional, **keywords):
@@ -40,6 +51,8 @@ class BootstrapFixture(NativeFixture):
                     "-e", "ORISO_APP_BASE_URL=https://otp-fixture.internal",
                     "-e", "EMAIL_BRANDING_NAME=OTP Fixture",
                     "-e", "EMAIL_LEGAL_ORGANISATION_NAME=Fixture Operator",
+                    "-v", str(Path(__file__).resolve().parents[2] / "themes/oriso") + ":/opt/keycloak/themes/oriso:ro",
+                    "--add-host", "host.docker.internal:host-gateway",
                 ]
             return original(args, *positional, **keywords)
 
@@ -93,12 +106,22 @@ def classify(summary):
         and observed.get("preparedReceiptMacVerified") is True
         and observed.get("expiredOriginalPrepareRetryStatus") == 403):
         return "GENUINE_PROTECTED_PENDING_OTP_EXPIRED_PREPARE_RETRY_RED"
+    email_ready = all(observed.get(key) is True for key in (
+        "emailPendingCreateOwnedReadAndPrepareVerified", "emailActualSmtpConfigured",
+        "emailCanonicalAdminAndStockDenialVerified", "emailNoCredentialOrMailBeforeStart"))
+    if (summary.get("failures") == 1 and email_ready and observed.get("emailStartStatus") == 403):
+        return "GENUINE_PROTECTED_PENDING_OTP_EMAIL_START_RED"
+    if (summary.get("failures") == 1 and email_ready
+        and observed.get("emailStartStatus") == 202 and observed.get("emailSentStatus") == 200
+        and observed.get("emailExactlyOneRealSmtpAndNativeInactiveCredential") is True
+        and observed.get("emailFinishStatus") == 403):
+        return "GENUINE_PROTECTED_PENDING_OTP_EMAIL_FINISH_RED"
     if (summary.get("failures") == 0 and observed.get("otpPrepareStatus") == 200
         and observed.get("appMutationStatus") == 201
         and all(observed.get(key) is True for key in (
             "preparedReceiptMacVerified", "appNativeCredentialAndDisabledStateVerified",
             "exactAppRetryPreservesOneCredential", "completedPhaseRefusesNewEnrollment",
-            "expiredOriginalPrepareRetryPreservesExactCausalReceipt"))):
+            "expiredOriginalPrepareRetryPreservesExactCausalReceipt", "emailFinishActiveDisabledAndExactRetryVerified"))):
         return "GREEN"
     return "BEHAVIOR_FAILURE"
 
@@ -373,3 +396,136 @@ class BootstrapRead(unittest.TestCase):
         self.assertEqual(409, app(changed)[0])
         self.assertEqual(after, helper.admin("GET", "/users/" + account + "/credentials"))
         observed["completedPhaseRefusesNewEnrollment"] = True
+
+        self.email_pending(helper, observed)
+
+    def email_pending(self, helper, observed):
+        from email import policy as email_policy
+        from email.parser import BytesParser
+        import re
+        approval, attempt, scope, approved, create = helper.approved_creation()
+        status, opened = helper.protected_machine_request(
+            "create", approval, create, actor="ACCOUNT_CREATE", attempt=attempt)
+        self.assertEqual(201, status)
+        owned = {key: copy.deepcopy(create[key]) for key in (
+            "approvalReceipt", "scopeDigest", "authorizationRevision", "creationFingerprint", "execution")}
+        owned.update(accountId=opened["accountId"], creationProof=opened["creationProof"])
+        status, projection = helper.protected_machine_request(
+            "owned-read", approval, owned, actor="ACCOUNT_CREATE", attempt=attempt)
+        self.assertEqual(200, status)
+        self.assertFalse(projection["enabled"])
+        account, username = opened["accountId"], projection["username"]
+        baseline = helper.admin("GET", "/users/" + account + "/credentials")
+        self.assertEqual(["password"], [row["type"] for row in baseline])
+
+        def invoke(operation, method, route, body=None, target=None, receipt=None):
+            bearer = helper.token("ACCOUNT_ADMIN")
+            encoded = bearer.split(".")[1]
+            claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            self.assertEqual({"userservice", "oriso-account-lifecycle", "oriso-otp"}, set(claims["aud"]))
+            self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], claims["sub"])
+            self.assertEqual(ACTORS["ACCOUNT_ADMIN"][0], claims["azp"])
+            self.assertEqual(403, call(helper.base, "GET", "/admin/realms/" + REALM
+                + "/users/" + account, token=bearer)[0])
+            observed["emailCanonicalAdminAndStockDenialVerified"] = True
+            materialized = {"target": target, "username": username, "otp": None} if method == "GET" else {
+                **copy.deepcopy(body), "username": username, "bootstrapReceipt": receipt}
+            now = int(time.time())
+            facts = {"iss": "userservice", "aud": "oriso-otp", "purpose": "OTP",
+                "operation": operation, "method": method, "actor": "ACCOUNT_ADMIN", "realm": REALM,
+                "target": "realm/" + helper.realm_id + "/account/" + account,
+                "taskClient": ACTORS["ACCOUNT_ADMIN"][0], "taskSubject": SUBJECTS["ACCOUNT_ADMIN"],
+                "payloadDigest": mac("payload", materialized), "jti": str(uuid.uuid4()),
+                "nonce": uuid.uuid4().hex, "iat": now, "exp": min(now + 60, int(claims["exp"]))}
+            payload = base64.urlsafe_b64encode(canonical(facts)).decode().rstrip("=")
+            signature = base64.urlsafe_b64encode(hmac.new(CONTEXT_KEY,
+                ("proof\n" + payload).encode(), hashlib.sha256).digest()).decode().rstrip("=")
+            headers = {"Authorization": "Bearer " + bearer, "X-ORISO-Task-Context": payload + "." + signature}
+            if target is not None:
+                headers["X-ORISO-Account-Target"] = canonical(target).decode()
+            if receipt is not None:
+                headers["X-ORISO-OTP-Bootstrap"] = receipt
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+            request = Request(helper.base + "/realms/" + REALM + "/otp-config/" + route
+                + "/" + quote(username, safe=""), method=method,
+                data=None if body is None else canonical(body), headers=headers)
+            try:
+                reply = urlopen(request, timeout=30)
+            except HTTPError as error:
+                reply = error
+            with reply:
+                raw = reply.read()
+                return reply.code, json.loads(raw) if raw else None
+
+        from datetime import datetime
+        workflow_deadline = int(datetime.fromisoformat(scope["validUntil"].replace("Z", "+00:00")).timestamp())
+        target = {"accountId": account, "tenantId": projection["tenantId"], "bootstrap": {
+            "v": 1, "kind": "PROTECTED_ACCEPTANCE", "approvalId": approval,
+            "scopeDigest": approved["scopeDigest"], "authorizationRevision": scope["authorizationRevision"],
+            "acceptanceClaim": copy.deepcopy(create["acceptanceClaim"]), "attemptId": attempt,
+            "execution": copy.deepcopy(create["execution"]), "creationFingerprint": create["creationFingerprint"],
+            "creationProof": opened["creationProof"], "authorityValidUntil": workflow_deadline}}
+        status, prepared = invoke("otp.bootstrap-read", "GET", "fetch-otp-setup-info", target=target)
+        self.assertEqual(200, status)
+        self.assertFalse(prepared["otpInfo"]["otpSetup"])
+        receipt = prepared["bootstrapReceipt"]
+        encoded, signature = receipt.split(".")
+        self.assertTrue(hmac.compare_digest(signature, hmac.new(CONTEXT_KEY,
+            ("otp-bootstrap-prepare/v1\n" + encoded).encode(), hashlib.sha256).hexdigest()))
+        observed["emailPendingCreateOwnedReadAndPrepareVerified"] = True
+        realm = helper.admin("GET", "")
+        realm["emailTheme"] = "oriso"
+        realm["smtpServer"] = {"host": "host.docker.internal", "port": str(BootstrapFixture.mail.server_address[1]),
+            "from": "otp-fixture@oriso.org", "auth": "false", "ssl": "false", "starttls": "false"}
+        helper.admin("PUT", "", realm)
+        self.assertEqual(realm["smtpServer"], helper.admin("GET", "")["smtpServer"])
+        observed["emailActualSmtpConfigured"] = True
+        before = len(BootstrapFixture.mail.messages)
+        mutation_target = {"accountId": account, "tenantId": projection["tenantId"], "origin": {
+            "kind": "INVITATION", "workflowId": scope["workflowId"], "humanSubject": None,
+            "humanIssuer": None, "humanClient": None, "humanAuthority": None}}
+        start = {"target": mutation_target, "operationId": str(uuid.uuid4()),
+            "expectedState": mac("otp-bootstrap-state/v1", receipt), "authorityValidUntil": workflow_deadline,
+            "otp": {"initialCode": None, "secret": None, "email": scope["recipient"]}}
+        observed["emailNoCredentialOrMailBeforeStart"] = baseline == helper.admin(
+            "GET", "/users/" + account + "/credentials") and before == len(BootstrapFixture.mail.messages)
+        status, ready = invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt)
+        observed["emailStartStatus"] = status
+        if status == 403:
+            self.assertEqual(baseline, helper.admin("GET", "/users/" + account + "/credentials"))
+            self.assertEqual(before, len(BootstrapFixture.mail.messages))
+        self.assertEqual(202, status)
+        self.assertEqual("READY", ready["deliveryState"])
+        status, sent = invoke("otp.bootstrap-email-start", "PUT", "send-verification-mail", start, receipt=receipt)
+        observed["emailSentStatus"] = status
+        self.assertEqual(200, status)
+        self.assertEqual("SENT", sent["deliveryState"])
+        self.assertEqual(before + 1, len(BootstrapFixture.mail.messages))
+        credentials = helper.admin("GET", "/users/" + account + "/credentials")
+        mail = [row for row in credentials if row["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail))
+        self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
+        observed["emailExactlyOneRealSmtpAndNativeInactiveCredential"] = True
+        message = BytesParser(policy=email_policy.default).parsebytes(BootstrapFixture.mail.messages[-1])
+        codes = set()
+        for part in message.walk():
+            if part.get_content_type() in {"text/plain", "text/html"}:
+                text = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8")
+                codes.update(re.findall(r"(?<![0-9])[0-9]{6}(?![0-9])", text))
+        self.assertEqual(1, len(codes))
+        finish = {"target": mutation_target, "operationId": str(uuid.uuid4()),
+            "expectedState": mac("otp-bootstrap-state/v1", receipt), "emailStartOperationId": start["operationId"],
+            "otp": {"initialCode": next(iter(codes)), "secret": None, "email": None}}
+        status, completed = invoke("otp.bootstrap-email-finish", "POST", "setup-otp-mail", finish, receipt=receipt)
+        observed["emailFinishStatus"] = status
+        self.assertEqual(201, status)
+        current = helper.admin("GET", "/users/" + account)
+        self.assertFalse(current["enabled"])
+        self.assertEqual(scope["recipient"], current["email"])
+        current_mail = [row for row in helper.admin("GET", "/users/" + account + "/credentials") if row["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(current_mail))
+        self.assertTrue(json.loads(current_mail[0]["credentialData"])["active"])
+        self.assertEqual((201, completed), invoke("otp.bootstrap-email-finish", "POST", "setup-otp-mail", finish, receipt=receipt))
+        self.assertEqual(before + 1, len(BootstrapFixture.mail.messages))
+        observed["emailFinishActiveDisabledAndExactRetryVerified"] = True
