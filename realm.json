@@ -1012,6 +1012,15 @@
       },
       "protocolMappers": [
         {
+          "name": "subject",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true"
+          }
+        },
+        {
           "id": "d727edf5-2881-4321-9be9-5c7c9201a4fe",
           "name": "username",
           "protocol": "openid-connect",
