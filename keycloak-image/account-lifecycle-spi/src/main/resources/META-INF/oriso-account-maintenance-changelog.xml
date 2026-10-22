@@ -18,4 +18,19 @@
       <column name="REALM_ID"/><column name="ACCOUNT_ID"/>
     </createIndex>
   </changeSet>
+  <changeSet id="oriso-otp-email-delivery-v1" author="oriso">
+    <createTable tableName="ORISO_OTP_EMAIL_DELIVERY">
+      <column name="ID" type="VARCHAR(255)"><constraints primaryKey="true" nullable="false"/></column>
+      <column name="REALM_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="ACCOUNT_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="INTENT_DIGEST" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="BINDING_JSON" type="VARCHAR(1024)"><constraints nullable="false"/></column>
+      <column name="EXPIRES_AT" type="BIGINT"><constraints nullable="false"/></column>
+      <column name="STATE" type="VARCHAR(16)"><constraints nullable="false"/></column>
+      <column name="FINAL_JSON" type="TEXT"/>
+      <column name="VERSION" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+    </createTable>
+    <addForeignKeyConstraint baseTableName="ORISO_OTP_EMAIL_DELIVERY" baseColumnNames="ID" referencedTableName="ORISO_ACCOUNT_MAINTENANCE_OP" referencedColumnNames="ID" constraintName="ORISO_OTP_EMAIL_OPERATION" onDelete="CASCADE"/>
+    <addForeignKeyConstraint baseTableName="ORISO_OTP_EMAIL_DELIVERY" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_OTP_EMAIL_REALM" onDelete="CASCADE"/>
+  </changeSet>
 </databaseChangeLog>

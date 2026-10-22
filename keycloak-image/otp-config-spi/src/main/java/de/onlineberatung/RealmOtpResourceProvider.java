@@ -215,8 +215,30 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
   @Path("send-verification-mail/{username}")
   @Consumes({MediaType.APPLICATION_JSON})
   @Produces({MediaType.APPLICATION_JSON})
-  public Response sendVerificationMail(@PathParam("username") final String username,
-      final OtpSetupDTO mailSetup) {
+  public Response sendVerificationMailRequest(@PathParam("username") final String username,
+      final byte[] raw) {
+    if (sessionAuthenticator.isScopedMode()) {
+      var headers = session.getContext().getRequestHeaders();
+      return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfEmailStart(
+          session, username, raw, headers.getHeaderString("X-ORISO-Task-Context"),
+          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+            var context = new CredentialContext(target.session(), target.realm(), target.user());
+            if (!mailCredentialService.getAllCredentials(context).isEmpty())
+              throw new jakarta.ws.rs.ClientErrorException("Current mail OTP credential conflicts", 409);
+            var otp = otpService.createOtp(target.email());
+            var credential = mailCredentialService.createCredential(otp, context);
+            target.bindEmailStartCredential(credential);
+            return Response.accepted(new Success().info("OTP mail pending")).build();
+          });
+    }
+    try {
+      return sendVerificationMail(username, org.keycloak.util.JsonSerialization.readValue(raw, OtpSetupDTO.class));
+    } catch (java.io.IOException rejected) {
+      throw new jakarta.ws.rs.BadRequestException("Invalid OTP request");
+    }
+  }
+
+  public Response sendVerificationMail(final String username, final OtpSetupDTO mailSetup) {
     verifyAuthentication();
 
     final var realm = this.session.getContext().getRealm();

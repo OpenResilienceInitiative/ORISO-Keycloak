@@ -48,6 +48,13 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, finish));
   }
 
+  public static Response requireSelfEmailStart(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
+      Function<VerifiedOtpTarget, Response> prepare) {
+    return guarded(session, () -> configuration(session).startEmailOtpSelf(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, prepare));
+  }
+
   private static AccountLifecycleFactory configuration(KeycloakSession session) {
     var factory = session.getKeycloakSessionFactory().getProviderFactory(
         RealmResourceProvider.class, "oriso-account-lifecycle");
@@ -220,6 +227,118 @@ public final class ScopedOtpAccess {
     return Response.status(status).entity(result).header("Cache-Control", "no-store").build();
   }
 
+  static Response checkedSelfEmailStart(KeycloakSession session, LifecycleAuthorization authorization,
+      Map<String, Set<String>> mappings, GeneralPolicy policy, String username,
+      byte[] raw, String proofHeader, String humanHeader,
+      Function<VerifiedOtpTarget, Response> prepare) {
+    var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
+    if (username == null || username.isBlank() || username.length() > 255
+        || username.chars().anyMatch(c -> c < 32 || c == 127)) bad();
+    var body = parse(raw);
+    String account = uuid(text(body.path("target"), "accountId", 36, false));
+    var request = ScopedOtpRequest.parse("otp.email-start", account, body);
+    var materialized = body.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("username", username);
+    var realm = session.getContext().getRealm();
+    authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.email-start", "PUT",
+        "realm/" + realm.getId() + "/account/" + account, materialized);
+    var read = JSON.createObjectNode();
+    read.set("target", request.target());
+    var target = MaintenanceRequest.parse("read", account, read);
+    if (policy == null) deny();
+    var em = session.getProvider(org.keycloak.connections.jpa.JpaConnectionProvider.class).getEntityManager();
+    var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class,
+        realm.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    if (lockedRealm == null) deny();
+    em.refresh(lockedRealm);
+    String id = realm.getId() + ":" + request.operationId();
+    String digest = authorization.mac("otp-intent", materialized);
+    var prior = em.find(AccountMaintenanceOperation.class, id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    var delivery = em.find(OtpEmailDelivery.class, id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    if (prior != null) {
+      em.refresh(prior);
+      if (!realm.getId().equals(prior.realmId) || !account.equals(prior.accountId)
+          || !"otp.email-start".equals(prior.command) || !machine.clientId().equals(prior.ownerClient)
+          || !machine.subject().equals(prior.ownerSubject)
+          || !LifecycleAuthorization.equal(digest, prior.intentDigest)
+          || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState))
+        throw new jakarta.ws.rs.ClientErrorException("OTP operation conflicts", 409);
+      policy.requireSelfOtpEmailStart(session, target, humanHeader);
+      if (delivery == null) deny();
+      em.refresh(delivery);
+      if (!id.equals(delivery.id) || !realm.getId().equals(delivery.realmId)
+          || !account.equals(delivery.accountId) || !LifecycleAuthorization.equal(digest, delivery.intentDigest)) deny();
+      if (!"READY".equals(delivery.state) || delivery.expiresAt <= java.time.Instant.now().getEpochSecond())
+        throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery could not complete");
+      return Response.status(202).entity(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
+    }
+    if (delivery != null) deny();
+    var current = new MaintenanceTarget(session, authorization, mappings)
+        .readOtpSelfEmailStart(target, policy, humanHeader);
+    if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
+      throw new jakarta.ws.rs.ClientErrorException("Current OTP target state conflicts", 409);
+    var human = policy.requireSelfOtpEmailStart(session, target, humanHeader).identity();
+    var machineToken = machine.nativeAuth().getToken();
+    long now = java.time.Instant.now().getEpochSecond();
+    if (machineToken.getIat() == null || machineToken.getExp() == null
+        || machineToken.getIat() <= 0 || machineToken.getExp() <= machineToken.getIat()
+        || machineToken.getExp() <= now) deny();
+    long expiry = Math.min(Math.min(human.validatedJwtExpiresAt(), machineToken.getExp()), now + 600);
+    var invocation = invoke(session, authorization, username, account, current, request, prepare);
+    if (invocation.response().getStatus() != 202 || invocation.emailCredential() == null) deny();
+    var nativeResult = JSON.valueToTree(invocation.response().getEntity());
+    fields(nativeResult, "info");
+    text(nativeResult, "info", 512, false);
+    var outcome = JSON.createObjectNode();
+    outcome.put("realmId", realm.getId());
+    outcome.put("accountId", account);
+    outcome.put("operationId", request.operationId());
+    outcome.put("operation", "otp.email-start");
+    outcome.put("ownerClient", machine.clientId());
+    outcome.put("ownerSubject", machine.subject());
+    outcome.put("intentDigest", digest);
+    outcome.put("previousState", request.expectedState());
+    outcome.set("tenantId", request.target().path("tenantId"));
+    outcome.put("originDigest", authorization.mac("otp-origin", request.target().path("origin")));
+    outcome.put("status", 202);
+    outcome.put("deliveryState", "READY");
+    outcome.put("authorityValidUntil", expiry);
+    outcome.put("resultDigest", authorization.mac("otp-result", nativeResult));
+    outcome.set("emailCredential", invocation.emailCredential());
+    var result = JSON.createObjectNode();
+    result.put("operationId", request.operationId());
+    result.put("accountId", account);
+    result.put("status", 202);
+    result.put("deliveryState", "READY");
+    result.set("result", nativeResult);
+    result.put("receipt", authorization.receipt("otp-operation-receipt", outcome));
+    var saved = new AccountMaintenanceOperation();
+    saved.id = id;
+    saved.realmId = realm.getId();
+    saved.operationId = request.operationId();
+    saved.accountId = account;
+    saved.command = "otp.email-start";
+    saved.ownerClient = machine.clientId();
+    saved.ownerSubject = machine.subject();
+    saved.intentDigest = digest;
+    saved.expectedState = request.expectedState();
+    saved.resultJson = canonical(result);
+    em.persist(saved);
+    delivery = new OtpEmailDelivery();
+    delivery.id = id;
+    delivery.realmId = realm.getId();
+    delivery.accountId = account;
+    delivery.intentDigest = digest;
+    delivery.bindingJson = canonical(invocation.emailCredential());
+    delivery.expiresAt = expiry;
+    delivery.state = "READY";
+    em.persist(delivery);
+    // Native inactive credential, immutable READY receipt and delivery ownership commit together.
+    // No old VerifiedOtpTarget or request-bound grant escapes this callback.
+    em.flush();
+    return Response.status(202).entity(result).header("Cache-Control", "no-store").build();
+  }
+
   private record Invocation(Response response, com.fasterxml.jackson.databind.JsonNode emailCredential) {}
 
   private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
@@ -269,11 +388,22 @@ public final class ScopedOtpAccess {
     public UserModel user() { lifetime.check(); return user; }
     public String initialCode() { lifetime.check(); if (request == null || !Set.of("otp.app-setup", "otp.email-finish").contains(request.operation())) deny(); return request.otp().path("initialCode").textValue(); }
     public String secret() { lifetime.check(); if (request == null || !"otp.app-setup".equals(request.operation())) deny(); return request.otp().path("secret").textValue(); }
+    public String email() { lifetime.check(); if (request == null || !"otp.email-start".equals(request.operation())) deny(); return request.otp().path("email").textValue(); }
+    public void bindEmailStartCredential(org.keycloak.credential.CredentialModel selected) {
+      lifetime.check();
+      if (request == null || !"otp.email-start".equals(request.operation())) deny();
+      bindEmailCredential(selected);
+    }
     /** Binds a current native-owned credential before its effect; never accepts DTO authority. */
     public void bindEmailFinishCredential(org.keycloak.credential.CredentialModel selected) {
       lifetime.check();
       if (request == null || !"otp.email-finish".equals(request.operation())
           || emailCredential != null || selected == null) deny();
+      bindEmailCredential(selected);
+    }
+    private void bindEmailCredential(org.keycloak.credential.CredentialModel selected) {
+      lifetime.check();
+      if (emailCredential != null || selected == null) deny();
       String id = uuid(selected.getId());
       var owned = user.credentialManager().getStoredCredentialById(id);
       if (owned == null || !"MAIL_OTP_CM".equals(owned.getType())

@@ -109,6 +109,31 @@ public class ScopedOtpRequestTest {
   }
 
   @Test
+  public void emailStartAcceptsOnlyTheBoundedDestinationWithNullCodeAndSecret() {
+    var exact = body();
+    var otp = (com.fasterxml.jackson.databind.node.ObjectNode) exact.path("otp");
+    otp.putNull("initialCode");
+    otp.putNull("secret");
+    otp.put("email", "pending@test.invalid");
+    var decoded = ScopedOtpRequest.parse("otp.email-start", ID, exact);
+    assertEquals("pending@test.invalid", decoded.otp().path("email").asText());
+    assertFalse(decoded.toString().contains("pending@test.invalid"));
+    for (String invalid : new String[] {"", " ", "pending@test.invalid\r\nBcc:x@y.invalid", "x".repeat(321)}) {
+      otp.put("email", invalid);
+      rejected("otp.email-start", ID, exact);
+    }
+    otp.put("email", "pending@test.invalid");
+    otp.put("secret", SECRET);
+    rejected("otp.email-start", ID, exact);
+    otp.putNull("secret");
+    otp.put("initialCode", "123456");
+    rejected("otp.email-start", ID, exact);
+    otp.putNull("initialCode");
+    otp.put("unreviewed", true);
+    rejected("otp.email-start", ID, exact);
+  }
+
+  @Test
   public void setupSecretAndInitialCodeCannotAppearInTheRequestDescription() {
     String description = accepted(body()).toString();
     assertFalse(description.contains(SECRET));
