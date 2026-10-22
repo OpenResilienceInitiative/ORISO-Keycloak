@@ -59,6 +59,15 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, finish));
   }
 
+  public static Response requireSelfEmailFinish(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> finish) {
+    if (bootstrapReceipt == null) return requireSelfEmailFinish(session, exactPathUsername, raw,
+        taskContextHeader, fullImmediateHumanHeader, finish);
+    return guarded(session, () -> configuration(session).finishEmailOtpProtected(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, bootstrapReceipt, finish));
+  }
+
   public static Response requireSelfEmailStart(KeycloakSession session, String exactPathUsername,
       byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
       Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send) {
@@ -513,7 +522,7 @@ public final class ScopedOtpAccess {
     });
   }
 
-  private record LinkedEmailStart(String operationId, JsonNode binding, String incarnationDigest) {}
+  record LinkedEmailStart(String operationId, JsonNode binding, String incarnationDigest) {}
 
   private static LinkedEmailStart requireLinkedEmailStart(
       jakarta.persistence.EntityManager em, RealmModel realm, LifecycleAuthorization authorization,
@@ -574,7 +583,7 @@ public final class ScopedOtpAccess {
     return invoke(session, authorization, username, account, current, request, action, null, 0, null);
   }
 
-  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+  static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
       String username, String account, JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action, LinkedEmailStart linked) {
     return invoke(session, authorization, username, account, current, request, action, null, 0, linked);

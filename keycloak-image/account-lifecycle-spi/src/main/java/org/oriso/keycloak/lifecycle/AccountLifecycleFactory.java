@@ -157,5 +157,13 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
         humanHeader, bootstrapReceipt, prepare, send);
   }
 
+  jakarta.ws.rs.core.Response finishEmailOtpProtected(KeycloakSession session, String username,
+      byte[] raw, String proofHeader, String humanHeader, String bootstrapReceipt,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> finish) {
+    if (authorization == null) LifecycleJson.deny();
+    return ProtectedOtpBootstrap.emailFinish(session, authorization, username, raw, proofHeader,
+        humanHeader, bootstrapReceipt, finish);
+  }
+
   public void close() {}
 }

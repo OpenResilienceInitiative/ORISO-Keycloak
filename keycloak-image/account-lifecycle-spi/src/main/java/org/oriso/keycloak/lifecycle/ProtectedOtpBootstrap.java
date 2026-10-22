@@ -348,7 +348,7 @@ final class ProtectedOtpBootstrap {
         var sent = ScopedOtpAccess.invoke(session, crypto, username, account, projection, request,
             send, binding, delivery.expiresAt);
         if (sent.response().getStatus() != 200) throw new IllegalStateException("Unknown OTP delivery");
-        var result = emailResult(crypto, owner, request, digest, delivery.expiresAt, binding,
+        var result = emailResult(crypto, owner, request.operationId(), digest, delivery.expiresAt, binding,
             JSON.valueToTree(sent.response().getEntity()), 200, "SENT");
         delivery.state = "SENT"; delivery.finalJson = canonical(result);
         owner.em().flush();
@@ -373,7 +373,7 @@ final class ProtectedOtpBootstrap {
     var projection = JSON.createObjectNode().put("username", username);
     var invocation = ScopedOtpAccess.invoke(session, crypto, username, account, projection, request, prepare);
     if (invocation.response().getStatus() != 202 || invocation.emailCredential() == null) deny();
-    var ready = emailResult(crypto, owner, request, digest, expiry, invocation.emailCredential(),
+    var ready = emailResult(crypto, owner, request.operationId(), digest, expiry, invocation.emailCredential(),
         JSON.valueToTree(invocation.response().getEntity()), 202, "READY");
     var saved = new AccountMaintenanceOperation(); saved.id = id; saved.realmId = owner.realm().getId();
     saved.operationId = request.operationId(); saved.accountId = account; saved.command = "otp.bootstrap-email-start";
@@ -392,13 +392,95 @@ final class ProtectedOtpBootstrap {
     return Response.status(202).entity(ready).header("Cache-Control", "no-store").build();
   }
 
+  static Response emailFinish(KeycloakSession session, LifecycleAuthorization crypto,
+      String username, byte[] raw, String proof, String human, String prepareReceipt,
+      Function<ScopedOtpAccess.VerifiedOtpTarget, Response> finish) {
+    var machine = crypto.requireMachine(session, "ACCOUNT_ADMIN");
+    if (human != null || username == null || username.isBlank() || username.length() > 255
+        || username.chars().anyMatch(c -> c < 32 || c == 127)) deny();
+    var body = parse(raw);
+    String account = uuid(text(body.path("target"), "accountId", 36, false));
+    var request = ScopedOtpRequest.parse("otp.email-finish", account, body);
+    String startOperation = uuid(text(body, "emailStartOperationId", 36, false));
+    var materialized = body.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("username", username);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("bootstrapReceipt", prepareReceipt);
+    crypto.verifyCommand(proof, machine, "oriso-otp", "OTP", "otp.bootstrap-email-finish", "POST",
+        "realm/" + session.getContext().getRealm().getId() + "/account/" + account, materialized);
+    var owner = emailOwner(session, crypto, machine, request, prepareReceipt);
+    crypto.verifyCommand(proof, machine, "oriso-otp", "OTP", "otp.bootstrap-email-finish", "POST",
+        "realm/" + owner.realm().getId() + "/account/" + account, materialized);
+    String id = owner.realm().getId() + ":" + request.operationId();
+    String digest = crypto.mac("otp-bootstrap-intent/v1", materialized);
+    var prior = owner.em().find(AccountMaintenanceOperation.class, id, LockModeType.PESSIMISTIC_WRITE);
+    if (prior != null) {
+      owner.em().refresh(prior);
+      if (!owner.realm().getId().equals(prior.realmId) || !account.equals(prior.accountId)
+          || !"otp.bootstrap-email-finish".equals(prior.command)
+          || !machine.clientId().equals(prior.ownerClient) || !machine.subject().equals(prior.ownerSubject)
+          || !LifecycleAuthorization.equal(digest, prior.intentDigest)
+          || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState)) conflict();
+      var saved = parse(prior.resultJson);
+      int status = saved.path("status").asInt();
+      if (!Set.of(201, 401).contains(status)) deny();
+      return Response.status(status).entity(saved).header("Cache-Control", "no-store").build();
+    }
+    if (!"EMAIL_READY".equals(owner.bootstrap().state)) conflict();
+    var user = currentEmailUser(session, crypto, owner, username, true);
+    String startId = owner.realm().getId() + ":" + startOperation;
+    var start = owner.em().find(AccountMaintenanceOperation.class, startId, LockModeType.PESSIMISTIC_WRITE);
+    var delivery = owner.em().find(OtpEmailDelivery.class, startId, LockModeType.PESSIMISTIC_WRITE);
+    if (start == null || delivery == null) deny();
+    owner.em().refresh(start); owner.em().refresh(delivery);
+    if (!owner.realm().getId().equals(start.realmId) || !account.equals(start.accountId)
+        || !"otp.bootstrap-email-start".equals(start.command) || !startOperation.equals(start.operationId)
+        || !machine.clientId().equals(start.ownerClient) || !machine.subject().equals(start.ownerSubject)
+        || !LifecycleAuthorization.equal(request.expectedState(), start.expectedState)
+        || !owner.realm().getId().equals(delivery.realmId) || !account.equals(delivery.accountId)
+        || !owner.approval().workflowId.equals(delivery.originWorkflowId)
+        || !LifecycleAuthorization.equal(start.intentDigest, delivery.intentDigest)
+        || !"SENT".equals(delivery.state) || delivery.finalJson == null || delivery.incarnationDigest == null) deny();
+    var binding = parse(delivery.bindingJson);
+    var sent = parse(delivery.finalJson);
+    fields(sent, "status", "deliveryState", "result", "receipt");
+    var expectedSent = emailResult(crypto, owner, startOperation, start.intentDigest,
+        delivery.expiresAt, binding, sent.path("result"), 200, "SENT");
+    if (!LifecycleAuthorization.equal(canonical(expectedSent), canonical(sent))) deny();
+    var linked = new ScopedOtpAccess.LinkedEmailStart(startOperation, binding.deepCopy(), delivery.incarnationDigest);
+    var projection = JSON.createObjectNode().put("username", username);
+    var invocation = ScopedOtpAccess.invoke(session, crypto, username, account, projection, request, finish, linked);
+    int status = invocation.response().getStatus();
+    if (!Set.of(201, 401).contains(status) || invocation.emailCredential() == null) deny();
+    var nativeResult = JSON.valueToTree(invocation.response().getEntity());
+    if (status == 201) { fields(nativeResult, "info"); text(nativeResult, "info", 512, false); }
+    else { fields(nativeResult, "error", "error_description");
+      text(nativeResult, "error", 100, false); text(nativeResult, "error_description", 512, false); }
+    var facts = (com.fasterxml.jackson.databind.node.ObjectNode) owner.receipt().deepCopy();
+    facts.put("state", status == 201 ? "COMPLETE" : "INVALID"); facts.put("operationId", request.operationId());
+    facts.put("intentDigest", digest); facts.put("status", status); facts.put("resultDigest", crypto.mac("otp-result", nativeResult));
+    var result = JSON.createObjectNode(); result.put("status", status); result.set("result", nativeResult);
+    result.put("receipt", crypto.receipt("otp-bootstrap-complete/v1", facts));
+    var saved = new AccountMaintenanceOperation(); saved.id = id; saved.realmId = owner.realm().getId();
+    saved.operationId = request.operationId(); saved.accountId = account; saved.command = "otp.bootstrap-email-finish";
+    saved.ownerClient = machine.clientId(); saved.ownerSubject = machine.subject(); saved.intentDigest = digest;
+    saved.expectedState = request.expectedState(); saved.resultJson = canonical(result); owner.em().persist(saved);
+    owner.em().flush();
+    String current = crypto.mac("pending-profile", AccountLifecycleResource.lockedSnapshot(owner.em(), account));
+    if (status == 201) {
+      owner.bootstrap().state = "COMPLETE";
+      owner.attempt().profileFingerprint = current;
+    } else owner.bootstrap().emailPendingFingerprint = current;
+    owner.em().flush();
+    return Response.status(status).entity(result).header("Cache-Control", "no-store").build();
+  }
+
   private static JsonNode emailResult(LifecycleAuthorization crypto, EmailOwner owner,
-      ScopedOtpRequest request, String digest, long expiry, JsonNode binding, JsonNode nativeResult,
+      String operationId, String digest, long expiry, JsonNode binding, JsonNode nativeResult,
       int status, String state) {
     fields(nativeResult, "info"); text(nativeResult, "info", 512, false);
     var facts = owner.receipt().deepCopy();
     var outcome = (com.fasterxml.jackson.databind.node.ObjectNode) facts;
-    outcome.put("state", state); outcome.put("operationId", request.operationId());
+    outcome.put("state", state); outcome.put("operationId", operationId);
     outcome.put("intentDigest", digest); outcome.put("status", status);
     outcome.put("resultDigest", crypto.mac("otp-result", nativeResult));
     outcome.put("deliveryValidUntil", expiry); outcome.set("emailCredential", binding);
