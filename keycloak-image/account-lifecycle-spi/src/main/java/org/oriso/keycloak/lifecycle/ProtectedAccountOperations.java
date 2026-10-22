@@ -33,6 +33,18 @@ final class ProtectedAccountOperations {
     return readCurrent(session, crypto, request, fullHumanHeader, "account.read");
   }
 
+  static boolean protectedTarget(KeycloakSession session, MaintenanceRequest request) {
+    var em = CurrentNativeHumanIdentity.entityManager(session); var realm = session.getContext().getRealm();
+    var locked = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
+    if (locked == null) deny(); em.refresh(locked);
+    var scopes = em.createQuery("select a.scope from AccountLifecycleAttempt a where a.realmId=:realm and a.accountId=:account", String.class)
+        .setParameter("realm", realm.getId()).setParameter("account", request.accountId()).setMaxResults(2).getResultList();
+    if (scopes.size() > 1) deny();
+    if (scopes.size() == 1) return parse(scopes.get(0)).has("approvalBinding");
+    if (!ProtectedInvitationFactory.checkedBootstrapConfiguration(session).adoptedAccounts.containsKey(request.accountId())) deny();
+    return true;
+  }
+
   record CheckedCurrent(JsonNode current, long humanValidUntil) {}
 
   static JsonNode readSelfOperation(KeycloakSession session, LifecycleAuthorization crypto,
@@ -59,7 +71,7 @@ final class ProtectedAccountOperations {
         || !Set.of("profile", "email").contains(request.command())) deny();
     var current = readCurrent(session, crypto, request, humanHeader, "account." + request.command());
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
-      throw new jakarta.ws.rs.ClientErrorException("Current account state conflicts", 409);
+      throw MaintenancePreflightRefusal.current(409);
     var realm = session.getContext().getRealm();
     var user = session.users().getUserById(realm, request.accountId());
     var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
@@ -112,29 +124,52 @@ final class ProtectedAccountOperations {
         + " where a.realmId=:realm and a.accountId=:account", Object[].class)
         .setParameter("realm", config.realmId).setParameter("account", request.accountId())
         .setMaxResults(2).getResultList();
-    if (locators.size() != 1) deny();
-    var locator = locators.get(0);
-    var scope = parse((String) locator[1]);
-    if (!scope.path("approvalBinding").isObject()) deny();
-    String approvalId = uuid(text(scope.path("approvalBinding"), "approvalId", 36, false));
-    var approval = em.find(ProtectedInvitationApproval.class,
-        ProtectedInvitationResource.key(config.realmId, approvalId), LockModeType.PESSIMISTIC_WRITE);
-    if (approval == null) deny();
-    em.refresh(approval);
-    var attempt = em.find(AccountLifecycleAttempt.class, locator[0], LockModeType.PESSIMISTIC_WRITE);
-    if (attempt == null) deny();
-    em.refresh(attempt);
-    if (!request.accountId().equals(attempt.accountId) || !locator[2].equals(attempt.attemptId)
-        || !locator[1].equals(attempt.scope)) deny();
-    var frozen = parse(approval.scope).path("profile");
-    var profile = config.profiles.get(text(frozen, "id", 255, false));
-    if (profile == null || !Set.of("TENANT_ADMIN", "PLATFORM_ADMIN").contains(profile.kind())
-        || !canonical(profile.snapshot()).equals(canonical(frozen))) deny();
+    if (locators.size() > 1) deny();
+    ProtectedInvitationApproval approval = null;
+    AccountLifecycleAttempt attempt = null;
+    ProtectedInvitationConfiguration.Profile profile;
+    String provenance;
+    long tenant;
     var delegation = new ProtectedPeerDelegation(session, config, crypto);
-    long tenant = delegation.committedOperationTarget(approval, attempt, profile);
+    if (locators.isEmpty()) {
+      var adoption = config.adoptedAccounts.get(request.accountId());
+      if (adoption == null) deny();
+      profile = config.profiles.get(adoption.profileId());
+      if (profile == null || profile.version() != adoption.profileVersion()) deny();
+      String requestedTenant = request.target().path("tenantId").asText();
+      if (!requestedTenant.matches("0|[1-9][0-9]{0,18}")) deny();
+      try { tenant = Long.parseLong(requestedTenant); }
+      catch (NumberFormatException invalid) { deny(); return null; }
+      if ("PLATFORM_ADMIN".equals(profile.kind()) ? tenant != 0 : tenant <= 0) deny();
+      var adopted = JSON.createObjectNode(); adopted.put("accountId", adoption.accountId());
+      adopted.put("profileId", adoption.profileId()); adopted.put("profileVersion", adoption.profileVersion());
+      adopted.set("profile", profile.snapshot());
+      provenance = crypto.mac("maintenance-adoption/v1", adopted);
+    } else {
+      var locator = locators.get(0);
+      var scope = parse((String) locator[1]);
+      if (!scope.path("approvalBinding").isObject()) deny();
+      String approvalId = uuid(text(scope.path("approvalBinding"), "approvalId", 36, false));
+      approval = em.find(ProtectedInvitationApproval.class,
+          ProtectedInvitationResource.key(config.realmId, approvalId), LockModeType.PESSIMISTIC_WRITE);
+      if (approval == null) deny(); em.refresh(approval);
+      attempt = em.find(AccountLifecycleAttempt.class, locator[0], LockModeType.PESSIMISTIC_WRITE);
+      if (attempt == null) deny(); em.refresh(attempt);
+      if (!request.accountId().equals(attempt.accountId) || !locator[2].equals(attempt.attemptId)
+          || !locator[1].equals(attempt.scope)) deny();
+      var frozen = parse(approval.scope).path("profile");
+      profile = config.profiles.get(text(frozen, "id", 255, false));
+      if (profile == null || !Set.of("TENANT_ADMIN", "PLATFORM_ADMIN").contains(profile.kind())
+          || !canonical(profile.snapshot()).equals(canonical(frozen))) deny();
+      tenant = delegation.committedOperationTarget(approval, attempt, profile);
+      var adoption = config.adoptedAccounts.get(request.accountId());
+      if (adoption != null && (!profile.id().equals(adoption.profileId())
+          || profile.version() != adoption.profileVersion())) deny();
+      provenance = attempt.id;
+    }
     if (!Long.toString(tenant).equals(request.target().path("tenantId").asText())) deny();
     long validUntil;
-    if ("PLATFORM_ADMIN".equals(profile.kind())
+    if (approval != null && "PLATFORM_ADMIN".equals(profile.kind())
         && "SELF".equals(request.target().path("origin").path("kind").asText())) {
       validUntil = requireCommittedRecipientSelf(session, config, approval, profile, request, rawHuman, operation, tenant);
     } else {
@@ -162,6 +197,7 @@ final class ProtectedAccountOperations {
           || "PLATFORM".equals(resolved.binding().authority()) && human.tenantId() != 0) deny();
       validUntil = human.validatedJwtExpiresAt();
     }
+    try {
     config.validateProfile(session, profile);
     var current = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
     var groups = new TreeSet<String>(); current.path("groups").forEach(value -> groups.add(value.asText()));
@@ -174,7 +210,7 @@ final class ProtectedAccountOperations {
       if (request.accountId().equals(technical.asText())) deny();
     var state = JSON.createObjectNode();
     state.put("realmId", config.realmId); state.set("account", current);
-    state.put("provenance", attempt.id); state.set("profile", profile.snapshot());
+    state.put("provenance", provenance); state.set("profile", profile.snapshot());
     var result = JSON.createObjectNode();
     for (String field : java.util.List.of("id", "username", "email", "firstName", "lastName", "enabled", "emailVerified"))
       result.set(field, current.path(field));
@@ -188,7 +224,14 @@ final class ProtectedAccountOperations {
       if (org.keycloak.models.UserModel.RequiredAction.UPDATE_PASSWORD.name().equals(action.asText())) passwordChange = true;
     result.put("passwordChangeRequired", passwordChange);
     result.put("state", crypto.mac("maintenance-state", state));
+    if ("TWO_FACTOR_STATUS_V1".equals(request.include())) result.set("twoFactor", NativeOtpStatus.read(current));
     return new CheckedCurrent(result, validUntil);
+    } catch (jakarta.ws.rs.WebApplicationException refused) {
+      int status = refused.getResponse().getStatus();
+      if ("HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
+          && (status == 403 || status == 409)) throw MaintenancePreflightRefusal.current(status);
+      throw refused;
+    }
   }
 
   private static long requireCommittedRecipientSelf(KeycloakSession session,

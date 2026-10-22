@@ -150,6 +150,43 @@ final class GeneralPolicy {
     return new OrdinaryHuman(human, matched.id, matched.version);
   }
 
+  void validateProfile(KeycloakSession session, Profile profile) {
+    var current = NativeCurrentGrants.read(CurrentNativeHumanIdentity.entityManager(session), nativePolicy.realmId,
+        Set.of(), Set.of(profile.groupId));
+    if (!profile.realmRoles.equals(current.realmRoles()) || !profile.clientRoles.equals(current.clientRoles())
+        || !current.groups().keySet().equals(Set.of(profile.groupId, profile.parentId))
+        || !profile.path.equals(current.paths().get(profile.groupId))
+        || !"/human-roles".equals(current.paths().get(profile.parentId))
+        || !profile.parentId.equals(current.groups().get(profile.groupId).parentId())
+        || current.groups().get(profile.parentId).parentId() != null) deny();
+  }
+
+  Profile profileForGroup(String groupId, Set<String> roles) {
+    var found = profiles.stream().filter(p -> p.groupId.equals(groupId) && p.realmRoles.equals(roles)).toList();
+    if (found.size() != 1) deny();
+    return found.get(0);
+  }
+
+  Profile profile(String id, long version) {
+    var found = profiles.stream().filter(p -> p.id.equals(id) && p.version == version).toList();
+    if (found.size() != 1) deny();
+    return found.get(0);
+  }
+
+  Profile desiredProfile(String path) {
+    var found = profiles.stream().filter(p -> p.path.equals(path)).toList();
+    if (found.size() != 1) deny();
+    return found.get(0);
+  }
+
+  void requireAdmin(HumanAdminSource source, MaintenanceRequest request, String operation,
+      Profile current, Profile desired) {
+    source.targetTenant(request.target().path("tenantId"));
+    if (adminOperations.stream().noneMatch(grant -> grant.authority.equals(source.authority())
+        && grant.profiles.contains(current.id) && grant.profiles.contains(desired.id)
+        && grant.operations.contains(operation))) deny();
+  }
+
   /** Classification result carries no peer, protected, creation or arbitrary operation grant. */
   static final class OrdinaryHuman {
     private final CurrentNativeHumanIdentity.VerifiedHuman human;
@@ -165,7 +202,7 @@ final class GeneralPolicy {
     long profileVersion() { return profileVersion; }
   }
 
-  private static final class Profile {
+  static final class Profile {
     final String id, groupId, path, parentId;
     final long version;
     final Set<String> realmRoles, selfOperations;
