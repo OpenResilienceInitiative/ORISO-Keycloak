@@ -140,8 +140,10 @@ public final class ScopedOtpAccess {
     body.set("target", target);
     var request = MaintenanceRequest.parse("read", account, body);
     // Realm -> committed provenance -> current human -> native user/credential locks.
-    var current = new MaintenanceTarget(session, authorization, mappings)
-        .readOtpSelf(request, policies.apply(session), humanHeader);
+    var current = ProtectedAccountOperations.selected(target)
+        ? ProtectedAccountOperations.readSelfOtp(session, authorization, request, humanHeader)
+        : new MaintenanceTarget(session, authorization, mappings)
+            .readOtpSelf(request, policies.apply(session), humanHeader);
     return invoke(session, authorization, username, account, current, null, read).response();
   }
 

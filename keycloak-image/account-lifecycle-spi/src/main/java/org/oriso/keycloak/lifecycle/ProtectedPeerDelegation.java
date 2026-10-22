@@ -67,6 +67,16 @@ final class ProtectedPeerDelegation {
 
   CurrentHumanAuthorization.VerifiedHuman require(Resolved resolved) {
     var human = CurrentHumanAuthorization.require(session, resolved.binding().policy());
+    return checkedProfile(resolved, human);
+  }
+
+  CurrentHumanAuthorization.VerifiedHuman require(Resolved resolved, String rawHumanBearer) {
+    return checkedProfile(resolved,
+        CurrentHumanAuthorization.require(session, resolved.binding().policy(), rawHumanBearer));
+  }
+
+  private CurrentHumanAuthorization.VerifiedHuman checkedProfile(Resolved resolved,
+      CurrentHumanAuthorization.VerifiedHuman human) {
     var profile = resolved.sourceProfile();
     if (profile != null) {
       config.validateProfile(session, profile);
@@ -77,6 +87,12 @@ final class ProtectedPeerDelegation {
       if (!groups.equals(Set.of(profile.groupId()))) deny();
     }
     return human;
+  }
+
+  // Facts only. The original peer provenance verifier and its TENANT_ADMIN semantics are unchanged.
+  long committedTarget(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
+      ProtectedInvitationConfiguration.Profile profile) {
+    return provenance(origin, attempt, profile);
   }
 
   void recordConsumed(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt) {
