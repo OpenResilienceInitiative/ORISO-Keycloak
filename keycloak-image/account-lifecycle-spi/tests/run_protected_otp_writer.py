@@ -16,6 +16,11 @@ def classify_writer(summary):
     observed = summary.get("readinessObservation", {})
     rows = observed.get("inflightWriterEvents", [])
     base = classify(summary)
+    sample = observed.get("inflightNativeWaitSample", [])
+    if (len(sample) != 1 or sample[0].get("rowCount") != 1 or not all(sample[0].get(key) is True for key in (
+            "nativeBlockedState", "capturedBlockerMatches", "otherSession", "selectStatement",
+            "onlyRealmTable", "singlePrimaryKeyPredicate", "onlyForUpdateAndExactRealmBind"))):
+        return "INPUT_OR_FIXTURE_ERROR"
     if not all(observed.get(k) is True for k in WRITER_FACTS):
         return "INPUT_OR_FIXTURE_ERROR"
     phases = ("ENTERED", "BLOCKED", "SMTP_RETURNED", "COMMITTED")

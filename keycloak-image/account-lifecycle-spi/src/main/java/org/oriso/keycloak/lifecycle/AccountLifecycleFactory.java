@@ -9,7 +9,9 @@ import org.keycloak.services.resource.*;
 public final class AccountLifecycleFactory implements RealmResourceProviderFactory {
   private LifecycleAuthorization authorization;
   private Map<String, Set<String>> groups;
+  private static final java.util.logging.Logger LOG = java.util.logging.Logger.getLogger(AccountLifecycleFactory.class.getName());
   private GeneralPolicy humanPolicy;
+  private volatile GeneralPolicy readyHumanPolicy;
 
   public void init(Config.Scope scope) {
     String enabled = System.getenv("ORISO_ACCOUNT_LIFECYCLE_ENABLED");
@@ -79,7 +81,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   RealmResourceProvider createMaintenance(KeycloakSession session) {
     return authorization == null
         ? null
-        : new AccountMaintenanceResource(session, authorization, groups, humanPolicy);
+        : new AccountMaintenanceResource(session, authorization, groups, () -> checkedHumanPolicy(session));
   }
 
   public String getId() {
@@ -89,21 +91,44 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   public void postInit(KeycloakSessionFactory factory) {
     if (humanPolicy == null) return;
     factory.register(event -> {
-      if (event instanceof org.keycloak.models.utils.PostMigrationEvent)
+      if (!(event instanceof org.keycloak.models.utils.PostMigrationEvent)) return;
+      readyHumanPolicy = null;
+      var committed = new java.util.concurrent.atomic.AtomicBoolean();
+      try {
         org.keycloak.models.utils.KeycloakModelUtils.runJobInTransaction(factory, session -> {
+          session.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
+            protected void commitImpl() { committed.set(true); }
+            protected void rollbackImpl() { committed.set(false); }
+          });
           var realm = session.realms().getRealm(humanPolicy.nativePolicy.realmId);
           if (realm == null) throw new IllegalStateException("Ordinary human native realm is missing");
           session.getContext().setRealm(realm);
           humanPolicy.validateInstallation(session);
         });
+      } catch (RuntimeException unavailable) {
+        LOG.warning("Ordinary human operations unavailable: native binding validation failed");
+        return;
+      }
+      if (committed.get()) readyHumanPolicy = humanPolicy;
     });
+  }
+
+  private GeneralPolicy checkedHumanPolicy(KeycloakSession session) {
+    if (humanPolicy == null) throw new jakarta.ws.rs.ForbiddenException();
+    var ready = readyHumanPolicy;
+    if (ready == null) {
+      session.getContext().getHttpResponse().setHeader("Cache-Control", "no-store");
+      throw new jakarta.ws.rs.ServiceUnavailableException(jakarta.ws.rs.core.Response.status(503)
+          .header("Cache-Control", "no-store").build());
+    }
+    return ready;
   }
 
   jakarta.ws.rs.core.Response readOtpSelf(KeycloakSession session, String username,
       String targetHeader, String proofHeader, String humanHeader,
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> read) {
     if (authorization == null) LifecycleJson.deny();
-    return ScopedOtpAccess.checkedSelfRead(session, authorization, groups, humanPolicy,
+    return ScopedOtpAccess.checkedSelfRead(session, authorization, groups, this::checkedHumanPolicy,
         username, targetHeader, proofHeader, humanHeader, read);
   }
 
@@ -119,7 +144,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
       byte[] raw, String proofHeader, String humanHeader,
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> setup) {
     if (authorization == null) LifecycleJson.deny();
-    return ScopedOtpAccess.checkedSelfMutation(session, authorization, groups, humanPolicy,
+    return ScopedOtpAccess.checkedSelfMutation(session, authorization, groups, this::checkedHumanPolicy,
         "otp.app-setup", "PUT", username, raw, proofHeader, humanHeader, setup);
   }
 
@@ -127,7 +152,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
       byte[] raw, String proofHeader, String humanHeader,
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> delete) {
     if (authorization == null) LifecycleJson.deny();
-    return ScopedOtpAccess.checkedSelfMutation(session, authorization, groups, humanPolicy,
+    return ScopedOtpAccess.checkedSelfMutation(session, authorization, groups, this::checkedHumanPolicy,
         "otp.delete", "DELETE", username, raw, proofHeader, humanHeader, delete);
   }
 
@@ -135,7 +160,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
       byte[] raw, String proofHeader, String humanHeader,
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> finish) {
     if (authorization == null) LifecycleJson.deny();
-    return ScopedOtpAccess.checkedSelfMutation(session, authorization, groups, humanPolicy,
+    return ScopedOtpAccess.checkedSelfMutation(session, authorization, groups, this::checkedHumanPolicy,
         "otp.email-finish", "POST", username, raw, proofHeader, humanHeader, finish);
   }
 
@@ -144,7 +169,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> prepare,
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> send) {
     if (authorization == null) LifecycleJson.deny();
-    return ScopedOtpAccess.checkedSelfEmailStart(session, authorization, groups, humanPolicy,
+    return ScopedOtpAccess.checkedSelfEmailStart(session, authorization, groups, this::checkedHumanPolicy,
         username, raw, proofHeader, humanHeader, prepare, send);
   }
 

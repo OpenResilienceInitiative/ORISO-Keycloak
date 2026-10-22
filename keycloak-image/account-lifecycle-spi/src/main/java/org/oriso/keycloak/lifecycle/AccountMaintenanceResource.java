@@ -22,13 +22,13 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   private final KeycloakSession session;
   private final LifecycleAuthorization auth;
   private final MaintenanceTarget targets;
-  private final GeneralPolicy humanPolicy;
+  private final Supplier<GeneralPolicy> humanPolicies;
 
   AccountMaintenanceResource(KeycloakSession session, LifecycleAuthorization auth,
-      Map<String, Set<String>> mappings, GeneralPolicy humanPolicy) {
+      Map<String, Set<String>> mappings, Supplier<GeneralPolicy> humanPolicies) {
     this.session = session;
     this.auth = auth;
-    this.humanPolicy = humanPolicy;
+    this.humanPolicies = humanPolicies;
     this.targets = new MaintenanceTarget(session, auth, mappings);
   }
 
@@ -63,6 +63,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "account.read", "POST",
           "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("read", account, body);
+      var humanPolicy = "SELF".equals(request.target().path("origin").path("kind").asText())
+          ? humanPolicies.get() : null;
       return Response.ok(targets.read(request, humanPolicy, rawHumanBearer)).header("Cache-Control", "no-store").build();
     });
   }
@@ -179,7 +181,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse(command, account, body);
-      if (humanPolicy == null || !"SELF".equals(request.target().path("origin").path("kind").asText())) deny();
+      if (!"SELF".equals(request.target().path("origin").path("kind").asText())) deny();
+      var humanPolicy = humanPolicies.get();
       var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
       var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
       if (lockedRealm == null) deny();

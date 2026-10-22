@@ -9,6 +9,11 @@ from run_protected_otp_writer import classify_writer, WRITER_FACTS
 class WriterControls(unittest.TestCase):
     def valid(self):
         facts = dict.fromkeys(WRITER_FACTS, True)
+        facts["inflightNativeWaitSample"] = [dict(schema=1, rowCount=1,
+            nativeBlockedState=True, capturedBlockerMatches=True, otherSession=True,
+            realmTable=True, forUpdate=True, realmParameterSuffix=True, exactOriginalGrammar=False,
+            selectStatement=True, onlyRealmTable=True, singlePrimaryKeyPredicate=True,
+            onlyForUpdateAndExactRealmBind=True)]
         facts["inflightWriterEvents"] = []
         for phase in ("ENTERED", "BLOCKED", "SMTP_RETURNED", "COMMITTED"):
             facts["inflightWriterEvents"].append(dict(schema=1, phase=phase,
@@ -35,6 +40,17 @@ class WriterControls(unittest.TestCase):
                 for row in bad["readinessObservation"]["inflightWriterEvents"]: row[key] = False
                 self.assertEqual("INPUT_OR_FIXTURE_ERROR", classify_writer(bad))
             bad = self.valid(); bad["readinessObservation"]["inflightWriterEvents"][0]["observerFailed"] = True
+            self.assertEqual("INPUT_OR_FIXTURE_ERROR", classify_writer(bad))
+
+    def test_semantic_wait_selector_requires_every_current_native_component(self):
+        with patch("run_protected_otp_writer.classify", return_value="GREEN"):
+            for key in ("nativeBlockedState", "capturedBlockerMatches", "otherSession", "selectStatement",
+                        "onlyRealmTable", "singlePrimaryKeyPredicate", "onlyForUpdateAndExactRealmBind"):
+                bad = self.valid(); bad["readinessObservation"]["inflightNativeWaitSample"][0][key] = False
+                self.assertEqual("INPUT_OR_FIXTURE_ERROR", classify_writer(bad))
+            bad = self.valid(); bad["readinessObservation"]["inflightNativeWaitSample"][0]["rowCount"] = 2
+            self.assertEqual("INPUT_OR_FIXTURE_ERROR", classify_writer(bad))
+            bad = self.valid(); bad["readinessObservation"]["inflightNativeWaitSample"] = []
             self.assertEqual("INPUT_OR_FIXTURE_ERROR", classify_writer(bad))
 
     def test_out_of_order_or_uncommitted_smtp_phases_are_fixture_failure(self):
