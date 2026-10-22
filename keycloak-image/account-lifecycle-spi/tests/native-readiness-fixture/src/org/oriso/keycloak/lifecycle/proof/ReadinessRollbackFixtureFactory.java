@@ -1,9 +1,6 @@
 package org.oriso.keycloak.lifecycle.proof;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.core.MediaType;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -39,6 +36,7 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
   private static final String VALIDATION_FAILURE =
       "Protected invitation provider unavailable: native binding validation failed";
   private final AtomicBoolean workerStarted = new AtomicBoolean();
+  private final AtomicBoolean bootObserved = new AtomicBoolean();
   private volatile boolean enabled, nativeProbe, captured, sessionCreated, rollbackOnly;
   private volatile boolean began, rolledBack, committed, returned, warningsAbsent, complete, failed;
   private volatile String stage = "INERT";
@@ -58,12 +56,15 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
       throw new IllegalStateException("Invalid proof configuration");
     }
     enabled = true;
+    stage = "ARMED";
   }
 
   public void postInit(KeycloakSessionFactory factory) {
-    if (!enabled) return;
     factory.register(event -> {
-      if (event instanceof PostMigrationEvent && workerStarted.compareAndSet(false, true)) {
+      if (event instanceof PostMigrationEvent && bootObserved.compareAndSet(false, true)) {
+        emitSnapshot();
+        if (!enabled) return;
+        if (!workerStarted.compareAndSet(false, true)) throw unsupported();
         worker = new Thread(() -> exercise(factory), "oriso-proof-readiness-rollback");
         worker.setDaemon(true);
         worker.start();
@@ -124,6 +125,7 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
       failed = true;
     } finally {
       complete = true;
+      emitSnapshot();
     }
   }
 
@@ -205,20 +207,16 @@ public final class ReadinessRollbackFixtureFactory implements RealmResourceProvi
     return value;
   }
 
-  public RealmResourceProvider create(KeycloakSession ignored) {
-    return new RealmResourceProvider() {
-      public Object getResource() { return new StatusResource(); }
-      public void close() {}
-    };
+  private void emitSnapshot() {
+    try {
+      // Only these closed static/boolean proof facts reach the process record.
+      System.out.println("ORISO_PROOF_READINESS_V1 " + new ObjectMapper().writeValueAsString(snapshot()));
+    } catch (com.fasterxml.jackson.core.JsonProcessingException failure) {
+      throw new IllegalStateException("Proof observation encoding failed");
+    }
   }
 
-  @jakarta.ws.rs.ext.Provider
-  @jakarta.enterprise.inject.Vetoed
-  public final class StatusResource {
-    private StatusResource() {}
-    @GET @Produces(MediaType.APPLICATION_JSON)
-    public Map<String, Object> status() { return snapshot(); }
-  }
+  public RealmResourceProvider create(KeycloakSession ignored) { return null; }
 
   public String getId() { return "oriso-proof-readiness"; }
   public void close() {

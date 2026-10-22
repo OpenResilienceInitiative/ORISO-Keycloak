@@ -1,6 +1,7 @@
 """A real rollback-only native validation cannot publish protected readiness."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -40,12 +41,22 @@ STATUS_FIELDS = {
     "stage",
 }
 TRUE_STATUS_FIELDS = STATUS_FIELDS - {"observerCommitted", "workerFailed", "stage"}
+PROCESS_PREFIX = "ORISO_PROOF_READINESS_V1 "
+
+
+def inert_record():
+    return {**{key: False for key in STATUS_FIELDS - {"stage"}}, "stage": "INERT"}
+
+
+def armed_record():
+    return {**inert_record(), "enabled": True, "stage": "ARMED"}
 
 
 class RollbackFixture(NativeFixture):
     @classmethod
     def setUpClass(cls):
         cls.startup_failure = {}
+        cls.inert_boot_records = []
         cls.companion_path = Path(os.environ["LIFECYCLE_PROOF_COMPANION_JAR"]).resolve()
         if not cls.companion_path.is_file():
             raise AssertionError("Actual separately compiled companion JAR required")
@@ -56,6 +67,10 @@ class RollbackFixture(NativeFixture):
     def ready(cls):
         try:
             super().ready()
+            records = companion_process_records(cls)
+            if records != [inert_record()]:
+                raise AssertionError("Exactly one inert proof boot record required")
+            cls.inert_boot_records.append(records[0])
         except AssertionError:
             # Collect before owned cleanup, retaining no raw native message or value.
             try:
@@ -174,14 +189,9 @@ class RollbackReadiness(unittest.TestCase):
         configuration = config_values(baseline)["ORISO_PROTECTED_INVITATIONS_CONFIG"]
         self.inspect_companion(baseline, configuration)
         self.assertNotIn("ORISO_PROOF_READINESS_ROLLBACK_ONLY", config_values(baseline))
-        status, inert = call(
-            helper.base, "GET", "/realms/" + REALM + "/oriso-proof-readiness"
+        self.assertEqual(
+            [inert_record(), inert_record()], RollbackFixture.inert_boot_records
         )
-        o["inertCompanionHttpStatus"] = status
-        self.assertEqual(200, status)
-        self.assertEqual(STATUS_FIELDS, set(inert))
-        self.assertFalse(inert["enabled"])
-        self.assertFalse(inert["workerStarted"])
         o["companionInertDuringActualHumanPositive"] = True
         o["installedConfigurationSHA256"] = hashlib.sha256(
             configuration.encode()
@@ -229,20 +239,18 @@ class RollbackReadiness(unittest.TestCase):
         self.assertEqual(1, len(set(RollbackFixture.native_image_ids)))
         o["sameImageMainCompanionJarConfigVolumeAndCapsVerified"] = True
         deadline = min(third_deadline, time.monotonic() + 60)
+        observed = None
         while time.monotonic() < deadline:
             require_active("native-rollback-callback-observation")
-            status, observed = call(
-                helper.base, "GET", "/realms/" + REALM + "/oriso-proof-readiness"
-            )
-            o["activeCompanionHttpStatus"] = status
-            self.assertEqual(200, status)
-            self.assertEqual(STATUS_FIELDS, set(observed))
-            self.assertTrue(
-                all(isinstance(observed[k], bool) for k in STATUS_FIELDS - {"stage"})
-            )
-            if observed["workerComplete"]:
+            records = companion_process_records(RollbackFixture)
+            self.assertIn(len(records), (1, 2))
+            self.assertEqual(armed_record(), records[0])
+            o["actualActiveBootRecord"] = records[0]
+            if len(records) == 2:
+                observed = records[1]
                 break
             time.sleep(0.2)
+        self.assertIsNotNone(observed)
         self.assertEqual("COMPLETE", observed["stage"])
         self.assertTrue(all(observed[k] is True for k in TRUE_STATUS_FIELDS))
         self.assertFalse(observed["workerFailed"])
@@ -318,10 +326,7 @@ def companion_evidence():
         if any(
             not n.startswith("org/oriso/keycloak/lifecycle/proof/")
             and n
-            not in {
-                "META-INF/beans.xml",
-                "META-INF/services/org.keycloak.services.resource.RealmResourceProviderFactory",
-            }
+            != "META-INF/services/org.keycloak.services.resource.RealmResourceProviderFactory"
             for n in names
         ):
             raise AssertionError("Unexpected proof companion archive entry")
@@ -338,7 +343,57 @@ def companion_evidence():
         "companionJarEntriesSHA256": entries,
         "companionAbsentFromMainJar": True,
         "startupFailureObservation": getattr(RollbackFixture, "startup_failure", {}),
+        "companionInertBootRecords": getattr(RollbackFixture, "inert_boot_records", []),
     }
+
+
+def companion_process_records(fixture):
+    inspected = inspect_owned(fixture)
+    if inspected["Config"]["Labels"].get("oriso-protected-receiver-test") != "true":
+        raise AssertionError("Owned native process observation label required")
+    output = subprocess.run(
+        ["docker", "logs", "--tail", "500", fixture.name],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    return parse_process_records(output.stdout + output.stderr)
+
+
+def parse_process_records(raw):
+    def closed_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate proof observation field")
+            result[key] = value
+        return result
+
+    records = []
+    for line in raw.splitlines():
+        if not line.startswith(PROCESS_PREFIX):
+            continue
+        value = json.loads(line[len(PROCESS_PREFIX) :], object_pairs_hook=closed_object)
+        if (
+            not isinstance(value, dict)
+            or set(value) != STATUS_FIELDS
+            or any(type(value[k]) is not bool for k in STATUS_FIELDS - {"stage"})
+            or value["stage"]
+            not in {
+                "INERT",
+                "ARMED",
+                "COMPLETE",
+                "NATIVE_AUTH_PROBE_UNAVAILABLE",
+                "WORKER_INTERRUPTED",
+                "WORKER_FAILED",
+            }
+        ):
+            raise ValueError("Invalid closed native process observation")
+        records.append(value)
+    if len(records) > 2:
+        raise ValueError("Duplicate native proof boot or completion observation")
+    return records
 
 
 def startup_failure_observation(fixture):
@@ -428,8 +483,8 @@ def classify_rollback(summary):
         and len(set(images)) == 1
         and all(o.get(k) is True for k in required)
         and o.get("validBindingApproveStatus") == 201
-        and o.get("inertCompanionHttpStatus") == 200
-        and o.get("activeCompanionHttpStatus") == 200
+        and summary.get("companionInertBootRecords") == [inert_record(), inert_record()]
+        and o.get("actualActiveBootRecord") == armed_record()
         and summary.get("companionJarStable") is True
         and summary.get("companionAbsentFromMainJar") is True
         and 0 < o.get("thirdBootElapsedSeconds", 181) < 180
