@@ -178,7 +178,8 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         phase = {"otp.app-setup": "scoped-otp-app-setup-http",
                  "otp.delete": "scoped-otp-delete-http",
                  "otp.email-finish": "scoped-otp-email-finish-http",
-                 "otp.email-start": "scoped-otp-email-start-http"}[operation]
+                 "otp.email-start": "scoped-otp-email-start-http",
+                 "otp.email-start-outcome": "scoped-otp-email-outcome-http"}[operation]
         self.phase(phase, status=status, expected_status=expected)
         return status, json.loads(raw) if raw else None
 
@@ -323,7 +324,7 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.phase("scoped-otp-linked-email-finish-effect", native_email_and_verified=True,
                    exact_sent_workflow_receipt=True, one_smtp=True, exact_retry_no_reapplication=True)
 
-    def linked_finish_fixture(self):
+    def linked_finish_fixture(self, deadline_seconds=120):
         from email import policy as email_policy
         from email.parser import BytesParser
         import re
@@ -336,6 +337,7 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         before_mail = len(self.mail.messages)
         destination = "linked-controls-" + uuid.uuid4().hex + "@oriso.org"
         start = self.email_start_body(human, start_target, destination)
+        start["authorityValidUntil"] = int(time.time()) + deadline_seconds
         self.assertEqual(202, self.scoped_mutation(human, start, "otp.email-start", "PUT", "send-verification-mail", 202)[0])
         status, sent = self.scoped_mutation(human, start, "otp.email-start", "PUT", "send-verification-mail", 200)
         self.assertEqual(200, status)
@@ -358,6 +360,8 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         finish = {"target": target, "operationId": str(uuid.uuid4()), "expectedState": current["state"],
                   "emailStartOperationId": start["operationId"],
                   "otp": {"initialCode": next(iter(codes)), "secret": None, "email": None}}
+        self._last_delivered_start = start
+        self._last_sent_result = sent
         return human, finish, destination, original, before_mail
 
     def test_linked_email_invalid_attempt_then_new_intent_activates_same_owned_incarnation(self):
@@ -430,6 +434,42 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual(before_mail + 1, len(self.mail.messages))
         self.phase("scoped-otp-linked-incarnation-refusal", exact_native_drift_proven=True,
                    fresh_cas=True, no_adoption=True, no_attempt=True, no_profile_effect=True)
+
+    def test_expired_sent_email_outcome_uses_fresh_authority_without_resend_or_expiry_extension(self):
+        human, finish, destination, original, before_mail = self.linked_finish_fixture(15)
+        start = self._last_delivered_start
+        original_result = self._last_sent_result
+        remaining = start["authorityValidUntil"] + 1 - time.time()
+        self.assertLessEqual(remaining, 17)
+        time.sleep(max(0, remaining))
+        self.assertGreater(int(time.time()), start["authorityValidUntil"])
+        fresh_human = self.human()
+        self.phase("scoped-otp-expired-sent-outcome-preconditions", actual_committed_sent=True,
+                   original_deadline_elapsed=True, fresh_native_human=True,
+                   canonical_admin=True, stock_native_denied=True, one_actual_smtp=True)
+        status, recovered = self.scoped_mutation(fresh_human, start, "otp.email-start-outcome", "POST", "email-delivery-outcome", 200)
+        self.assertEqual(200, status)
+        self.assertEqual(original_result, recovered)
+        encoded, signature = recovered["receipt"].split(".")
+        self.assertTrue(hmac.compare_digest(hmac.new(CONTEXT_KEY, ("otp-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest(), signature))
+        facts = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual(start["authorityValidUntil"], facts["authorityValidUntil"])
+        self.assertEqual(start["operationId"], facts["operationId"])
+        self.assertEqual("SENT", facts["deliveryState"])
+        self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], facts["ownerSubject"])
+        missing = json.loads(json.dumps(start)); missing["operationId"] = str(uuid.uuid4())
+        self.assertEqual(409, self.scoped_mutation(fresh_human, missing, "otp.email-start-outcome", "POST", "email-delivery-outcome", 409)[0])
+        changed = json.loads(json.dumps(start)); changed["otp"]["email"] = "unowned@fixture.invalid"
+        self.assertEqual(409, self.scoped_mutation(fresh_human, changed, "otp.email-start-outcome", "POST", "email-delivery-outcome", 409)[0])
+        self.assertEqual(401, self.scoped_mutation(None, start, "otp.email-start-outcome", "POST", "email-delivery-outcome", 401)[0])
+        self.assertEqual(original, self.admin("GET", "/users/" + self.account_id).get("email"))
+        mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(mail)); self.assertFalse(json.loads(mail[0]["credentialData"])["active"])
+        self.assertEqual(0, json.loads(mail[0]["credentialData"])["failedVerifications"])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        self.phase("scoped-otp-expired-sent-outcome-effect", original_mac_deadline=True,
+                   exact_saved_outcome=True, missing_and_changed_refused=True, current_human_required=True,
+                   no_smtp=True, no_profile_effect=True, no_credential_effect=True)
 
     def email_start_body(self, human, target, email):
         status, current = self.invoke("read", {"target": target}, human, 200)
