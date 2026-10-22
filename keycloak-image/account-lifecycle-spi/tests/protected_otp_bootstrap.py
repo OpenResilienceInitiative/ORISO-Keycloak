@@ -62,6 +62,8 @@ REQUIRED = (
     "stockNativeAdminReadDenied",
     "bootstrapDeadlineOnlyReducesApprovalAndMachine",
     "nativeAccountAndCredentialsUnchangedByRead",
+    "originalMachineExpiryElapsedBeforeApp",
+    "freshCanonicalAdminVerifiedForApp",
 )
 
 
@@ -162,6 +164,10 @@ class BootstrapRead(unittest.TestCase):
         self.assertEqual(["/pending-provisioning"], [row["path"] for row in
             helper.admin("GET", "/users/" + account + "/groups")])
         observed["disabledPendingNativeProfileAndNoOtpVerified"] = True
+        # Actual native client lifetime, already supported by the retained native expiry fixture.
+        admin_client = helper.admin("GET", "/clients?clientId=backend-account-admin")[0]
+        admin_client.setdefault("attributes", {})["access.token.lifespan"] = "20"
+        helper.admin("PUT", "/clients/" + admin_client["id"], admin_client)
         bearer = helper.token("ACCOUNT_ADMIN")
         encoded = bearer.split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
@@ -254,6 +260,23 @@ class BootstrapRead(unittest.TestCase):
             "authorityValidUntil": result["authorityValidUntil"], "state": "PREPARED",
         }, receipt_value)
         observed["preparedReceiptMacVerified"] = True
+        self.assertEqual(int(claims["exp"]), deadline)
+        remaining = deadline - int(time.time())
+        self.assertGreaterEqual(remaining, 1)
+        self.assertLessEqual(remaining, 20)
+        observed["originalPrepareRemainingSeconds"] = remaining
+        time.sleep(remaining + 2)
+        self.assertGreater(int(time.time()), int(claims["exp"]))
+        observed["originalMachineExpiryElapsedBeforeApp"] = True
+        bearer = helper.token("ACCOUNT_ADMIN")
+        fresh_encoded = bearer.split(".")[1]
+        fresh_claims = json.loads(base64.urlsafe_b64decode(
+            fresh_encoded + "=" * (-len(fresh_encoded) % 4)))
+        for name in ("sub", "azp", "aud", "realm_access"):
+            self.assertEqual(claims[name], fresh_claims[name])
+        self.assertGreater(int(fresh_claims["exp"]), int(time.time()))
+        self.assertGreater(int(fresh_claims["iat"]), int(claims["iat"]))
+        observed["freshCanonicalAdminVerifiedForApp"] = True
         secret = result["otpInfo"]["otpSecret"]
         digest = hmac.new(secret.encode(), struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
         offset = digest[-1] & 15
@@ -272,7 +295,8 @@ class BootstrapRead(unittest.TestCase):
             now = int(time.time())
             claims = {**proof, "operation": "otp.bootstrap-app-setup", "method": "PUT",
                 "payloadDigest": mac("payload", materialized), "jti": str(uuid.uuid4()),
-                "nonce": uuid.uuid4().hex, "iat": now, "exp": min(now + 60, deadline)}
+                "nonce": uuid.uuid4().hex, "iat": now,
+                "exp": min(now + 60, int(fresh_claims["exp"]))}
             payload = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
             signature = base64.urlsafe_b64encode(hmac.new(CONTEXT_KEY,
                 ("proof\n" + payload).encode(), hashlib.sha256).digest()).decode().rstrip("=")
