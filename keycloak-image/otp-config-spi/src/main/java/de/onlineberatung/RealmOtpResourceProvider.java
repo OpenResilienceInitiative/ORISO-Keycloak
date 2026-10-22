@@ -123,7 +123,8 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
       return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfAppSetup(
           session, username, raw,
           headers.getHeaderString("X-ORISO-Task-Context"),
-          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          headers.getHeaderString("X-ORISO-OTP-Bootstrap"), target -> {
             var dto = new OtpSetupDTO();
             dto.setInitialCode(target.initialCode());
             dto.setSecret(target.secret());

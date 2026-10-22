@@ -36,6 +36,15 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, setup));
   }
 
+  public static Response requireSelfAppSetup(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> setup) {
+    if (bootstrapReceipt == null) return requireSelfAppSetup(session, exactPathUsername, raw,
+        taskContextHeader, fullImmediateHumanHeader, setup);
+    return guarded(session, () -> configuration(session).appSetupOtpProtected(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, bootstrapReceipt, setup));
+  }
+
   public static Response requireSelfDelete(KeycloakSession session, String exactPathUsername,
       byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
       Function<VerifiedOtpTarget, Response> delete) {
@@ -116,6 +125,27 @@ public final class ScopedOtpAccess {
     var current = new MaintenanceTarget(session, authorization, mappings)
         .readOtpSelf(request, policy, humanHeader);
     return invoke(session, authorization, username, account, current, null, read).response();
+  }
+
+  static Response checkedProtectedApp(KeycloakSession session, LifecycleAuthorization authorization,
+      String username, byte[] raw, String proofHeader, String humanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> setup) {
+    var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
+    if (humanHeader != null || username == null || username.isBlank() || username.length() > 255
+        || username.chars().anyMatch(c -> c < 32 || c == 127)) deny();
+    var body = parse(raw);
+    String account = uuid(text(body.path("target"), "accountId", 36, false));
+    var request = ScopedOtpRequest.parse("otp.app-setup", account, body);
+    var materialized = body.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("username", username);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("bootstrapReceipt", bootstrapReceipt);
+    authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.bootstrap-app-setup", "PUT",
+        "realm/" + session.getContext().getRealm().getId() + "/account/" + account, materialized);
+    return ProtectedOtpBootstrap.app(session, authorization, machine, username, request, materialized,
+        bootstrapReceipt, user -> {
+          var projection = JSON.createObjectNode(); projection.put("username", user.getUsername());
+          return invoke(session, authorization, username, account, projection, request, setup).response();
+        });
   }
 
   static Response checkedSelfMutation(KeycloakSession session, LifecycleAuthorization authorization,
