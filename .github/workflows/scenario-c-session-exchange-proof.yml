@@ -2,7 +2,9 @@ name: Scenario C finite session exchange tracer
 
 on:
   push:
-    branches: [codex/367-c-s1-keycloak-20261022]
+    branches: [codex/367-c-s1-keycloak-20261022, dev]
+  pull_request:
+    branches: [dev]
 
 permissions:
   contents: read
@@ -32,7 +34,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: OpenResilienceInitiative/ORISO-UserService
-          ref: 41c13ba2996b8fd085865c00d9aba3885a3ffbdb
+          ref: 525c1bc77820bb2c8d7a68989695d0efe5df79c0
           path: subject
           fetch-depth: 0
           persist-credentials: false
@@ -68,7 +70,7 @@ jobs:
           python3 host/scripts/ci/session-exchange-proof.py "$S1_ROLE" \
             --source host --source-ref "$GITHUB_SHA" \
             --support support --support-ref a1a1eb1ce51728e0ad60f7f07660f8c87b96815b \
-            --user subject --user-ref 41c13ba2996b8fd085865c00d9aba3885a3ffbdb \
+            --user subject --user-ref 525c1bc77820bb2c8d7a68989695d0efe5df79c0 \
             --evidence "$RUNNER_TEMP/s1-finite-proof-${S1_ROLE}"
       - name: Retain only bounded sanitized source and outcome receipts
         if: always()
