@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Finite two-boot cleanup-status public proof using the existing owned runner."""
-from protected_binding_readiness import NativeFixture
-from protected_cleanup_status_readiness import CleanupStatusReadiness, classify
+from protected_cleanup_status_readiness import CleanupStatusReadiness, NativeFixture, classify, companion_evidence
 from run_protected_readiness import main
 
 if __name__ == "__main__":
@@ -12,5 +11,5 @@ if __name__ == "__main__":
         case="independent-cleanup-status",
         suite_name="protected-cleanup-status",
         classify_result=classify,
-        extension_evidence=lambda: {"expectedNativeBoots": 2},
+        extension_evidence=lambda: companion_evidence(NativeFixture),
     ))

@@ -268,19 +268,19 @@ class AuthLockReadiness(unittest.TestCase):
         self.assertTrue(all(r["completedBeforeRelease"] and not r["matchingBlockedRequest"] for r in observations))
 
 
-def companion_evidence():
+def companion_evidence(fixture=AuthLockFixture):
     result = {"expectedNativeBoots": 2}
-    if not hasattr(AuthLockFixture, "companion_path"):
+    if not hasattr(fixture, "companion_path"):
         return result
-    jar = AuthLockFixture.companion_path
+    jar = fixture.companion_path
     with zipfile.ZipFile(jar) as archive:
         entries = {n: hashlib.sha256(archive.read(n)).hexdigest() for n in archive.namelist()}
         if any(not n.startswith("org/oriso/keycloak/lifecycle/proof/") and n != "META-INF/services/org.keycloak.services.resource.RealmResourceProviderFactory" for n in entries):
             raise AssertionError("Unexpected companion archive entry")
-    with zipfile.ZipFile(AuthLockFixture.jar_path) as archive:
+    with zipfile.ZipFile(fixture.jar_path) as archive:
         if any(n.startswith("org/oriso/keycloak/lifecycle/proof/") for n in archive.namelist()):
             raise AssertionError("Companion appeared in product JAR")
-    result.update(companionJarSHA256=AuthLockFixture.companion_sha256, companionJarStable=digest(jar) == AuthLockFixture.companion_sha256,
+    result.update(companionJarSHA256=fixture.companion_sha256, companionJarStable=digest(jar) == fixture.companion_sha256,
         companionAbsentFromMainJar=True, companionJarEntriesSHA256=entries,
-        ownedControlDirectoryRemoved=not AuthLockFixture.control.exists(), companionBootPhases=AuthLockFixture.proof_boot_phases)
+        ownedControlDirectoryRemoved=not fixture.control.exists(), companionBootPhases=fixture.proof_boot_phases)
     return result

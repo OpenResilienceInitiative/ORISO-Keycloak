@@ -22,7 +22,9 @@ class CleanupStatusControls(unittest.TestCase):
         value = self.summary(200, 0)
         self.assertNotEqual("GREEN", classify(value))
         value["readinessObservation"].update(exactIndependentTerminalAndOriginalRestrictionVerified=True,
-                                            savedReplayAndAuthenticationDenialsVerified=True)
+                                            savedReplayAndAuthenticationDenialsVerified=True,
+                                            badProofDeniedBeforeActualHeldRealmRelease=True,
+                                            actualAbsentRecoveryRequiresCompensateBeforeAttestation=True)
         self.assertEqual("GREEN", classify(value))
 
     def test_zero_cases_or_ambiguous_transport_never_counts_as_red(self):
