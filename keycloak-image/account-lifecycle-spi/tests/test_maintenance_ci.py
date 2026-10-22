@@ -10,6 +10,13 @@ from run_maintenance import EXPECTED_UNITS, missing_native, sanitize_units, sour
 
 
 class MaintenanceEvidenceGate(unittest.TestCase):
+    def test_existing_consultant_profile_is_the_default_native_human_fixture(self):
+        from maintenance_human_fixture import HumanMaintenanceFixture
+        self.assertEqual(
+            {"kind": "CONSULTANT", "group": "consultant", "roles": ["consultant", "group-chat-consultant"], "id": "consultant-v1"},
+            HumanMaintenanceFixture.reviewed_human_profile(),
+        )
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

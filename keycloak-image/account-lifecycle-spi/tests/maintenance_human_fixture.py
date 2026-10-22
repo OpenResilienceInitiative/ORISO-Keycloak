@@ -39,6 +39,14 @@ class HumanMaintenanceFixture(LifecycleFixture):
         return ["account.read", "account.locale"]
 
     @classmethod
+    def reviewed_human_profile(cls):
+        return {
+            "kind": "CONSULTANT", "group": "consultant",
+            "roles": ["consultant", "group-chat-consultant"],
+            "id": "consultant-v1",
+        }
+
+    @classmethod
     def setUpClass(cls):
         if platform.system() != "Linux" or os.environ.get("GITHUB_ACTIONS") != "true":
             raise AssertionError(
@@ -121,7 +129,10 @@ class HumanMaintenanceFixture(LifecycleFixture):
                 }
             )
         helper.admin("PUT", "/users/profile", profile)
-        attempt, create = str(uuid.uuid4()), helper.creation()
+        human_profile = cls.reviewed_human_profile()
+        attempt, create = str(uuid.uuid4()), helper.creation(
+            kind=human_profile["kind"], group=human_profile["group"]
+        )
         status, opened = helper.request("create", attempt, create)
         helper.assertEqual(201, status)
         status, committed = helper.request(
@@ -193,11 +204,11 @@ class HumanMaintenanceFixture(LifecycleFixture):
         ]
         roles = [
             helper.admin("GET", "/roles/" + name)
-            for name in ["consultant", "group-chat-consultant"]
+            for name in human_profile["roles"]
         ]
         helper.admin("POST", "/clients/" + client + "/scope-mappings/realm", roles)
         cls.group = helper.admin(
-            "GET", "/groups/" + helper.group_id("/human-roles/consultant")
+            "GET", "/groups/" + helper.group_id("/human-roles/" + human_profile["group"])
         )
         native = {
             "realmId": cls.realm_id,
@@ -217,12 +228,12 @@ class HumanMaintenanceFixture(LifecycleFixture):
             "native": native,
             "ordinaryProfiles": [
                 {
-                    "id": "consultant-v1",
+                    "id": human_profile["id"],
                     "version": 1,
                     "groupId": cls.group["id"],
-                    "groupPath": "/human-roles/consultant",
+                    "groupPath": "/human-roles/" + human_profile["group"],
                     "groupParentId": helper.group_id("/human-roles"),
-                    "realmRoles": ["consultant", "group-chat-consultant"],
+                    "realmRoles": human_profile["roles"],
                     "clientRoles": {},
                     "allowUnassignedTenant": False,
                     "selfOperations": cls.reviewed_self_operations(),
@@ -299,7 +310,7 @@ class HumanMaintenanceFixture(LifecycleFixture):
         self.assertEqual(CLIENT, claims["azp"])
         self.assertEqual("11", claims["tenantId"])
         self.assertEqual(
-            {"consultant", "group-chat-consultant"},
+            set(self.reviewed_human_profile()["roles"]),
             set(claims["realm_access"]["roles"]),
         )
         aud = claims["aud"]
@@ -311,7 +322,7 @@ class HumanMaintenanceFixture(LifecycleFixture):
             "GET", "/users/" + self.account_id + "/role-mappings/realm/composite"
         )
         self.assertEqual(
-            {"consultant", "group-chat-consultant"},
+            set(self.reviewed_human_profile()["roles"]),
             {role["name"] for role in current_roles},
         )
         groups = self.admin("GET", "/users/" + self.account_id + "/groups")
