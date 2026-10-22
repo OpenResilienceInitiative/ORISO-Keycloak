@@ -42,6 +42,7 @@ class PeerFixture(NativeFixture):
         other["id"] = OTHER_PROFILE
         configuration["profiles"].append(other)
         configuration["bindings"][0]["protectedProfileIds"].extend([PROFILE, OTHER_PROFILE])
+        configuration["bindings"][0]["protectedProfileIds"].sort()
         configuration["peerDelegationPolicies"] = [
             {
                 "id": POLICY,
