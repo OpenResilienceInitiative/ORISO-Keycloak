@@ -18,6 +18,63 @@ import org.keycloak.models.jpa.entities.RealmEntity;
 final class ProtectedOtpBootstrap {
   private ProtectedOtpBootstrap() {}
 
+  /** Called only by the private protected compensation policy under its original provenance locks. */
+  static void reconcilePendingEmailForCompensation(KeycloakSession session, LifecycleAuthorization crypto,
+      AccountLifecycleAttempt attempt, ProtectedInvitationApproval approval) {
+    var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
+    if (!session.getTransactionManager().isActive() || !em.contains(attempt) || !em.contains(approval)) deny();
+    String id = "bootstrap:" + crypto.mac("otp-bootstrap-row/v1", JSON.valueToTree(attempt.id));
+    var bootstrap = em.find(ProtectedOtpBootstrapState.class, id, LockModeType.PESSIMISTIC_WRITE);
+    if (bootstrap == null) return;
+    em.refresh(bootstrap);
+    var realm = session.getContext().getRealm();
+    var binding = parse(attempt.scope).path("approvalBinding");
+    var claim = binding.path("acceptanceClaim");
+    if (!realm.getId().equals(attempt.realmId) || !realm.getId().equals(bootstrap.realmId)
+        || !realm.getId().equals(approval.realmId)
+        || !approval.approvalId.equals(bootstrap.approvalId)
+        || !approval.approvalId.equals(binding.path("approvalId").asText())
+        || !attempt.attemptId.equals(approval.boundAttemptId)
+        || !attempt.attemptId.equals(bootstrap.attemptId)
+        || !attempt.accountId.equals(bootstrap.accountId)
+        || !bootstrap.claimId.equals(claim.path("claimId").asText())
+        || !approval.workflowId.equals(claim.path("workflowId").asText())
+        || !approval.inviteId.equals(claim.path("inviteId").asText())
+        || approval.authorizationRevision != number(claim, "authorizationRevision", true)
+        || number(claim, "journalVersion", true) != 1
+        || !bootstrap.executionId.equals(attempt.createExecution)
+        || !"backend-account-admin".equals(bootstrap.ownerClient)
+        || !crypto.adminSubject.equals(bootstrap.ownerSubject)) conflict();
+    if (!"EMAIL_READY".equals(bootstrap.state)) return;
+    if (!"RECOVERY_CLAIMED".equals(attempt.state)
+        || !Set.of("BOUND", "CANCELLED", "EXPIRED").contains(approval.state)
+        || attempt.recoveryExpected == null || attempt.recoveryExpected < 0
+        || attempt.recoveryExpected == Long.MAX_VALUE
+        || attempt.recoveryExpected + 1 != attempt.generation
+        || attempt.recoveryReceipt == null || attempt.recoveryId == null
+        || !attempt.recoveryId.equals(attempt.executionId)
+        || attempt.recoveryId.equals(bootstrap.executionId)
+        || bootstrap.emailPendingFingerprint == null) conflict();
+    var receipt = JSON.createObjectNode();
+    receipt.put("v", 1); receipt.put("realmId", bootstrap.realmId);
+    receipt.put("approvalId", bootstrap.approvalId); receipt.put("attemptId", bootstrap.attemptId);
+    receipt.put("accountId", bootstrap.accountId); receipt.put("claimId", bootstrap.claimId);
+    receipt.put("executionId", bootstrap.executionId); receipt.put("bootstrapIncarnation", bootstrap.executionId);
+    receipt.put("ownerClient", bootstrap.ownerClient); receipt.put("ownerSubject", bootstrap.ownerSubject);
+    receipt.put("originDigest", bootstrap.originDigest); receipt.put("authorityValidUntil", bootstrap.authorityValidUntil);
+    receipt.put("state", "PREPARED");
+    if (!LifecycleAuthorization.equal(bootstrap.prepareReceipt,
+        crypto.receipt("otp-bootstrap-prepare/v1", receipt))) conflict();
+    var stored = em.find(org.keycloak.models.jpa.entities.UserEntity.class,
+        attempt.accountId, LockModeType.PESSIMISTIC_WRITE);
+    if (stored == null) return;
+    em.refresh(stored);
+    String current = crypto.mac("pending-profile", AccountLifecycleResource.lockedSnapshot(em, attempt.accountId));
+    if (!LifecycleAuthorization.equal(bootstrap.emailPendingFingerprint, current)) conflict();
+    // The unchanged core pending-account integrity check still runs before any deletion.
+    attempt.profileFingerprint = current;
+  }
+
   static Response prepare(KeycloakSession session, LifecycleAuthorization crypto,
       LifecycleAuthorization.CheckedMachine authenticatedMachine, String username, JsonNode target,
       Function<UserModel, Response> read) {

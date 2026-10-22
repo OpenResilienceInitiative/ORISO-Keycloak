@@ -22,9 +22,15 @@ public final class AuthLockFixtureFactory implements RealmResourceProviderFactor
   private final AtomicBoolean started = new AtomicBoolean();
   private String realmId, realmName;
   private Thread worker;
+  private int caseCount = 9;
 
   public void init(Config.Scope ignored) {
     if (!"true".equals(System.getenv("ORISO_PROTECTED_INVITATIONS_ENABLED"))) return;
+    String mode = System.getenv("ORISO_PROOF_AUTH_LOCK_CASE");
+    if (mode != null) {
+      if (!"CLEANUP_STATUS".equals(mode)) throw new IllegalStateException("Invalid fixed proof case");
+      caseCount = 1;
+    }
     try {
       var config = new ObjectMapper().readTree(System.getenv("ORISO_PROTECTED_INVITATIONS_CONFIG"));
       realmId = config.path("realmId").textValue();
@@ -48,14 +54,14 @@ public final class AuthLockFixtureFactory implements RealmResourceProviderFactor
   private void exercise(KeycloakSessionFactory factory) {
     try {
       long deadline = System.nanoTime() + 240_000_000_000L;
-      for (int index = 0; index < 9; index++) {
+      for (int index = 0; index < caseCount; index++) {
         while (!Files.isRegularFile(CONTROL.resolve(index + ".arm"))) {
           if (System.nanoTime() >= deadline) throw new IllegalStateException("Proof arm deadline");
           Thread.sleep(25);
         }
         hold(factory, index);
       }
-      emit(9, "COMPLETE", true, true, false, true, false);
+      emit(caseCount, "COMPLETE", true, true, false, true, false);
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       emit(-1, "FAILED", false, false, false, false, true);

@@ -40,6 +40,19 @@ class BootstrapClassifier(unittest.TestCase):
         observation["emailActualSmtpConfigured"] = False
         self.assertEqual("BEHAVIOR_FAILURE", classify(value))
 
+    def test_fenced_email_cleanup_red_requires_actual_cancel_recovery_and_old_write_refusal(self):
+        value = self.valid()
+        seen = value["readinessObservation"]
+        seen.update(otpPrepareStatus=200, emailPendingCreateOwnedReadAndPrepareVerified=True,
+            emailActualSmtpConfigured=True, emailCanonicalAdminAndStockDenialVerified=True,
+            emailNoCredentialOrMailBeforeStart=True, emailFinishActiveDisabledAndExactRetryVerified=True,
+            fencedEmailCancelStatus=200, fencedEmailRecoveryStatus=200,
+            fencedEmailTwoGenerationFenceVerified=True, fencedEmailOldStartStatus=409,
+            fencedEmailOldWriteAndSmtpUnchanged=True, fencedEmailCompensateStatus=409)
+        self.assertEqual("GENUINE_FENCED_PENDING_EMAIL_COMPENSATION_RED", classify(value))
+        seen["fencedEmailOldWriteAndSmtpUnchanged"] = False
+        self.assertEqual("BEHAVIOR_FAILURE", classify(value))
+
     def test_missing_any_native_precondition_is_setup(self):
         for key in REQUIRED:
             with self.subTest(key=key):
@@ -76,7 +89,8 @@ class BootstrapClassifier(unittest.TestCase):
             preparedReceiptMacVerified=True, appNativeCredentialAndDisabledStateVerified=True,
             exactAppRetryPreservesOneCredential=True, completedPhaseRefusesNewEnrollment=True,
             expiredOriginalPrepareRetryPreservesExactCausalReceipt=True,
-            emailFinishActiveDisabledAndExactRetryVerified=True)
+            emailFinishActiveDisabledAndExactRetryVerified=True,
+            fencedEmailPendingCompensationExactRetryVerified=True)
         self.assertEqual("GREEN", classify(value))
         value["readinessObservation"]["otpPrepareStatus"] = 404
         self.assertNotEqual("GREEN", classify(value))
