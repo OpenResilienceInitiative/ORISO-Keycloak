@@ -400,7 +400,7 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.phase("scoped-otp-linked-origin-refusal", absent_owned_reference=True,
                    origin_mismatch=True, missing_human=True, no_attempt=True, no_profile_effect=True)
 
-    def test_linked_email_changed_credential_ttl_cannot_be_adopted_as_sent_incarnation(self):
+    def test_linked_email_recreated_same_uuid_credential_cannot_be_adopted_as_sent_incarnation(self):
         human, finish, destination, original, before_mail = self.linked_finish_fixture()
         native = self.admin("GET", "/users/" + self.account_id)
         mail = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
@@ -408,8 +408,15 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         data = json.loads(mail[0]["credentialData"])
         old_ttl = data["ttlInSeconds"]
         data["ttlInSeconds"] = old_ttl + 1
-        mail[0]["credentialData"] = canonical(data).decode()
-        native["credentials"] = mail
+        # Native User PUT deliberately ignores updates to an existing credential. Prove a real
+        # installer replacement instead: delete the exact owned row, then recreate its UUID with
+        # changed immutable data/secret bounds. UUID alone must never adopt this incarnation.
+        self.admin("DELETE", "/users/" + self.account_id + "/credentials/" + mail[0]["id"])
+        self.assertFalse(any(c["id"] == mail[0]["id"] for c in self.admin("GET", "/users/" + self.account_id + "/credentials")))
+        recreated = {"id": mail[0]["id"], "type": "MAIL_OTP_CM", "createdDate": int(time.time() * 1000),
+                     "credentialData": canonical(data).decode(),
+                     "secretData": canonical({"code": finish["otp"]["initialCode"], "expiry": int(time.time() * 1000) + 600000}).decode()}
+        native["credentials"] = [recreated]
         self.admin("PUT", "/users/" + self.account_id, native)
         actual = [c for c in self.admin("GET", "/users/" + self.account_id + "/credentials") if c["type"] == "MAIL_OTP_CM"]
         self.assertEqual([mail[0]["id"]], [c["id"] for c in actual])
