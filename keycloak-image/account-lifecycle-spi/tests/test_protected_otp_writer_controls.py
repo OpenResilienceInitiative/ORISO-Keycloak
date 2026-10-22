@@ -54,6 +54,19 @@ class WriterControls(unittest.TestCase):
         with patch("run_protected_otp_writer.classify", return_value="BEHAVIOR_FAILURE"):
             self.assertEqual("BEHAVIOR_FAILURE", classify_writer(self.valid()))
 
+    def test_installer_failure_retains_only_fixed_phase_status_and_expiry_boolean(self):
+        from protected_otp_bootstrap import BootstrapFixture, BootstrapRead
+        import base64
+        fixture = BootstrapFixture("runTest")
+        fixture.installer = "header." + base64.urlsafe_b64encode(b'{"exp":1}').decode().rstrip("=") + ".signature"
+        fixture.base = "http://synthetic.invalid"
+        BootstrapRead.observation = {}
+        with patch("protected_otp_bootstrap.call", return_value=(401, {"private": "never-copy"})):
+            with self.assertRaises(AssertionError):
+                fixture.admin("PUT", "", {"smtpServer": {"password": "never-copy"}})
+        self.assertEqual({"method": "PUT", "route": "REALM_CONFIGURATION", "status": 401,
+                          "cachedNativeTokenExpired": True}, BootstrapRead.observation["installerAdminFailure"])
+
     def test_companion_remains_outside_product_and_delegates_native_smtp(self):
         tests = Path(__file__).parent
         source = (tests / "native-otp-writer-fixture/src/org/oriso/keycloak/lifecycle/proof/OtpWriterFixtureFactory.java").read_text()

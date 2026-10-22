@@ -469,6 +469,47 @@ class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual(409, self.invoke("profile", changed, human, 409)[0])
         stale = json.loads(json.dumps(body)); stale["operationId"] = str(uuid.uuid4())
         self.assertEqual(409, self.invoke("profile", stale, human, 409)[0])
+        # Same actual SELF boundary, now prove the credential effect and immutable retry.
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        password = "Synthetic-" + uuid.uuid4().hex
+        later_password = "Synthetic-later-" + uuid.uuid4().hex
+        command = {"target": target, "operationId": str(uuid.uuid4()),
+                   "expectedState": current["state"],
+                   "change": {"password": password, "temporary": False}}
+        def login(value):
+            return call(self.base, "POST", "/realms/" + REALM + "/protocol/openid-connect/token",
+                        {"client_id": CLIENT, "grant_type": "password",
+                         "username": self.creation_input["account"]["username"],
+                         "password": value, "scope": "openid"}, form=True)[0]
+        self.assertEqual(200, login(self.creation_input["account"]["password"]))
+        self.phase("human-password-proof-preconditions", original_password_verified=True,
+                   exact_self_read=True, current_native_session=True)
+        try:
+            status, changed_password = self.invoke("password", command, human, 200)
+            self.assertEqual(200, status)
+            self.assertNotIn(password, canonical(changed_password).decode())
+            encoded, signature = changed_password["receipt"].split(".")
+            self.assertTrue(hmac.compare_digest(signature, hmac.new(CONTEXT_KEY,
+                ("maintenance-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest()))
+            receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            self.assertEqual("password", receipt["command"])
+            self.assertEqual(mac("maintenance-intent", command), receipt["intentDigest"])
+            self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], receipt["ownerSubject"])
+            self.assertEqual(200, login(password))
+            self.assertEqual(401, login(self.creation_input["account"]["password"]))
+            self.admin("PUT", "/users/" + self.account_id + "/reset-password",
+                       {"type": "password", "value": later_password, "temporary": False})
+            self.assertEqual((200, changed_password), self.invoke("password", command, human, 200))
+            self.assertEqual(200, login(later_password))
+            self.assertEqual(401, login(password))
+            conflicting = json.loads(json.dumps(command))
+            conflicting["change"]["password"] = "Synthetic-conflict-" + uuid.uuid4().hex
+            self.assertEqual(409, self.invoke("password", conflicting, human, 409)[0])
+        finally:
+            self.admin("PUT", "/users/" + self.account_id + "/reset-password",
+                       {"type": "password", "value": self.creation_input["account"]["password"],
+                        "temporary": False})
 
     def test_real_human_self_locale_keeps_admin_receipt_owner_and_rejects_origin_mix(
         self,

@@ -24,6 +24,23 @@ import otp_writer_fixture
 
 
 class BootstrapFixture(NativeFixture):
+    def admin(self, method, path="", body=None):
+        status, value = call(self.base, method, "/admin/realms/" + REALM + path,
+                             body, self.installer)
+        if status >= 300:
+            try:
+                encoded = self.installer.split(".")[1]
+                expiry = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))).get("exp")
+                expired = type(expiry) is int and expiry <= time.time()
+            except (ValueError, IndexError):
+                expired = False
+            BootstrapRead.observation["installerAdminFailure"] = {
+                "method": method if method in {"GET", "PUT", "POST", "DELETE"} else "OTHER",
+                "route": "REALM_CONFIGURATION" if path == "" else "OTHER_NATIVE_ADMIN",
+                "status": status, "cachedNativeTokenExpired": expired}
+        self.assertLess(status, 300)
+        return value
+
     @classmethod
     def setUpClass(cls):
         jar = Path(os.environ.get("OTP_C_TEST_JAR", ""))
