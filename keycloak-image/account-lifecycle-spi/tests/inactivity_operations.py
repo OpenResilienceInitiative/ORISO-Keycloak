@@ -15,8 +15,9 @@ def exercise(test, helper, primary, peer, observed):
     disabled, _ = committed(test, helper)
     disabled_native = helper.admin('GET', '/users/' + disabled); disabled_native['enabled'] = False
     helper.admin('PUT', '/users/' + disabled, disabled_native)
-    targets = [('ordinary-disabled', disabled, None), ('ordinary', ordinary, None), ('tenant-admin', type(helper).adopted_account, None),
+    targets = [('ordinary-adopted', type(helper).ordinary_adopted_account, None), ('ordinary-disabled', disabled, None), ('ordinary', ordinary, None), ('tenant-admin', type(helper).adopted_account, None),
                ('platform-admin', type(helper).new_platform_account, None), ('manual-platform', peer[0], primary)]
+    adoption_boundaries(test, helper, records)
     for label, account, human in targets:
         native = helper.admin('GET', '/users/' + account)
         helper.account_id = account
@@ -74,3 +75,47 @@ def exercise(test, helper, primary, peer, observed):
             test.assertEqual((status, restored), HumanMaintenanceFixture.invoke(helper, 'reactivate', restore, human, 200))
             records[label]['nativeOriginalEnabledAndExactRetryVerified'] = True
     helper.account_id, helper.creation_input = original_account, original_creation
+
+
+def adoption_boundaries(test, helper, records):
+    def read(account):
+        helper.account_id = account
+        native = helper.admin('GET', '/users/' + account)
+        work = str(uuid.uuid4()); now = int(time.time())
+        return {'target': {'accountId': account, 'tenantId': '11', 'origin': {'kind': 'INACTIVITY',
+            'workflowId': work, 'humanSubject': None, 'humanIssuer': None, 'humanClient': None, 'humanAuthority': None}},
+            'workflow': {'v': 1, 'kind': 'INACTIVITY', 'workId': work, 'action': 'SUSPEND',
+                'rowDigest': mac('claimed-inactivity-row/v1', {'synthetic': work}), 'revision': 0,
+                'assignedMonths': 24, 'lastActivity': now - 100, 'dueAt': now - 1, 'suspensionOperationId': None}}
+    ungranted = type(helper).ordinary_inactivity_ungranted_account
+    before = helper.admin('GET', '/users/' + ungranted)
+    test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'read', read(ungranted), None, 403)[0])
+    test.assertEqual(before, helper.admin('GET', '/users/' + ungranted))
+    account = type(helper).ordinary_adopted_account
+    own_group = helper.group_id('/human-roles/user'); other_group = helper.group_id('/human-roles/consultant')
+    helper.admin('DELETE', '/users/' + account + '/groups/' + own_group)
+    helper.admin('PUT', '/users/' + account + '/groups/' + other_group)
+    try:
+        test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'read', read(account), None, 403)[0])
+    finally:
+        helper.admin('DELETE', '/users/' + account + '/groups/' + other_group)
+        helper.admin('PUT', '/users/' + account + '/groups/' + own_group)
+    account = type(helper).ordinary_inactivity_incarnation_account
+    body = read(account); status, _ = HumanMaintenanceFixture.invoke(helper, 'read', body, None, 200)
+    records['adopted-incarnation'] = {'initialReadStatus': status}
+    with test.subTest(operation='inactivity.adopted-user.incarnation-baseline'):
+        test.assertEqual(200, status)
+    if status == 200:
+        old = helper.admin('GET', '/users/' + account)
+        helper.admin('DELETE', '/users/' + account)
+        replacement = {'id': account, 'username': 'recreated-workflow-' + uuid.uuid4().hex, 'enabled': True,
+            'email': 'recreated-' + uuid.uuid4().hex + '@oriso.org', 'firstName': 'Recreated', 'lastName': 'Workflow',
+            'attributes': {'tenantId': ['11']}}
+        helper.admin('POST', '/partialImport', {'ifResourceExists': 'FAIL', 'users': [replacement]})
+        defaults = helper.admin('GET', '/users/' + account + '/role-mappings/realm')
+        if defaults: helper.admin('DELETE', '/users/' + account + '/role-mappings/realm', defaults)
+        helper.admin('PUT', '/users/' + account + '/groups/' + own_group)
+        test.assertNotEqual(old['createdTimestamp'], helper.admin('GET', '/users/' + account)['createdTimestamp'])
+        test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'read', body, None, 403)[0])
+        records['adopted-incarnation']['replacedNativeIncarnationDenied'] = True
+    records['adopted-workflow-boundaries'] = {'missingSeparateGrantDenied': True, 'foreignNativeProfileDenied': True}

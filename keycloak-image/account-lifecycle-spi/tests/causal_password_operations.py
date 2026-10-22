@@ -67,6 +67,8 @@ def exercise(test, helper, observed):
         test.assertEqual(400, invoke(helper, account, 'account.password-reset.read', extra)[0])
         body = {**read, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
                 'change': {'password': 'Native-causal-fixture-' + uuid.uuid4().hex, 'temporary': False}}
+        before_events = {event['id'] for event in helper.admin('GET', '/admin-events?max=100')
+            if event.get('resourcePath') == 'accounts/' + account}
         status, result = invoke(helper, account, 'account.password-reset', body)
         records[label]['mutationStatus'] = status
         with test.subTest(operation='causal.' + label + '.mutation'):
@@ -91,6 +93,17 @@ def exercise(test, helper, observed):
             test.assertEqual(409, conflict_status); test.assertNotIn('receipt', conflict)
             records[label]['effectAndExactRetryVerified'] = True
             records[label]['exactSavedReadAndClaimReservationVerified'] = True
+        if status == 200:
+            added = [event for event in helper.admin('GET', '/admin-events?max=100')
+                if event.get('resourcePath') == 'accounts/' + account and event['id'] not in before_events]
+            with test.subTest(operation='causal.' + label + '.canonical-admin-event'):
+                test.assertEqual(1, len(added))
+                test.assertEqual('UPDATE', added[0]['operationType']); test.assertEqual('USER', added[0]['resourceType'])
+                test.assertEqual(SUBJECTS['ACCOUNT_ADMIN'], added[0]['authDetails']['userId'])
+                test.assertEqual(ACTORS['ACCOUNT_ADMIN'][0], added[0]['authDetails']['clientId'])
+                test.assertEqual(helper.realm_id, added[0]['authDetails']['realmId'])
+                test.assertFalse(added[0].get('representation'))
+                records[label]['canonicalAdminEventWithoutSecretsOrReplayDuplicate'] = True
     if all(value.get('effectAndExactRetryVerified') for value in records.values()):
         terminal_and_expired_history(test, helper, observed)
 

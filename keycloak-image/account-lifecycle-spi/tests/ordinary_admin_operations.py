@@ -54,7 +54,18 @@ def install_policy(cls, helper, protected):
         config['adoptedAccounts'].append({'accountId': control, 'ordinaryProfileId': 'user-v1', 'profileVersion': 1})
         setattr(cls, 'ordinary_' + boundary + '_adopted_account', control)
 
-    config['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': ['consultant-v1'],
+    for label, profile in [('inactivity-incarnation', 'user'), ('inactivity-ungranted', 'consultant-basic')]:
+        username = 'adopted-' + label + '-' + uuid.uuid4().hex
+        helper.admin('POST', '/users', {'username': username, 'enabled': True, 'email': username + '@oriso.org',
+            'firstName': 'Workflow', 'lastName': 'Boundary', 'attributes': {'tenantId': ['11']}})
+        controls = helper.admin('GET', '/users?username=' + username + '&exact=true'); helper.assertEqual(1, len(controls))
+        control = controls[0]['id']; defaults = helper.admin('GET', '/users/' + control + '/role-mappings/realm')
+        if defaults: helper.admin('DELETE', '/users/' + control + '/role-mappings/realm', defaults)
+        helper.admin('PUT', '/users/' + control + '/groups/' + helper.group_id('/human-roles/' + profile))
+        config['adoptedAccounts'].append({'accountId': control, 'ordinaryProfileId': profile + '-v1', 'profileVersion': 1})
+        setattr(cls, 'ordinary_' + label.replace('-', '_') + '_account', control)
+
+    config['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': ['consultant-v1', 'user-v1'],
         'operations': ['account.deactivate', 'account.reactivate', 'account.read']}]
     command = cls.command.copy()
     index = command.index(IMAGE)
