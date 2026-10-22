@@ -107,6 +107,7 @@ jobs:
       max-parallel: 2
       matrix:
         case:
+          - committed-own-tenant-peer
           - binding-rollback-only-unavailable
           - binding-corrected-restart-available
           - binding-commit-failure-unavailable
@@ -175,6 +176,11 @@ jobs:
                 python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_ordering.py \
                   --report keycloak-image/account-lifecycle-spi/proof-output/commit-ordering-readiness.json ;;
             esac
+          elif [ "$PROTECTED_INSTALLATION_CASE" = committed-own-tenant-peer ]; then
+            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
+              -p test_protected_peer_controls.py -q
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_peer.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/peer.json
           elif [ "$PROTECTED_INSTALLATION_CASE" = binding-corrected-restart-available ]; then
             python keycloak-image/account-lifecycle-spi/tests/run_protected_corrected_readiness.py \
               --report keycloak-image/account-lifecycle-spi/proof-output/corrected-readiness.json
