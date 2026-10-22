@@ -216,6 +216,10 @@ final class MaintenanceTarget {
       user = session.users().getUserById(realm, request.accountId());
     }
     if (user == null) conflict();
+    if ("self-password".equals(request.command())
+        && !user.credentialManager().isValid(
+            UserCredentialModel.password(request.change().path("currentPassword").textValue())))
+      throw new jakarta.ws.rs.BadRequestException("Current password was not accepted");
     String password = request.change().path("password").textValue();
     try {
       if (session.getProvider(org.keycloak.policy.PasswordPolicyManagerProvider.class)

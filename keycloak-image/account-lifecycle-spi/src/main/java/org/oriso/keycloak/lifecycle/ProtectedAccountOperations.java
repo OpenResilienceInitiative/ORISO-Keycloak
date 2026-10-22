@@ -20,7 +20,18 @@ final class ProtectedAccountOperations {
 
   static JsonNode readSelfOtp(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String fullHumanHeader) {
-    if (!selected(request.target()) || !"read".equals(request.command())) deny();
+    return readCurrent(session, crypto, request, fullHumanHeader, "otp.read");
+  }
+
+  static JsonNode readAccount(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String fullHumanHeader) {
+    return readCurrent(session, crypto, request, fullHumanHeader, "account.read");
+  }
+
+  private static JsonNode readCurrent(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String fullHumanHeader, String operation) {
+    if (!selected(request.target()) || !"read".equals(request.command())
+        || !Set.of("otp.read", "account.read").contains(operation)) deny();
     if (fullHumanHeader == null || fullHumanHeader.length() > 32775
         || !fullHumanHeader.regionMatches(true, 0, "Bearer ", 0, 7))
       throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
@@ -79,7 +90,7 @@ final class ProtectedAccountOperations {
     }
     if (grants == null || grants.stream().noneMatch(grant ->
         grant.authority().equals(resolved.binding().authority()) && grant.profiles().contains(profile.id())
-            && grant.operations().contains("otp.read")
+            && grant.operations().contains(operation)
             && (!grant.selfOnly() || human.subject().equals(request.accountId()))
             && (grant.targetSubjects().isEmpty() || grant.targetSubjects().contains(request.accountId())))) deny();
     if ("TENANT_PEER".equals(resolved.binding().authority()) && human.tenantId() != tenant
@@ -94,7 +105,22 @@ final class ProtectedAccountOperations {
         || tenantValues.size() != 1 || !Long.toString(tenant).equals(tenantValues.path(0).asText())) deny();
     for (var technical : config.installation.path("technicalSubjects"))
       if (request.accountId().equals(technical.asText())) deny();
-    var result = JSON.createObjectNode(); result.set("username", current.path("username"));
+    var state = JSON.createObjectNode();
+    state.put("realmId", config.realmId); state.set("account", current);
+    state.put("provenance", attempt.id); state.set("profile", profile.snapshot());
+    var result = JSON.createObjectNode();
+    for (String field : java.util.List.of("id", "username", "email", "firstName", "lastName", "enabled", "emailVerified"))
+      result.set(field, current.path(field));
+    result.put("tenantId", Long.toString(tenant));
+    var locales = current.path("attributes").path("locale");
+    if (!locales.isMissingNode() && locales.size() != 1) deny();
+    result.set("preferredLanguage", locales.isMissingNode() ? JSON.nullNode() : locales.path(0));
+    result.set("effectiveRoles", JSON.valueToTree(new TreeSet<>(profile.realmRoles())));
+    boolean passwordChange = false;
+    for (var action : current.path("requiredActions"))
+      if (org.keycloak.models.UserModel.RequiredAction.UPDATE_PASSWORD.name().equals(action.asText())) passwordChange = true;
+    result.put("passwordChangeRequired", passwordChange);
+    result.put("state", crypto.mac("maintenance-state", state));
     return result;
   }
 

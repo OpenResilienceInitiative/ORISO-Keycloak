@@ -14,7 +14,7 @@ record MaintenanceRequest(
     String expectedState,
     JsonNode change) {
   static MaintenanceRequest parse(String command, String accountId, JsonNode body) {
-    if (!Set.of("read", "profile", "email", "locale", "password", "ordinary-profile",
+    if (!Set.of("read", "profile", "email", "locale", "password", "self-password", "ordinary-profile",
         "deactivate", "reactivate", "delete").contains(command)) bad();
     boolean read = "read".equals(command);
     if (read) fields(body, "target");
@@ -65,6 +65,14 @@ record MaintenanceRequest(
         fields(change, "password", "temporary");
         text(change, "password", 4096, false);
         if (!change.path("temporary").isBoolean()) bad();
+      }
+      case "self-password" -> {
+        fields(change, "currentPassword", "password", "temporary");
+        text(change, "currentPassword", 4096, false);
+        text(change, "password", 4096, false);
+        if (!change.path("temporary").isBoolean() || change.path("temporary").asBoolean()) bad();
+        if (change.path("currentPassword").equals(change.path("password")))
+          throw new jakarta.ws.rs.ClientErrorException("The new password must differ", 409);
       }
       case "ordinary-profile" -> {
         fields(change, "group");

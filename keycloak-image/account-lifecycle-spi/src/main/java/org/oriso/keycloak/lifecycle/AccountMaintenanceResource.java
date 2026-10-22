@@ -63,6 +63,9 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "account.read", "POST",
           "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("read", account, body);
+      if (ProtectedAccountOperations.selected(request.target()))
+        return Response.ok(ProtectedAccountOperations.readAccount(session, auth, request, rawHumanBearer))
+            .header("Cache-Control", "no-store").build();
       var humanPolicy = "SELF".equals(request.target().path("origin").path("kind").asText())
           ? humanPolicies.get() : null;
       return Response.ok(targets.read(request, humanPolicy, rawHumanBearer)).header("Cache-Control", "no-store").build();
@@ -171,9 +174,17 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
     return selfMutation("password", account, raw, proof, rawHumanBearer);
   }
 
+  @POST
+  @Path("v1/accounts/{account}/self-password")
+  public Response selfPassword(@PathParam("account") String account, byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String rawHumanBearer) {
+    return selfMutation("self-password", account, raw, proof, rawHumanBearer);
+  }
+
   private Response selfMutation(String command, String account, byte[] raw, String proof,
       String rawHumanBearer) {
-    if (!Set.of("locale", "profile", "password").contains(command)) deny();
+    if (!Set.of("locale", "profile", "password", "self-password").contains(command)) deny();
     return guarded(() -> {
       var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
       var body = parse(raw);
@@ -205,7 +216,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       }
       if ("locale".equals(command)) targets.locale(request, humanPolicy, rawHumanBearer);
       else if ("profile".equals(command)) targets.profile(request, humanPolicy, rawHumanBearer);
-      else if ("password".equals(command)) targets.password(request, humanPolicy, rawHumanBearer);
+      else if (Set.of("password", "self-password").contains(command)) targets.password(request, humanPolicy, rawHumanBearer);
       else deny();
       var outcome = JSON.createObjectNode();
       outcome.put("realmId", realm.getId());
