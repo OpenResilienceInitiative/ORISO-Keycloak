@@ -29,8 +29,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'authority': 'PLATFORM', 'targetProfiles': ['platform-v1'], 'selfOnly': True,
             'operations': ['account.read', 'otp.app-setup', 'otp.delete', 'otp.email-finish', 'otp.email-start', 'otp.read'],
         }, {
-            'authority': 'PLATFORM', 'targetProfiles': [PROFILE, 'platform-v1'], 'selfOnly': False,
-            'operations': ['account.read', 'account.profile', 'account.email'],
+            'authority': 'PLATFORM', 'targetProfiles': ['platform-v1', PROFILE], 'selfOnly': False,
+            'operations': ['account.email', 'account.profile', 'account.read'],
         }]
         cls.installed_configuration = copy.deepcopy(value)
         return value

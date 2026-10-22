@@ -50,14 +50,25 @@ final class GeneralPolicy {
       String authority = text(value, "authority", 20, false);
       if (!Set.of("PLATFORM", "TENANT_PEER").contains(authority)
           || !value.path("selfOnly").isBoolean() || value.path("selfOnly").booleanValue()) bad();
-      var targets = HumanPolicyJson.strings(value.path("targetProfiles"), 1, 20, 100);
-      var operations = HumanPolicyJson.strings(value.path("operations"), 1, allowed.size(), 80);
+      var targets = operationStrings(value.path("targetProfiles"), 20, 100);
+      var operations = operationStrings(value.path("operations"), allowed.size(), 80);
       if (!profileIds.containsAll(targets) || !allowed.containsAll(operations)) bad();
       var grant = new AdminGrant(authority, targets, operations);
       if (!unique.add(grant)) bad();
       result.add(grant);
     }
     return List.copyOf(result);
+  }
+
+  private static Set<String> operationStrings(JsonNode value, int maximum, int length) {
+    if (!value.isArray() || value.isEmpty() || value.size() > maximum) bad();
+    var result = new HashSet<String>();
+    for (var item : value) {
+      if (!item.isTextual() || item.asText().isBlank() || item.asText().length() > length
+          || item.asText().chars().anyMatch(c -> c < 32 || c == 127)
+          || !result.add(item.asText())) bad();
+    }
+    return Set.copyOf(result);
   }
 
   void validateInstallation(KeycloakSession session) {
