@@ -89,6 +89,16 @@ def checked_session_checks(value):
     return value
 
 
+TOKEN_FACT_FLAGS = {"subjectPresent","subjectMatchesTarget","subjectMatchesCanonicalAdmin",
+    "clientMatchesApp","tenantPresent","tenantMatchesTarget","sessionIdPresent"}
+
+
+def checked_token_facts(value):
+    if not isinstance(value,dict) or set(value)!=TOKEN_FACT_FLAGS or any(type(v) is not bool for v in value.values()):
+        raise RuntimeError("Exact fixed native token facts required")
+    return value
+
+
 def native_classification(receipt):
     observed = checked_observation(receipt["observed"])
     session_checks = checked_session_checks(receipt["sessionChecks"])
@@ -319,7 +329,7 @@ def child():
     ET.ElementTree(tree).write(out / ("TEST-" + NATIVE_SUITE + ".xml"), encoding="utf-8", xml_declaration=True)
     (out / "native-observation.json").write_text(json.dumps({
         "counts": counts, "cases": result.rows, "observed": checked_observation(module.OBSERVATIONS),
-        "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS)}, sort_keys=True) + "\n")
+        "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS),"tokenFacts":checked_token_facts(module.TOKEN_FACTS)}, sort_keys=True) + "\n")
     return 0 if result.wasSuccessful() else 1
 
 

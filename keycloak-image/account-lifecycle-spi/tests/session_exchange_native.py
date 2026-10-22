@@ -28,6 +28,10 @@ SESSION_CHECKS = dict.fromkeys(("nativeSubjectClientTenantExpiry","actualNativeS
     "wrongProofAudienceRefused","expiredCommandRefused","currentDisabledRefused"),False)
 
 
+TOKEN_FACTS = dict.fromkeys(("subjectPresent","subjectMatchesTarget","subjectMatchesCanonicalAdmin",
+    "clientMatchesApp","tenantPresent","tenantMatchesTarget","sessionIdPresent"),False)
+
+
 def proof(body, realm_id, claim_changes=None):
     now = int(time.time())
     claims = {
@@ -234,6 +238,14 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             encoded=response["access_token"].split(".")[1]
             return json.loads(base64.urlsafe_b64decode(encoded+"="*(-len(encoded)%4)))
         issued=claims(reply)
+        TOKEN_FACTS.update(
+            subjectPresent=isinstance(issued.get("sub"),str) and bool(issued.get("sub")),
+            subjectMatchesTarget=issued.get("sub")==target["id"],
+            subjectMatchesCanonicalAdmin=issued.get("sub")==native.SUBJECTS["ACCOUNT_ADMIN"],
+            clientMatchesApp=issued.get("azp")=="app",
+            tenantPresent="tenantId" in issued,
+            tenantMatchesTarget=issued.get("tenantId")==creation["identity"]["scope"]["tenantId"],
+            sessionIdPresent=isinstance(issued.get("sid"),str) and bool(issued.get("sid")))
         self.assertEqual(target["id"],issued.get("sub"))
         self.assertEqual("app",issued.get("azp"))
         self.assertEqual(creation["identity"]["scope"]["tenantId"],issued.get("tenantId"))

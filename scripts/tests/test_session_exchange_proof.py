@@ -138,6 +138,12 @@ class SessionProofControls(unittest.TestCase):
                 with self.subTest(flag=flag,value=value),self.assertRaises(RuntimeError):p.native_classification(row)
         checks=dict.fromkeys(p.SESSION_CHECK_FLAGS,True);checks["private"]="never-export"
         with self.assertRaises(RuntimeError):p.checked_session_checks(checks)
+        facts=dict.fromkeys(p.TOKEN_FACT_FLAGS,False)
+        self.assertEqual(facts,p.checked_token_facts(facts))
+        facts["privateJWT"]="never-export"
+        with self.assertRaises(RuntimeError):p.checked_token_facts(facts)
+        facts=dict.fromkeys(p.TOKEN_FACT_FLAGS,False);facts["subjectPresent"]=1
+        with self.assertRaises(RuntimeError):p.checked_token_facts(facts)
 
     def test_runtime_requires_one_known_false_oom_integer_zero_restart(self):
         good=[{"kind":"container","runtime":{"oomKilled":False,"restartCount":0}}]
