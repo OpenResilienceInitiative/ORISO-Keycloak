@@ -33,6 +33,8 @@ SESSION_CHECKS = dict.fromkeys(("nativeSubjectClientTenantExpiry","actualNativeS
     "mfaReplayRequiresNewValidCode","lateRequiredActionNoOrphan"),False)
 
 
+PAIRED_EXPORT = None
+
 TOKEN_FACTS = dict.fromkeys(("subjectPresent","subjectMatchesTarget","subjectMatchesCanonicalAdmin",
     "clientMatchesApp","tenantPresent","tenantMatchesTarget","sessionIdPresent"),False)
 
@@ -405,6 +407,17 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             self.admin("PUT","/users/"+target["id"],target)
         except AssertionError as failure:
             raise RuntimeError("Native late required action fixture restoration") from failure
+        if os.environ.get("S1_PAIR_ENABLED") == "true":
+            before_pair=session_ids()
+            try:
+                import session_exchange_pair
+                session_exchange_pair.run(self,target["id"],body["tenantId"])
+            finally:
+                global PAIRED_EXPORT
+                PAIRED_EXPORT=getattr(self,"paired_export",None)
+            after_pair=session_ids()
+            self.assertEqual(1,len(after_pair-before_pair))
+            expected_sessions=after_pair
         self.admin("PUT","/users/"+target["id"],{**target,"enabled":False})
         self.assertIs(False,self.admin("GET","/users/"+target["id"])["enabled"])
         self.assertEqual(401,exchange(body)[0])

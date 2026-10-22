@@ -22,6 +22,17 @@ public final class MagicLinkSessionAttach extends MagicLinkFlow {
           || !context.getAuthenticationSession().getRequiredActions().isEmpty()) LifecycleJson.deny();
       var session = context.getSession();
       var realm = context.getRealm();
+      // Stock password Grant evaluates these again after the flow. Check native triggers
+      // before minting our owned session, so a newly required action cannot leave an orphan.
+      AuthenticationManager.evaluateRequiredActionTriggers(session,context.getAuthenticationSession(),
+          context.getHttpRequest(),context.getEvent(),realm,context.getUser());
+      if (context.getUser().getRequiredActionsStream().findAny().isPresent()
+          || !context.getAuthenticationSession().getRequiredActions().isEmpty()) {
+        context.getEvent().error(org.keycloak.events.Errors.RESOLVE_REQUIRED_ACTIONS);
+        context.failure(org.keycloak.authentication.AuthenticationFlowError.CREDENTIAL_SETUP_REQUIRED,
+            errorResponse(400,"invalid_grant","Account is not fully set up"));
+        return;
+      }
       var em = CurrentNativeHumanIdentity.entityManager(session);
       String id = realm.getId()+":"+checked.workflow();
       var row = em.find(MagicLinkSession.class,id,LockModeType.PESSIMISTIC_WRITE);

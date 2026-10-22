@@ -93,9 +93,9 @@ class SessionProofControls(unittest.TestCase):
     def test_formatter_replaces_unstarted_tests_in_exact_three_group_catalogue(self):
         self.assertEqual(["toolchain","user-compile","user-formatter"],p.planned_groups("user",True))
         self.assertEqual(["toolchain","user-compile","user-tests"],p.planned_groups("user",False))
-        self.assertEqual(4,len(p.planned_groups("native",False)))
+        self.assertEqual(["toolchain","user-compile","lifecycle-compile","otp-compile","native-test"],p.planned_groups("native",False))
         with self.assertRaises(RuntimeError):p.planned_groups("user","true")
-        with self.assertRaises(RuntimeError):p.planned_groups("native",True)
+        self.assertEqual(p.planned_groups("user",True),p.planned_groups("native",True))
         with self.assertRaises(RuntimeError):p.planned_groups("unknown",False)
         three=[{"processGroup":i,"confirmedAbsent":True} for i in (1,2,3)]
         self.assertTrue(p.groups_ok(three,len(p.planned_groups("user",True))))
@@ -145,17 +145,19 @@ class SessionProofControls(unittest.TestCase):
         facts=dict.fromkeys(p.TOKEN_FACT_FLAGS,False);facts["subjectPresent"]=1
         with self.assertRaises(RuntimeError):p.checked_token_facts(facts)
 
-    def test_runtime_requires_one_known_false_oom_integer_zero_restart(self):
-        good=[{"kind":"container","runtime":{"oomKilled":False,"restartCount":0}}]
-        self.assertTrue(p.runtime_known(good))
-        for mutate in (lambda x:x.clear(),lambda x:x.append(copy.deepcopy(x[0])),
-                       lambda x:x[0]["runtime"].pop("oomKilled"),
-                       lambda x:x[0]["runtime"].update(oomKilled=None),
-                       lambda x:x[0]["runtime"].update(oomKilled=True),
-                       lambda x:x[0]["runtime"].update(restartCount=False),
+    def test_runtime_requires_both_exact_owned_known_false_oom_integer_zero_restart(self):
+        planned=[{"kind":"container","name":"kc"},{"kind":"container","name":"redis"},{"kind":"network","name":"net"}]
+        good=[{**row,"confirmedAbsent":True,"runtime":{"oomKilled":False,"restartCount":0} if row["kind"]=="container" else None} for row in planned]
+        self.assertTrue(p.runtime_known(good,planned))
+        for mutate in (lambda x:x.clear(),lambda x:x.append(copy.deepcopy(x[0])),lambda x:x.pop(),
+                       lambda x:x[1].update(name="foreign"),lambda x:x[1].update(name="kc"),
+                       lambda x:x[1].update(confirmedAbsent=False),lambda x:x[2].update(confirmedAbsent=False),
+                       lambda x:x[0]["runtime"].pop("oomKilled"),lambda x:x[1]["runtime"].update(oomKilled=None),
+                       lambda x:x[0]["runtime"].update(oomKilled=True),lambda x:x[1]["runtime"].update(restartCount=False),
                        lambda x:x[0]["runtime"].update(restartCount=1)):
             bad=copy.deepcopy(good);mutate(bad)
-            self.assertFalse(p.runtime_known(bad))
+            self.assertFalse(p.runtime_known(bad,planned))
+
 
 
     def test_user_inventory_preserves_three_original_and_all_adjacent_cases(self):
@@ -177,5 +179,40 @@ class SessionProofControls(unittest.TestCase):
         self.assertEqual("USER_ASSERTION_RED",p.user_classification(red,1))
         for counts,status in ((green,1),(red,0),(green,124),(red,124),(green,-9),(red,-9),(green,True),(red,True),(green,None)):
             self.assertEqual("USER_SETUP_OR_INCONCLUSIVE",p.user_classification(counts,status))
+
+    def test_paired_green_requires_exact_private_fixture_exit_inventory_and_booleans(self):
+        good={"checks":dict.fromkeys(p.PAIR_FLAGS,True),"exit":0,
+              "suites":{p.PAIR_SUITE:{"tests":1,"failures":0,"errors":0,"skipped":0}},"sourceFrames":[]}
+        self.assertEqual("PAIRED_PRIVATE_CALLER_GREEN",p.pair_classification(good))
+        red=copy.deepcopy(good);red["exit"]=1;red["suites"][p.PAIR_SUITE]["failures"]=1;red["checks"]["javaFixtureGreen"]=False
+        self.assertEqual("PAIRED_PRIVATE_CALLER_ASSERTION_RED",p.pair_classification(red))
+        for mutate in (lambda x:x.update(exit=124),lambda x:x.update(exit=True),lambda x:x.update(exit=1),
+                       lambda x:x["checks"].update(childGroupInherited=False),
+                       lambda x:x["checks"].update(firstNative200Dropped=False),
+                       lambda x:x["checks"].update(firstNative200Dropped=1),
+                       lambda x:x["checks"].update(privateJWT="never-export"),
+                       lambda x:x["suites"][p.PAIR_SUITE].update(errors=1),
+                       lambda x:x["suites"][p.PAIR_SUITE].update(skipped=1),lambda x:x["suites"].clear(),
+                       lambda x:x.update(sourceFrames=[{"file":"private.java","line":1}]),
+                       lambda x:x.update(sourceFrames=[{"file":"MagicLinkSessionNativeFixture.java","line":True}]),
+                       lambda x:x.update(sourceFrames=[{"file":"MagicLinkSessionNativeFixture.java","line":1,"secret":"never"}])):
+            bad=copy.deepcopy(good);mutate(bad)
+            with self.assertRaises(RuntimeError):p.pair_classification(bad)
+
+    def test_native_exit_must_agree_with_exact_xml_even_after_a_timeout(self):
+        green={"tests":1,"failures":0,"errors":0,"skipped":0}
+        red={**green,"failures":1}
+        self.assertTrue(p.native_exit_agrees(green,0))
+        self.assertTrue(p.native_exit_agrees(red,1))
+        for counts,status in ((green,1),(red,0),(green,124),(red,-9),(green,True),(red,None),
+                              ({**green,"errors":1},1),({**green,"skipped":1},0)):
+            self.assertFalse(p.native_exit_agrees(counts,status))
+
+    def test_only_exact_new_fixture_path_joins_failure_only_formatter_allowlist(self):
+        fixture="src/test/java/de/caritas/cob/userservice/api/service/auth/MagicLinkSessionNativeFixture.java"
+        self.assertIn(fixture,p.USER_FILES)
+        self.assertTrue(p.format_allowed([fixture],""))
+        self.assertFalse(p.format_allowed([fixture.replace("Fixture.java","FixtureAdjacent.java")],""))
+        self.assertFalse(p.format_allowed([fixture],"untracked.java"))
 
 if __name__ == "__main__": unittest.main()

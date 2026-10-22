@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -23,7 +24,11 @@ import zipfile
 sys.dont_write_bytecode = True
 
 HELPER_SHA = "37d29adc5e8e31aac9467e1ca1c1587b2d84db6239ea79f016cd0442f7916fec"
-LEASE_MIB, CONTAINER_MIB = 3152, 1024
+LEASE_MIB, CONTAINER_MIB, REDIS_MIB = 3280, 1024, 128
+REDIS_IMAGE = "redis@sha256:892022f9f18c26c92c30e15194d132f90044af87b94a491a75429bbc3982eab1"
+PAIR_SUITE = "de.caritas.cob.userservice.api.service.auth.MagicLinkSessionNativeFixture"
+PAIR_FLAGS = {"childGroupInherited", "firstNative200Dropped", "secondNative200Forwarded",
+              "exactCommandAfterLoss", "sameNativeSessionAfterLoss", "canonicalNativeAdmin", "javaFixtureGreen"}
 USER_SUITE = "de.caritas.cob.userservice.api.config.auth.SessionExchangeTokenBoundaryTest"
 USER_SUITES = {
     USER_SUITE: 3,
@@ -42,6 +47,7 @@ USER_FILES = (
     "src/main/java/de/caritas/cob/userservice/api/service/auth/RedisOneTimeTokenStore.java",
     "src/test/java/de/caritas/cob/userservice/api/service/auth/MagicLinkLoginServiceTest.java",
     "src/test/java/de/caritas/cob/userservice/api/service/auth/RedisOneTimeTokenStoreIT.java",
+    "src/test/java/de/caritas/cob/userservice/api/service/auth/MagicLinkSessionNativeFixture.java",
     "src/test/java/de/caritas/cob/userservice/api/adapters/keycloak/KeycloakIdentitySessionExchangeTest.java",
 )
 
@@ -159,10 +165,52 @@ def native_classification(receipt):
     raise RuntimeError("Native tracer outcome is not qualified")
 
 
-def runtime_known(cleanup):
+def runtime_known(cleanup, planned):
+    if (not isinstance(planned,list) or len(planned)!=3
+            or sorted(row.get("kind") for row in planned)!=["container","container","network"]
+            or len({row.get("name") for row in planned})!=3
+            or len(cleanup)!=3
+            or {(r.get("kind"),r.get("name")) for r in cleanup}
+                != {(r.get("kind"),r.get("name")) for r in planned}
+            or any(r.get("confirmedAbsent") is not True for r in cleanup)):
+        return False
     rows = [r.get("runtime") for r in cleanup if r.get("kind") == "container"]
-    return (len(rows) == 1 and isinstance(rows[0], dict) and rows[0].get("oomKilled") is False
-            and type(rows[0].get("restartCount")) is int and rows[0]["restartCount"] == 0)
+    return (len(rows)==2 and all(isinstance(row,dict) and row.get("oomKilled") is False
+            and type(row.get("restartCount")) is int and row["restartCount"]==0 for row in rows))
+
+
+def pair_classification(value):
+    if not isinstance(value,dict) or set(value)!={"checks","exit","suites","sourceFrames"}:
+        raise RuntimeError("Exact paired result required")
+    checks=value["checks"]
+    if not isinstance(checks,dict) or set(checks)!=PAIR_FLAGS or any(type(v) is not bool for v in checks.values()):
+        raise RuntimeError("Fixed paired booleans required")
+    frames=value["sourceFrames"]
+    if (not isinstance(frames,list) or len(frames)>8 or any(not isinstance(row,dict)
+            or set(row)!={"file","line"} or row["file"]!="MagicLinkSessionNativeFixture.java"
+            or type(row["line"]) is not int or row["line"]<=0 for row in frames)):
+        raise RuntimeError("Only fixed paired source positions may be exported")
+    suites=value["suites"]
+    if set(suites)!={PAIR_SUITE}:
+        raise RuntimeError("Exactly one fresh actual private-caller XML required")
+    counts=suites[PAIR_SUITE]
+    if (set(counts)!={"tests","failures","errors","skipped"}
+            or any(type(v) is not int or v<0 for v in counts.values())
+            or counts["tests"]!=1 or counts["errors"] or counts["skipped"]
+            or not checks["childGroupInherited"]):
+        raise RuntimeError("Complete actual paired assertion inventory required")
+    if type(value["exit"]) is int and value["exit"]==0 and counts["failures"]==0 and all(checks.values()):
+        return "PAIRED_PRIVATE_CALLER_GREEN"
+    if type(value["exit"]) is int and value["exit"]==1 and counts["failures"]==1:
+        return "PAIRED_PRIVATE_CALLER_ASSERTION_RED"
+    raise RuntimeError("Paired exit, inventory and observations disagree")
+
+
+def native_exit_agrees(counts, exit_code):
+    return (isinstance(counts,dict) and set(counts)=={"tests","failures","errors","skipped"}
+            and all(type(v) is int and v>=0 for v in counts.values())
+            and counts["tests"]==1 and counts["errors"]==0 and counts["skipped"]==0
+            and type(exit_code) is int and (exit_code,counts["failures"]) in ((0,0),(1,1)))
 
 
 def named_groups_ok(groups, executed, planned):
@@ -228,11 +276,13 @@ def empty_owned_scratch(scratch, owner, runtemp):
 
 
 def planned_groups(role, formatted=False):
-    if type(formatted) is not bool or role not in {"user","native"} or (role == "native" and formatted):
+    if type(formatted) is not bool or role not in {"user","native"}:
         raise RuntimeError("Known role/formatter-attempt state required")
+    if formatted:
+        return ["toolchain","user-compile","user-formatter"]
     if role == "native":
-        return ["toolchain","lifecycle-compile","otp-compile","native-test"]
-    return ["toolchain","user-compile","user-formatter" if formatted else "user-tests"]
+        return ["toolchain","user-compile","lifecycle-compile","otp-compile","native-test"]
+    return ["toolchain","user-compile","user-tests"]
 
 
 def verify_format_delta(user, scratch, ref, deadline):
@@ -367,9 +417,20 @@ def child():
         if case["outcome"] != "pass":
             ET.SubElement(row, case["outcome"], message="S1 finite native tracer did not pass")
     ET.ElementTree(tree).write(out / ("TEST-" + NATIVE_SUITE + ".xml"), encoding="utf-8", xml_declaration=True)
+    paired = getattr(module,"PAIRED_EXPORT",None)
+    if paired is not None:
+        target=out/"paired-user"
+        target.mkdir()
+        reports=Path(os.environ["S1_USER_SOURCE"])/"target/surefire-reports"
+        frames=[]
+        for xml in reports.glob("TEST-*.xml"):
+            for file,line in re.findall(r"\((MagicLinkSessionNativeFixture\.java):(\d+)\)",xml.read_text(errors="replace")):
+                row={"file":file,"line":int(line)}
+                if row not in frames:frames.append(row)
+        paired={**paired,"suites":safe_xml(reports,target),"sourceFrames":frames[:8]}
     (out / "native-observation.json").write_text(json.dumps({
         "counts": counts, "cases": result.rows, "observed": checked_observation(module.OBSERVATIONS),
-        "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS),"tokenFacts":checked_token_facts(module.TOKEN_FACTS)}, sort_keys=True) + "\n")
+        "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS),"tokenFacts":checked_token_facts(module.TOKEN_FACTS),"paired":paired}, sort_keys=True) + "\n")
     return 0 if result.wasSuccessful() else 1
 
 
@@ -397,7 +458,7 @@ def main():
     before = {name: snapshot(folder) for name, folder in roots.items()}
     overall = time.monotonic() + 1200
     report = {"role": args.role, "refs": refs, "sourceBefore": before, "classification": "SETUP_FAILURE",
-              "nativeClaimAuthority": "fixture signed claim only; final User/Redis/Broker path not proved" if args.role == "native" else "HTTP/JWKS broker only; no native session or claim authority",
+              "nativeClaimAuthority": "native fixture plus real Redis/private Java caller when paired passes; account SQL remains a finite double" if args.role == "native" else "focused private producer/HTTP/JWKS; no native or Redis credit",
               "resourceBudgetMiB": LEASE_MIB, "helperSHA256": HELPER_SHA, "accepted": False}
     owned, private, private_owner = None, None, None
     status = 1
@@ -421,26 +482,34 @@ def main():
         report["toolchainPinned"] = "Apache Maven 3.9.15" in version and "Java version: 21.0.12" in version
         if report["toolchainExit"] or not report["toolchainPinned"]:
             raise RuntimeError("Pinned actual Maven/Java runtime required")
+        if (user / "target").exists():
+            raise RuntimeError("Fresh user compiled output required")
+        scoped = "|".join(re.escape(str(user / p)) for p in USER_FILES)
+        command = [*common, "-DspotlessFiles=" + scoped, "test-compile"]
+        report["executedGroupNames"].append("user-compile")
+        report["compileExit"] = support.bounded(command, user, env, private / "user-compile.log", 420, compile_end)
+        if report["compileExit"]:
+            report["compileDiagnostics"] = compile_diagnostics(private/"user-compile.log")
+            if report["compileDiagnostics"]["spotlessConfirmed"]:
+                report["formatterAttempted"] = True
+                report["plannedGroups"] = planned_groups(args.role,True)
+                report["testsNotStartedBecauseCompileFailed"] = True
+                report["formatProposal"] = mechanical_proposal(user,args.user_ref,support,env,private,out,compile_end,report)
+                report["classification"] = "MECHANICAL_PROPOSAL_ONLY_NO_FEATURE_RED"
+            return 1
+        compiled = user / "target/test-classes" / Path(USER_SUITE.replace(".", "/") + ".class")
+        report["compiledTestSHA256"] = hashlib.sha256(compiled.read_bytes()).hexdigest()
+        report["compiledTests"] = {name:hashlib.sha256((user/"target/test-classes"/
+            Path(name.replace(".","/")+".class")).read_bytes()).hexdigest() for name in USER_SUITES}
+        paired_class = user/"target/test-classes"/Path(PAIR_SUITE.replace(".","/")+".class")
+        report["compiledPairFixtureSHA256"] = hashlib.sha256(paired_class.read_bytes()).hexdigest()
+        report["compiledUserMain"] = {name:hashlib.sha256((user/"target/classes"/Path(name.replace(".","/")+".class")).read_bytes()).hexdigest()
+            for name in ("de.caritas.cob.userservice.api.service.auth.MagicLinkLoginService",
+                "de.caritas.cob.userservice.api.service.auth.RedisOneTimeTokenStore",
+                "de.caritas.cob.userservice.api.adapters.keycloak.KeycloakIdentitySessionExchange",
+                "de.caritas.cob.userservice.api.config.auth.TaskActorTokenBroker",
+                "de.caritas.cob.userservice.api.adapters.keycloak.lifecycle.AccountLifecycleCodec")}
         if args.role == "user":
-            if (user / "target").exists():
-                raise RuntimeError("Fresh user compiled output required")
-            scoped = "|".join(re.escape(str(user / p)) for p in USER_FILES)
-            command = [*common, "-DspotlessFiles=" + scoped, "test-compile"]
-            report["executedGroupNames"].append("user-compile")
-            report["compileExit"] = support.bounded(command, user, env, private / "user-compile.log", 420, compile_end)
-            if report["compileExit"]:
-                report["compileDiagnostics"] = compile_diagnostics(private/"user-compile.log")
-                if report["compileDiagnostics"]["spotlessConfirmed"]:
-                    report["formatterAttempted"] = True
-                    report["plannedGroups"] = planned_groups(args.role,True)
-                    report["testsNotStartedBecauseCompileFailed"] = True
-                    report["formatProposal"] = mechanical_proposal(user,args.user_ref,support,env,private,out,compile_end,report)
-                    report["classification"] = "MECHANICAL_PROPOSAL_ONLY_NO_FEATURE_RED"
-                return 1
-            compiled = user / "target/test-classes" / Path(USER_SUITE.replace(".", "/") + ".class")
-            report["compiledTestSHA256"] = hashlib.sha256(compiled.read_bytes()).hexdigest()
-            report["compiledTests"] = {name:hashlib.sha256((user/"target/test-classes"/
-                Path(name.replace(".","/")+".class")).read_bytes()).hexdigest() for name in USER_SUITES}
             reports = user / "target/surefire-reports"
             if reports.exists():
                 raise RuntimeError("Fresh user XML directory required")
@@ -498,6 +567,8 @@ def main():
             network, container = "oriso-s1-net-" + run[:12], "oriso-s1-kc-" + run[:12]
             owned.plan("network", network)
             owned.plan("container", container)
+            redis_container = "oriso-s1-redis-"+run[:12]
+            owned.plan("container",redis_container)
             report["runId"] = run
             report["planned"] = [{"kind": k, "name": v} for k, v in owned.planned]
             for kind, name in owned.planned:
@@ -505,6 +576,7 @@ def main():
                     raise RuntimeError("Planned exact resource already exists")
             support.free_guard()
             support.resources.docker("pull", native.IMAGE)
+            support.resources.docker("pull", REDIS_IMAGE)
             support.resources.docker("network", "create", "--label", "oriso-s1-run=" + run, network)
             command = ["run", "-d", "--name", container, "--label", "oriso-s1-run=" + run,
                        "--network", network, "--memory", "1024m", "--memory-swap", "1024m",
@@ -550,15 +622,52 @@ def main():
                     time.sleep(1)
             if not installer:
                 raise RuntimeError("Finite native readiness unavailable")
+            support.free_guard()
+            support.resources.docker("run","-d","--name",redis_container,"--label","oriso-s1-run="+run,
+                "--network",network,"--memory","128m","--memory-swap","128m","--cpus","1",
+                "-p","127.0.0.1::6379",REDIS_IMAGE,"redis-server","--save","","--appendonly","no",
+                "--maxmemory","96mb","--maxmemory-policy","noeviction")
+            redis_meta=owned.inspect("container",redis_container)
+            if ((redis_meta.get("Config",{}).get("Labels") or {}).get(owned.label_key)!=run
+                    or redis_meta.get("HostConfig",{}).get("Memory")!=REDIS_MIB*1024*1024
+                    or redis_meta.get("HostConfig",{}).get("MemorySwap")!=REDIS_MIB*1024*1024):
+                raise RuntimeError("Exact owned Redis cap/no-swap required")
+            redis_port=redis_meta["NetworkSettings"]["Ports"]["6379/tcp"][0]["HostPort"]
+            redis_ready=False
+            while time.monotonic()<ready_end:
+                support.free_guard()
+                try:
+                    with socket.create_connection(("127.0.0.1",int(redis_port)),timeout=1) as redis_socket:
+                        redis_socket.sendall(b"*1\r\n$4\r\nPING\r\n")
+                        if redis_socket.recv(64)==b"+PONG\r\n":
+                            redis_ready=True
+                            break
+                except OSError:time.sleep(0.2)
+            if not redis_ready:raise RuntimeError("Finite actual Redis readiness unavailable")
+            report["redisLimitAndNoSwapVerified"]=True
+            report["redisImage"]=REDIS_IMAGE
             report["nativeResourcesStarted"] = True
-            env.update(S1_NATIVE_BASE=base, S1_INSTALLER_BEARER=installer, S1_CHILD_EVIDENCE=str(out))
+            env.update(S1_NATIVE_BASE=base, S1_INSTALLER_BEARER=installer, S1_CHILD_EVIDENCE=str(out),
+                S1_PAIR_ENABLED="true",S1_REDIS_PORT=redis_port,S1_USER_SOURCE=str(user),S1_PAIR_PRIVATE=str(private))
             report["executedGroupNames"].append("native-test")
             report["testExit"] = support.bounded([sys.executable, str(Path(__file__).resolve()), "--native-child"],
                 root, env, private / "native-tests.log", 300, overall)
             receipt = json.loads((out / "native-observation.json").read_text())
             report.update(receipt)
+            if not native_exit_agrees(receipt["counts"],report["testExit"]):
+                raise RuntimeError("Native process exit and XML must agree")
             report["classification"] = native_classification(receipt)
-            status = 0 if report["classification"] == "NATIVE_TRACER_GREEN_INCOMPLETE" else 1
+            if receipt.get("paired") is None:
+                report["nativeAssertionClassification"]=report["classification"]
+                report["classification"]="INCOMPLETE_PAIRED_NOT_REACHED"
+                report["pairedClassification"]="NOT_REACHED_NO_CREDIT"
+                status=1
+            else:
+                paired=pair_classification(receipt["paired"])
+                report["pairedClassification"]=paired
+                if paired=="PAIRED_PRIVATE_CALLER_ASSERTION_RED":
+                    report["classification"]=paired
+                status = 0 if report["classification"] == "NATIVE_TRACER_GREEN_INCOMPLETE" and paired=="PAIRED_PRIVATE_CALLER_GREEN" else 1
     except Exception as failure:
         report["failureType"] = type(failure).__name__
         report["classification"] = ("BOUNDED_EXECUTION_OR_RESOURCE_REFUSAL" if isinstance(failure,
@@ -566,7 +675,8 @@ def main():
     finally:
         if owned is not None:
             try:
-                report["ownedMemory"] = support.owned_memory_snapshot(owned, container)
+                report["ownedMemory"] = {row["name"]:support.owned_memory_snapshot(owned,row["name"])
+                    for row in report["planned"] if row["kind"]=="container"}
                 if not report.get("nativeResourcesStarted") or report.get("testExit"):
                     try:
                         report["safeNativeFailureFrames"] = native_failure_frames(support.resources.docker("logs","--tail","300",container))
@@ -601,7 +711,7 @@ def main():
             report["failureType"] = type(failure).__name__
             status = 1
         report["totalDeadlineRetained"] = time.monotonic() <= overall
-        report["runtimeKnown"] = args.role == "user" or runtime_known(report.get("cleanup",[]))
+        report["runtimeKnown"] = args.role == "user" or runtime_known(report.get("cleanup",[]),report.get("planned",[]))
         if not report["sourceStable"] or not report["totalDeadlineRetained"] or not report["groupsAbsent"] or not report["runtimeKnown"]:
             report["classification"] = "SOURCE_RESOURCE_OR_INCOMPLETE_REFUSAL"
             status = 1
