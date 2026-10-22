@@ -33,6 +33,7 @@ from protected_fence_cases import ProtectedFenceCases
 from protected_expiry_cases import ProtectedExpiryCases
 from protected_reconciliation_cases import ProtectedReconciliationCases
 from protected_approval_replay_cases import ProtectedApprovalReplayCases
+from protected_impersonation_cases import ProtectedImpersonationCases
 
 HUMAN = None  # Set only from the actual native user lookup, never a proposed UUID.
 ISSUER = "http://protected-fixture.invalid/realms/" + REALM
@@ -40,6 +41,7 @@ HUMAN_PASSWORD = "synthetic-human-password-0001"
 
 
 class ProtectedInvitations(
+    ProtectedImpersonationCases,
     ProtectedApprovalReplayCases,
     ProtectedCreationCases,
     ProtectedTerminalCases,
@@ -79,6 +81,7 @@ class ProtectedInvitations(
         cls.expired_commit_observation = None
         cls.creation_reconciliation_observation = None
         cls.duplicate_workflow_observation = None
+        cls.impersonation_observation = None
         cls.phase = "initial-native-start"
         # Two finite boots: existing installer builds real native state; provider then
         # starts with privileged exact IDs over that same persisted native database.
@@ -492,25 +495,35 @@ class ProtectedInvitations(
     def setUp(self):
         pass
 
-    def human(self, username="reviewed-human", expected_subject=None, record=True):
+    def human(
+        self,
+        username="reviewed-human",
+        expected_subject=None,
+        record=True,
+        native_bearer=None,
+    ):
         expected_subject = HUMAN if expected_subject is None else expected_subject
         require_active("human-preconditions")
         type(self).phase = "human-preconditions"
-        status, value = call(
-            self.base,
-            "POST",
-            "/realms/" + REALM + "/protocol/openid-connect/token",
-            {
-                "client_id": "protected-human-web",
-                "grant_type": "password",
-                "username": username,
-                "password": HUMAN_PASSWORD,
-                "scope": "openid",
-            },
-            form=True,
-        )
-        self.assertEqual(200, status)
-        bearer = value["access_token"]
+        if native_bearer is None:
+            status, value = call(
+                self.base,
+                "POST",
+                "/realms/" + REALM + "/protocol/openid-connect/token",
+                {
+                    "client_id": "protected-human-web",
+                    "grant_type": "password",
+                    "username": username,
+                    "password": HUMAN_PASSWORD,
+                    "scope": "openid",
+                },
+                form=True,
+            )
+            self.assertEqual(200, status)
+            bearer = value["access_token"]
+        else:
+            self.assertIsInstance(native_bearer, str)
+            bearer = native_bearer
         payload = bearer.split(".")[1]
         claims = json.loads(
             base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
