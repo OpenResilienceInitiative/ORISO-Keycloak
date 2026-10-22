@@ -589,6 +589,44 @@ class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
             self.admin("PUT", "/users/" + self.account_id + "/reset-password",
                        {"type": "password", "value": original_password, "temporary": False})
 
+        # A fresh bearer may resolve an old committed outcome but cannot extend a frozen
+        # password intent's original deadline into a previously absent credential write.
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        deadline = int(time.time()) + 8
+        bounded = {"target": target, "operationId": str(uuid.uuid4()),
+                   "expectedState": current["state"], "authorityValidUntil": deadline,
+                   "change": {"currentPassword": original_password,
+                              "password": "Synthetic-bounded-" + uuid.uuid4().hex,
+                              "temporary": False}}
+        self.phase("human-password-deadline-preconditions", exact_self_read=True,
+                   current_native_session=True, original_password_verified=login(original_password) == 200,
+                   original_deadline_still_future=deadline > time.time())
+        try:
+            status, changed = self.invoke("self-password", bounded, human, 200)
+            self.phase("human-password-deadline-positive-reply", status=status,
+                       original_deadline_still_future=deadline > time.time())
+            self.assertEqual(200, status)
+            self.assertEqual(200, login(bounded["change"]["password"]))
+            while time.time() <= deadline:
+                time.sleep(0.1)
+            self.assertEqual((200, changed), self.invoke("self-password", bounded, human, 200))
+            absent = copy.deepcopy(bounded)
+            absent["operationId"] = str(uuid.uuid4())
+            status, current = self.invoke("read", {"target": target}, human, 200)
+            self.assertEqual(200, status)
+            absent["expectedState"] = current["state"]
+            absent["change"]["currentPassword"] = bounded["change"]["password"]
+            absent["change"]["password"] = "Synthetic-expired-no-effect-" + uuid.uuid4().hex
+            self.assertEqual(400, self.invoke("self-password", absent, human, 400)[0])
+            self.assertEqual(200, login(bounded["change"]["password"]))
+            self.assertEqual(400, login(absent["change"]["password"]))
+            self.phase("human-password-expired-outcome-fence", exact_old_receipt_only=True,
+                       expired_absent_has_no_write=True, no_original_deadline_extension=True)
+        finally:
+            self.admin("PUT", "/users/" + self.account_id + "/reset-password",
+                       {"type": "password", "value": original_password, "temporary": False})
+
     def test_real_human_self_locale_keeps_admin_receipt_owner_and_rejects_origin_mix(
         self,
     ):

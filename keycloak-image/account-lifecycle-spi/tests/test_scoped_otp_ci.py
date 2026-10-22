@@ -120,5 +120,16 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
         self.assertEqual('GENUINE_PROTECTED_SELF_MAINTENANCE_READ403_RED',
                          classify(dict(read, protectedSelfMaintenanceReadStatus=403)))
         self.assertEqual('BEHAVIOR_FAILURE', classify(dict(read, protectedSelfMaintenanceReadStatus=200)))
-        self.assertEqual('GREEN', classify(dict(read, protectedSelfMaintenanceReadStatus=200,
-                                               closedProtectedCurrentStateVerified=True)))
+        app = dict(read, protectedSelfMaintenanceReadStatus=200,
+                   closedProtectedCurrentStateVerified=True,
+                   newPlatformCommittedConsumedNative0AndRealSessionVerified=True,
+                   newPlatformExplicitRootSelfGrantWithoutPersonBindingVerified=True,
+                   newPlatformSelfOriginalReadAndStateVerified=True,
+                   protectedAppCurrentStateAndOriginalSetupSecretVerified=True)
+        self.assertEqual('GENUINE_NEW_PLATFORM_SELF_OTP_READ403_RED', classify(dict(app, newPlatformSelfOtpReadStatus=403)))
+        self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(app, newPlatformExplicitRootSelfGrantWithoutPersonBindingVerified=False)))
+        self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(app,
+                         protectedAppCurrentStateAndOriginalSetupSecretVerified=False)))
+        self.assertEqual('GENUINE_PROTECTED_SELF_OTP_APP403_RED', classify(dict(app, protectedSelfAppSetupStatus=403)))
+        self.assertEqual('GREEN', classify(dict(app, protectedSelfAppSetupStatus=201,
+                                               protectedSelfAppNativeEffectAndExactRetryVerified=True)))
