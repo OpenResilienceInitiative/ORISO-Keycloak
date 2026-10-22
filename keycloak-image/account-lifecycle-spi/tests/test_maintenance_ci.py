@@ -92,6 +92,26 @@ class MaintenanceEvidenceGate(unittest.TestCase):
                    if isinstance(item, ast.FunctionDef) and item.name.startswith("test_")]
         self.assertEqual(6, len(methods))
 
+    def test_binding_drift_requires_actual_exit_source_and_unchanged_native_runtime(self):
+        from maintenance_readiness import classify
+        base = {"validHumanReadStatus": 200, "reviewedUnusedProfileInstalled": True,
+                "exactUnusedGroupNameOnlyDrift": True, "primaryHumanAndOrdinaryMappingUnchanged": True,
+                "sameJarImageConfigVolumeAndCaps": True, "bindingValidationSourceWitness": True,
+                "nativeExitedNonzeroWithoutOom": True, "driftHumanLoginStatus": 0}
+        self.assertEqual("GENUINE_HUMAN_BINDING_ABORTS_NATIVE_LOGIN_RED", classify(base))
+        for key in ("reviewedUnusedProfileInstalled", "exactUnusedGroupNameOnlyDrift",
+                    "primaryHumanAndOrdinaryMappingUnchanged", "sameJarImageConfigVolumeAndCaps",
+                    "bindingValidationSourceWitness", "nativeExitedNonzeroWithoutOom"):
+            self.assertEqual("INPUT_OR_FIXTURE_ERROR", classify(dict(base, **{key: False})))
+        self.assertEqual("INPUT_OR_FIXTURE_ERROR", classify({}))
+        green = dict(base, nativeExitedNonzeroWithoutOom=False, bindingValidationSourceWitness=False,
+                     driftHumanLoginStatus=200, selfStatus=503, otpStatus=503,
+                     bothUnavailableNoStore=True, ordinaryMachineCreationReadDeleteVerified=True,
+                     wrongActorAndProofDeniedBeforeReadiness=True)
+        self.assertEqual("GREEN", classify(green))
+        self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, bothUnavailableNoStore=False)))
+        self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, ordinaryMachineCreationReadDeleteVerified=False)))
+
     def test_manifests_exclude_compiled_outputs_but_bind_real_source(self):
         (self.root / "target").mkdir()
         (self.root / "target/private.jar").write_bytes(b"compiled")

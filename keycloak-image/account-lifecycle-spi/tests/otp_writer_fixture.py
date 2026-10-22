@@ -110,6 +110,30 @@ def launch(fixture, arguments, image):
     return result
 
 
+def wait_rows(output):
+    prefix = "ORISO_PROOF_OTP_WAIT_V1 "
+    fields = {"schema", "rowCount", "nativeBlockedState", "capturedBlockerMatches", "otherSession",
+              "realmTable", "forUpdate", "realmParameterSuffix", "exactOriginalGrammar"}
+    rows = []
+    for line in output.splitlines():
+        if prefix not in line:
+            continue
+        row = json.loads(line.split(prefix, 1)[1])
+        if (set(row) != fields or row["schema"] != 1 or type(row["rowCount"]) is not int
+                or not 0 <= row["rowCount"] <= 1000
+                or any(type(row[k]) is not bool for k in fields - {"schema", "rowCount"})):
+            raise AssertionError("Closed finite native wait observation required")
+        rows.append(row)
+    if len(rows) > 1:
+        raise AssertionError("Exactly one bounded native wait sample permitted")
+    return rows
+
+
+def wait_observations(fixture):
+    output = subprocess.run(["docker", "logs", fixture.name], check=True, capture_output=True, text=True, timeout=10)
+    return wait_rows(output.stdout + output.stderr)
+
+
 def observations(fixture):
     output = subprocess.run(["docker", "logs", fixture.name], check=True, capture_output=True, text=True, timeout=10)
     rows = []
@@ -164,6 +188,8 @@ def concurrent_start(fixture, control, start_request, cancel_request, observed):
                 break
             time.sleep(0.025)
         if not matched or cancellation.done() or mail.writer_timed_out:
+            observed["inflightFixedPhase"] = "CANCEL_WAIT_WITNESS_MISSING"
+            observed["inflightCancellationFutureBeforeRelease"] = future_observation(cancellation)
             raise AssertionError("Actual cancel must be blocked by the captured native SMTP writer")
         observed["inflightCancelBlockedByActualWriter"] = True
     finally:
@@ -172,7 +198,9 @@ def concurrent_start(fixture, control, start_request, cancel_request, observed):
         pool.shutdown(wait=True, cancel_futures=False)
         mail.writer_armed = False
         observed["inflightWriterFutureAfterRelease"] = future_observation(writer)
+        observed["inflightCancellationFutureAfterRelease"] = None if cancellation is None else future_observation(cancellation)
         observed["inflightNativeWriterEventsAfterRelease"] = observations(fixture)
+        observed["inflightNativeWaitSample"] = wait_observations(fixture)
     ready = writer.result(timeout=1)
     cancelled = cancellation.result(timeout=1) if cancellation is not None else None
     deadline = time.monotonic() + 2

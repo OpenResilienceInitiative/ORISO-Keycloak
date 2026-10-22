@@ -154,6 +154,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
       var tx = session.getTransactionManager(); tx.begin();
       try {
         var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
+        boolean sampled = false;
         long deadline = System.nanoTime() + 3_500_000_000L;
         while (!witness.finished.get() && System.nanoTime() < deadline) {
           var rows = em.createNativeQuery("select SESSION_ID, SESSION_STATE, BLOCKER_ID, EXECUTING_STATEMENT from INFORMATION_SCHEMA.SESSIONS where BLOCKER_ID=:writer")
@@ -164,6 +165,14 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
                 .replace('"', ' ').replaceAll("\\s+", " ").trim();
             boolean exact = sql.matches("select .+ from (public\\.)?realm [a-z0-9_]+ where [a-z0-9_]+\\.id=\\? for update \\{1: '"
                 + java.util.regex.Pattern.quote(witness.realm) + "'\\}");
+            if (!sampled) {
+              waitObservation(rows.size(), "BLOCKED".equals(row[1]),
+                  row[2] instanceof Number blocker && blocker.longValue() == witness.connection,
+                  ((Number) row[0]).longValue() != witness.connection,
+                  sql.matches(".* from (public\\.)?realm [a-z0-9_]+ .*"),
+                  sql.contains(" for update"), sql.endsWith("{1: '" + witness.realm + "'}"), exact);
+              sampled = true;
+            }
             if (((Number) row[0]).longValue() != witness.connection && "BLOCKED".equals(row[1])
                 && row[2] instanceof Number n && n.longValue() == witness.connection && exact) {
               witness.blocked.set(true); emit("BLOCKED", witness); return;
@@ -171,10 +180,22 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
           }
           Thread.sleep(25);
         }
+        if (!sampled) waitObservation(0, false, false, false, false, false, false, false);
       } finally { if (tx.isActive()) tx.rollback(); }
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt(); witness.failed.set(true); emit("FAILED", witness);
     } catch (RuntimeException failure) { witness.failed.set(true); emit("FAILED", witness); }
+  }
+
+  private static void waitObservation(int count, boolean blocked, boolean blocker, boolean other,
+      boolean realm, boolean update, boolean parameter, boolean exact) {
+    var values = new TreeMap<String, Object>();
+    values.put("schema", 1); values.put("rowCount", count);
+    values.put("nativeBlockedState", blocked); values.put("capturedBlockerMatches", blocker);
+    values.put("otherSession", other); values.put("realmTable", realm); values.put("forUpdate", update);
+    values.put("realmParameterSuffix", parameter); values.put("exactOriginalGrammar", exact);
+    try { System.out.println("ORISO_PROOF_OTP_WAIT_V1 " + new ObjectMapper().writeValueAsString(values)); }
+    catch (java.io.IOException failure) { throw new IllegalStateException("Proof wait observation unavailable"); }
   }
 
   private static void emit(String phase, Witness witness) {

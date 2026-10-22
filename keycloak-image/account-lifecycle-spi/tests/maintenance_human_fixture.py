@@ -31,6 +31,10 @@ class HumanMaintenanceFixture(LifecycleFixture):
     phase_receipts = []
 
     @classmethod
+    def install_unused_readiness_profile(cls):
+        return False
+
+    @classmethod
     def extra_launch_arguments(cls):
         return []
 
@@ -240,6 +244,15 @@ class HumanMaintenanceFixture(LifecycleFixture):
                 }
             ],
         }
+        if cls.install_unused_readiness_profile():
+            parent = helper.group_id("/human-roles")
+            helper.admin("POST", "/groups/" + parent + "/children", {"name": "readiness-unused"})
+            cls.unused_readiness_group = helper.group_id("/human-roles/readiness-unused")
+            helper.admin("POST", "/groups/" + cls.unused_readiness_group + "/role-mappings/realm", roles)
+            unused = dict(config["ordinaryProfiles"][0])
+            unused.update(id="readiness-unused-v1", groupId=cls.unused_readiness_group,
+                          groupPath="/human-roles/readiness-unused")
+            config["ordinaryProfiles"].append(unused)
         helper.human()
         original(
             ["docker", "stop", "-t", "5", cls.name],
@@ -257,6 +270,7 @@ class HumanMaintenanceFixture(LifecycleFixture):
             "ORISO_ACCOUNT_MAINTENANCE_CONFIG="
             + json.dumps(config, separators=(",", ":")),
         ]
+        cls.configured_command = command.copy()
         original(command, check=True, capture_output=True, timeout=30)
         cls.refresh_endpoint("human-policy-restart")
         cls.ready()
@@ -424,8 +438,10 @@ class HumanMaintenanceFixture(LifecycleFixture):
         try:
             with urlopen(request, timeout=30) as response:
                 status, raw = response.status, response.read()
+                self.last_response_no_store = "no-store" in response.headers.get("Cache-Control", "")
         except HTTPError as error:
             status, raw = error.code, error.read()
+            self.last_response_no_store = "no-store" in error.headers.get("Cache-Control", "")
         value = json.loads(raw) if raw else None
         self.phase(
             "human-maintenance-http",
