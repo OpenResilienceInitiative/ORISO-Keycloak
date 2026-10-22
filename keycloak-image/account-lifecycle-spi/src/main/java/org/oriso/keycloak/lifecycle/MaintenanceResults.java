@@ -9,7 +9,7 @@ import org.keycloak.models.KeycloakSession;
 final class MaintenanceResults {
   static Response noEffect(KeycloakSession session, LifecycleAuthorization crypto,
       LifecycleAuthorization.CheckedMachine machine, MaintenanceRequest request, JsonNode body, int status) {
-    if (!allowedStatus(request.command(), status)) deny();
+    if (!allowedStatus(request, status)) deny();
     String digest = crypto.mac("maintenance-intent", body);
     var payload = payload(session, crypto, machine, request, digest, "NO_EFFECT"); payload.put("status", status);
     var result = JSON.createObjectNode(); result.put("operationId", request.operationId());
@@ -28,7 +28,7 @@ final class MaintenanceResults {
     if (!request.operationId().equals(result.path("operationId").asText())
         || !request.accountId().equals(result.path("accountId").asText())) deny();
     int status = refused ? (int) number(result, "status", true) : 200;
-    if (refused && !allowedStatus(request.command(), status) || !refused && !"UPDATED".equals(result.path("result").asText())) deny();
+    if (refused && !allowedStatus(request, status) || !refused && !"UPDATED".equals(result.path("result").asText())) deny();
     var value = JSON.createObjectNode(); value.put("realmId", prior.realmId); value.put("accountId", prior.accountId);
     value.put("operationId", prior.operationId); value.put("command", prior.command); value.put("ownerClient", prior.ownerClient);
     value.put("ownerSubject", prior.ownerSubject); value.put("intentDigest", prior.intentDigest); value.put("previousState", prior.expectedState);
@@ -64,8 +64,15 @@ final class MaintenanceResults {
     persist(session, machine, request, digest, result); CurrentNativeHumanIdentity.entityManager(session).flush();
     return Response.ok(result).header("Cache-Control", "no-store").build();
   }
-  private static boolean allowedStatus(String command, int status) {
-    return status == 403 || status == 409 || status == 400 && java.util.Set.of("password-reset", "self-password").contains(command);
+  private static boolean allowedStatus(MaintenanceRequest request, int status) {
+    return status == 403 || status == 409 || status == 400 && (java.util.Set.of("password-reset", "self-password").contains(request.command()) || passwordReactivation(request));
+  }
+  static boolean passwordReactivation(MaintenanceRequest request) {
+    if (!"reactivate".equals(request.command()) || request.workflow() != null || request.change() == null
+        || !request.change().isObject() || request.change().size() != 3) return false;
+    for (String key : java.util.List.of("expectedUsername", "expectedEmail", "password"))
+      if (!request.change().path(key).isTextual() || request.change().path(key).asText().isBlank()) return false;
+    return true;
   }
   private MaintenanceResults() {}
 }

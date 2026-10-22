@@ -40,7 +40,8 @@ final class OrdinaryAccountOperations {
     if (user == null) throw MaintenancePreflightRefusal.current(409);
     if ("reactivate".equals(request.command())
         && session.getProvider(org.keycloak.policy.PasswordPolicyManagerProvider.class)
-            .validate(realm, user, request.change().path("password").textValue()) != null) bad();
+            .validate(realm, user, request.change().path("password").textValue()) != null)
+      throw MaintenancePreflightRefusal.passwordPolicy(request);
     // Every definite preflight check above precedes the first native write below.
     switch (request.command()) {
       case "profile", "email" -> profile(user, request.change());
