@@ -513,7 +513,6 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             self.assertEqual(400,replay_status)
             self.assertNotIn("access_token",replay_error)
             self.assertEqual(before_failure,session_ids(),"Failed replay must preserve the original session")
-            SESSION_CHECKS["postTokenPolicyFailureNoOrphan"]=True
         finally:
             try:
                 self.admin("PUT","/client-policies/policies",initial_policies)
@@ -523,3 +522,86 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
                 self.assertEqual(initial_profiles,self.admin("GET","/client-policies/profiles"))
             except AssertionError as failure:
                 raise RuntimeError("Native response policy fixture restoration") from failure
+
+        self.assertEqual(401,exchange(failed)[0],"Failed fresh workflow must remain occupied without replacement")
+        self.assertEqual(before_failure,session_ids())
+        restored_status,restored_reply=exchange(body)
+        self.assertEqual(200,restored_status)
+        self.assertEqual(sid,claims(restored_reply).get("sid"))
+        self.assertEqual(before_failure,session_ids())
+        SESSION_CHECKS["postTokenPolicyFailureNoOrphan"]=True
+
+
+LEGACY_CHECKS = dict.fromkeys(("productFlowPreserved","passwordAccepted","wrongPasswordRefused",
+    "appMfaMissingWrongCorrect","claimedCommandRefused","nativeSubjectAndClient"),False)
+
+
+class LegacySessionExchangeNative(SessionExchangeNative):
+    # Reuse the exact product realm/actor setup; do not execute the scoped lifecycle case.
+    test_checked_claim_enters_native_session_path = None
+
+    def test_default_legacy_password_and_app_otp(self):
+        self.assertTrue(OBSERVATIONS["sourceOtpExecutionsPreserved"])
+        app_fields=("clientId","enabled","publicClient","standardFlowEnabled",
+            "directAccessGrantsEnabled","serviceAccountsEnabled","fullScopeAllowed",
+            "defaultClientScopes","optionalClientScopes","protocol","consentRequired",
+            "authenticationFlowBindingOverrides","attributes")
+        app={key:self.source_app[key] for key in app_fields}
+        username="s1-legacy-"+uuid.uuid4().hex
+        password="S1-native-password-"+uuid.uuid4().hex
+        try:
+            self.admin("POST","/clients",app)
+            current_app=self.admin("GET","/clients?clientId=app")[0]
+            for field in app_fields:
+                expected,actual=app[field],current_app[field]
+                if field=="attributes":actual={key:actual.get(key) for key in expected}
+                if field in {"defaultClientScopes","optionalClientScopes"}:expected,actual=set(expected),set(actual)
+                self.assertEqual(expected,actual)
+            # Installer-owned disposable human, using the complete native managed profile.
+            self.admin("POST","/users",{"username":username,"email":username+"@oriso.org",
+                "firstName":"Native","lastName":"Legacy","emailVerified":True,"enabled":True,
+                "credentials":[{"type":"password","value":password,"temporary":False}]})
+            users=self.admin("GET","/users?exact=true&username="+username)
+            self.assertEqual(1,len(users));target=users[0]
+            self.assertIs(True,target["enabled"])
+            self.assertEqual(username,target["username"])
+            self.assertFalse(target.get("requiredActions"))
+        except (AssertionError,KeyError,IndexError) as failure:
+            raise RuntimeError("Native default legacy fixture precondition") from failure
+        LEGACY_CHECKS["productFlowPreserved"]=True
+        token_path="/realms/"+native.REALM+"/protocol/openid-connect/token"
+        def login(**changes):
+            return native.call(self.base,"POST",token_path,{"client_id":"app","grant_type":"password",
+                "username":username,"password":password,**changes},form=True)
+        self.assertEqual(401,login(password="wrong-native-password")[0])
+        LEGACY_CHECKS["wrongPasswordRefused"]=True
+        status,reply=login();self.assertEqual(200,status)
+        encoded=reply["access_token"].split(".")[1]
+        claims=json.loads(base64.urlsafe_b64decode(encoded+"="*(-len(encoded)%4)))
+        self.assertEqual(target["id"],claims.get("sub"));self.assertEqual("app",claims.get("azp"))
+        self.assertTrue(claims.get("sid"))
+        LEGACY_CHECKS["passwordAccepted"]=True;LEGACY_CHECKS["nativeSubjectAndClient"]=True
+        seed="native-s1-legacy-"+uuid.uuid4().hex
+        data={"subType":"totp","digits":6,"counter":0,"period":30,"algorithm":"HmacSHA1"}
+        try:
+            original=self.admin("GET","/users/"+target["id"]+"/credentials")
+            self.admin("PUT","/users/"+target["id"],{**target,"credentials":[{"type":"otp",
+                "secretData":json.dumps({"value":seed}),"credentialData":json.dumps(data)}]})
+            current=self.admin("GET","/users/"+target["id"]+"/credentials")
+            otp=[row for row in current if row["type"]=="otp"]
+            self.assertEqual(1,len(otp))
+            self.assertTrue({row["id"] for row in original}.issubset({row["id"] for row in current}))
+            for field,value in data.items():self.assertEqual(value,json.loads(otp[0]["credentialData"])[field])
+        except (AssertionError,KeyError) as failure:
+            raise RuntimeError("Native legacy OTP credential precondition") from failure
+        def code(counter):
+            value=hmac.new(seed.encode(),struct.pack(">Q",counter),hashlib.sha1).digest();offset=value[-1]&15
+            return str((struct.unpack(">I",value[offset:offset+4])[0]&0x7fffffff)%1000000).zfill(6)
+        counter=int(time.time())//30
+        nearby={code(counter+offset) for offset in range(-5,6)}
+        wrong=next(str(value).zfill(6) for value in range(100) if str(value).zfill(6) not in nearby)
+        status,challenge=login();self.assertEqual(400,status);self.assertEqual("APP",challenge.get("otpType"))
+        self.assertEqual(400,login(otp=wrong)[0]);self.assertEqual(200,login(otp=code(counter))[0])
+        LEGACY_CHECKS["appMfaMissingWrongCorrect"]=True
+        self.assertEqual(401,login(oriso_magic_command="{}")[0])
+        LEGACY_CHECKS["claimedCommandRefused"]=True

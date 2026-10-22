@@ -36,6 +36,9 @@ USER_SUITES = {
     "de.caritas.cob.userservice.api.adapters.keycloak.KeycloakIdentitySessionExchangeTest": 19,
 }
 NATIVE_SUITE = "session_exchange_native.SessionExchangeNative"
+LEGACY_SUITE = "session_exchange_native.LegacySessionExchangeNative"
+LEGACY_FLAGS = {"productFlowPreserved","passwordAccepted","wrongPasswordRefused",
+    "appMfaMissingWrongCorrect","claimedCommandRefused","nativeSubjectAndClient"}
 USER_FILES = (
     "src/main/java/de/caritas/cob/userservice/api/config/auth/TaskActorTokenBroker.java",
     "src/test/java/de/caritas/cob/userservice/api/config/auth/SessionExchangeTokenBoundaryTest.java",
@@ -174,6 +177,25 @@ def native_classification(receipt):
     raise RuntimeError("Native tracer outcome is not qualified")
 
 
+
+def checked_legacy_checks(value):
+    if not isinstance(value,dict) or set(value)!=LEGACY_FLAGS or any(type(v) is not bool for v in value.values()):
+        raise RuntimeError("Exact legacy checks required")
+    return value
+
+
+def legacy_classification(receipt,exit_code):
+    checks=checked_legacy_checks(receipt["legacyChecks"])
+    if checks["productFlowPreserved"] is not True:raise RuntimeError("Legacy fixture precondition missing")
+    counts=receipt["counts"]
+    if not native_exit_agrees(counts,exit_code):raise RuntimeError("Legacy exit/XML mismatch")
+    expected={"name":"test_default_legacy_password_and_app_otp","outcome":"pass" if exit_code==0 else "failure"}
+    if receipt["cases"]!=[expected]:raise RuntimeError("Exact legacy case required")
+    if exit_code==0 and all(checks.values()):return "LEGACY_PASSWORD_MFA_GREEN"
+    if exit_code==1:return "LEGACY_PASSWORD_MFA_ASSERTION_FAILURE"
+    raise RuntimeError("Incomplete legacy result")
+
+
 def runtime_known(cleanup, planned):
     if (not isinstance(planned,list) or len(planned)!=3
             or sorted(row.get("kind") for row in planned)!=["container","container","network"]
@@ -284,12 +306,29 @@ def empty_owned_scratch(scratch, owner, runtemp):
     return (stat.st_dev,stat.st_ino,stat.st_uid) == owner and not list(scratch.iterdir())
 
 
+
+LEGACY_OMITTED_ENV = {"TASK_IDENTITY_MODEL","ORISO_TASK_CONTEXT_KEY","ORISO_ACCOUNT_LIFECYCLE_ENABLED",
+    "ORISO_ACCOUNT_LIFECYCLE_REALM","ORISO_ACCOUNT_LIFECYCLE_GROUPS",
+    "IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT","IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT"}
+
+
+def native_container_values(role,values):
+    if role not in {"native","legacy"}:raise RuntimeError("Exact native launch role required")
+    return {key:value for key,value in values.items() if role!="legacy" or key not in LEGACY_OMITTED_ENV}
+
+
+def legacy_env_omitted(values):
+    if not isinstance(values,list) or not all(isinstance(value,str) and "=" in value for value in values):return False
+    names={value.split("=",1)[0] for value in values}
+    return not names&LEGACY_OMITTED_ENV and not any(name.startswith("ORISO_ACCOUNT_LIFECYCLE_") for name in names)
+
+
 def planned_groups(role, formatted=False):
-    if type(formatted) is not bool or role not in {"user","native"}:
+    if type(formatted) is not bool or role not in {"user","native","legacy"}:
         raise RuntimeError("Known role/formatter-attempt state required")
     if formatted:
         return ["toolchain","user-compile","user-formatter"]
-    if role == "native":
+    if role in {"native","legacy"}:
         return ["toolchain","user-compile","lifecycle-compile","otp-compile","native-test"]
     return ["toolchain","user-compile","user-tests"]
 
@@ -392,7 +431,9 @@ def child():
     folder = root / "keycloak-image/account-lifecycle-spi/tests"
     sys.path.insert(0, str(folder))
     module = load("session_exchange_native", folder / "session_exchange_native.py")
-    suite = unittest.defaultTestLoader.loadTestsFromTestCase(module.SessionExchangeNative)
+    legacy=os.environ.get("S1_LEGACY_ONLY")=="true"
+    native_suite=LEGACY_SUITE if legacy else NATIVE_SUITE
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(module.LegacySessionExchangeNative if legacy else module.SessionExchangeNative)
     if suite.countTestCases() != 1:
         raise RuntimeError("Exact finite native tracer required")
     class Result(unittest.TestResult):
@@ -420,12 +461,12 @@ def child():
     out = Path(os.environ["S1_CHILD_EVIDENCE"])
     counts = {"tests": result.testsRun, "failures": len(result.failures),
               "errors": len(result.errors), "skipped": len(result.skipped)}
-    tree = ET.Element("testsuite", name=NATIVE_SUITE, **{k: str(v) for k, v in counts.items()})
+    tree = ET.Element("testsuite", name=native_suite, **{k: str(v) for k, v in counts.items()})
     for case in result.rows:
-        row = ET.SubElement(tree, "testcase", name=case["name"], classname=NATIVE_SUITE)
+        row = ET.SubElement(tree, "testcase", name=case["name"], classname=native_suite)
         if case["outcome"] != "pass":
             ET.SubElement(row, case["outcome"], message="S1 finite native tracer did not pass")
-    ET.ElementTree(tree).write(out / ("TEST-" + NATIVE_SUITE + ".xml"), encoding="utf-8", xml_declaration=True)
+    ET.ElementTree(tree).write(out / ("TEST-" + native_suite + ".xml"), encoding="utf-8", xml_declaration=True)
     paired = getattr(module,"PAIRED_EXPORT",None)
     if paired is not None:
         target=out/"paired-user"
@@ -437,6 +478,10 @@ def child():
                 row={"file":file,"line":int(line)}
                 if row not in frames:frames.append(row)
         paired={**paired,"suites":safe_xml(reports,target),"sourceFrames":frames[:8]}
+    if legacy:
+        (out / "native-observation.json").write_text(json.dumps({"counts":counts,"cases":result.rows,
+            "safePythonFailures":result.safe_failures,"legacyChecks":checked_legacy_checks(module.LEGACY_CHECKS)},sort_keys=True)+"\n")
+        return 0 if result.wasSuccessful() else 1
     (out / "native-observation.json").write_text(json.dumps({
         "counts": counts, "cases": result.rows, "observed": checked_observation(module.OBSERVATIONS),
         "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS),"tokenFacts":checked_token_facts(module.TOKEN_FACTS),"tenantKinds":checked_tenant_kinds(module.TENANT_KINDS),"paired":paired}, sort_keys=True) + "\n")
@@ -445,7 +490,7 @@ def child():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("role", choices=("user", "native"))
+    parser.add_argument("role", choices=("user", "native", "legacy"))
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--source-ref", required=True)
     parser.add_argument("--support", type=Path, required=True)
@@ -602,6 +647,10 @@ def main():
                 "IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT": native.SUBJECTS["ACCOUNT_ADMIN"],
                 "ORISO_TASK_CONTEXT_KEY": base64.b64encode(native.CONTEXT_KEY).decode(),
                 "ORISO_ACCOUNT_LIFECYCLE_GROUPS": json.dumps({"/human-roles/" + k: v for k, v in native.HUMAN_GROUPS.items()})}
+            values=native_container_values(args.role,values)
+            if args.role=="legacy":
+                report["legacyConfigurationOmitted"]=False
+                report["nativeClaimAuthority"]="defaultLEGACY password+APP OTP only; no scoped claim or Redis authority credit"
             for k, v in values.items():
                 command.extend(["-e", k + "=" + v])
             for name, jar in jars.items():
@@ -613,6 +662,9 @@ def main():
                     or metadata.get("HostConfig",{}).get("MemorySwap") != CONTAINER_MIB*1024*1024):
                 raise RuntimeError("Actual owned exact memory/no-swap container required")
             report["containerLimitAndNoSwapVerified"] = True
+            if args.role=="legacy":
+                report["legacyConfigurationOmitted"]=legacy_env_omitted(metadata.get("Config",{}).get("Env"))
+                if report["legacyConfigurationOmitted"] is not True:raise RuntimeError("Actual legacy JVM inherited C configuration")
             port = metadata["NetworkSettings"]["Ports"]["8080/tcp"][0]["HostPort"]
             base = "http://127.0.0.1:" + port
             ready_end, installer = min(time.monotonic()+120, overall), None
@@ -658,7 +710,8 @@ def main():
             report["redisImage"]=REDIS_IMAGE
             report["nativeResourcesStarted"] = True
             env.update(S1_NATIVE_BASE=base, S1_INSTALLER_BEARER=installer, S1_CHILD_EVIDENCE=str(out),
-                S1_PAIR_ENABLED="true",S1_REDIS_PORT=redis_port,S1_USER_SOURCE=str(user),S1_PAIR_PRIVATE=str(private))
+                S1_LEGACY_ONLY="true" if args.role=="legacy" else "false",
+                S1_PAIR_ENABLED="false" if args.role=="legacy" else "true",S1_REDIS_PORT=redis_port,S1_USER_SOURCE=str(user),S1_PAIR_PRIVATE=str(private))
             report["executedGroupNames"].append("native-test")
             report["testExit"] = support.bounded([sys.executable, str(Path(__file__).resolve()), "--native-child"],
                 root, env, private / "native-tests.log", 300, overall)
@@ -666,8 +719,16 @@ def main():
             report.update(receipt)
             if not native_exit_agrees(receipt["counts"],report["testExit"]):
                 raise RuntimeError("Native process exit and XML must agree")
-            report["classification"] = native_classification(receipt)
-            if receipt.get("paired") is None:
+            if args.role=="legacy":
+                if report.get("legacyConfigurationOmitted") is not True:raise RuntimeError("C configuration present in legacy JVM")
+                report["classification"]=legacy_classification(receipt,report["testExit"])
+                report["pairedClassification"]="NOT_APPLICABLE_NO_REDIS_CREDIT"
+                status=int(report["classification"]!="LEGACY_PASSWORD_MFA_GREEN")
+            else:
+                report["classification"] = native_classification(receipt)
+            if args.role=="legacy":
+                pass
+            elif receipt.get("paired") is None:
                 report["nativeAssertionClassification"]=report["classification"]
                 report["classification"]="INCOMPLETE_PAIRED_NOT_REACHED"
                 report["pairedClassification"]="NOT_REACHED_NO_CREDIT"

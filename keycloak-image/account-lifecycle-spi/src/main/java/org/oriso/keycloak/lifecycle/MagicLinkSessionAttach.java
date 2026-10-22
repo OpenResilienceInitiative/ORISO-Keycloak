@@ -4,6 +4,8 @@ import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.UUID;
 import org.keycloak.authentication.AuthenticationFlowContext;
+import org.keycloak.events.EventType;
+import org.keycloak.models.AbstractKeycloakTransaction;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.services.managers.AuthenticationManager;
 
@@ -53,6 +55,29 @@ public final class MagicLinkSessionAttach extends MagicLinkFlow {
         nativeSession.setNote("oriso.magic-link.workflow",row.workflow);
         nativeSession.setNote("oriso.magic-link.command",row.digest);
         nativeSession.setNote("oriso.magic-link.expiry",Long.toString(row.expiry));
+        // Native token generation/client policies run after this execution. Prepare runs
+        // before native session/JPA commit; EventBuilder stamps even unstored LOGIN success.
+        // Only this invocation's fresh session is eligible; replay sessions never enlist.
+        final String ownedSession = row.sessionId, ownedTarget = row.target,
+            ownedWorkflow = row.workflow, ownedDigest = row.digest,
+            ownedExpiry = Long.toString(row.expiry);
+        var result = context.getEvent();
+        session.getTransactionManager().enlistPrepare(new AbstractKeycloakTransaction() {
+          protected void commitImpl() {
+            var event = result.getEvent();
+            if (event.getTime()>0 && event.getType()==EventType.LOGIN && event.getError()==null
+                && realm.getId().equals(event.getRealmId()) && "app".equals(event.getClientId())
+                && ownedTarget.equals(event.getUserId()) && ownedSession.equals(event.getSessionId())) return;
+            var current = session.sessions().getUserSession(realm,ownedSession);
+            if (current == null) return;
+            if (!ownedSession.equals(current.getId()) || !ownedTarget.equals(current.getUser().getId())
+                || !ownedWorkflow.equals(current.getNote("oriso.magic-link.workflow"))
+                || !ownedDigest.equals(current.getNote("oriso.magic-link.command"))
+                || !ownedExpiry.equals(current.getNote("oriso.magic-link.expiry"))) LifecycleJson.deny();
+            session.sessions().removeUserSession(realm,current);
+          }
+          protected void rollbackImpl() { }
+        });
       } else {
         if (!realm.getId().equals(row.realmId) || !checked.workflow().equals(row.workflow)
             || !checked.target().equals(row.target) || !"app".equals(row.client)

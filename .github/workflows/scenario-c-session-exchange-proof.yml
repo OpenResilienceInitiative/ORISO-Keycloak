@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        role: [user, native]
+        role: [user, native, legacy]
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       GIT_CONFIG_NOSYSTEM: '1'

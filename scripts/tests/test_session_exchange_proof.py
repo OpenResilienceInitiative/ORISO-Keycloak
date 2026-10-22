@@ -96,6 +96,7 @@ class SessionProofControls(unittest.TestCase):
         self.assertEqual(["toolchain","user-compile","lifecycle-compile","otp-compile","native-test"],p.planned_groups("native",False))
         with self.assertRaises(RuntimeError):p.planned_groups("user","true")
         self.assertEqual(p.planned_groups("user",True),p.planned_groups("native",True))
+        self.assertEqual(p.planned_groups("native",False),p.planned_groups("legacy",False))
         with self.assertRaises(RuntimeError):p.planned_groups("unknown",False)
         three=[{"processGroup":i,"confirmedAbsent":True} for i in (1,2,3)]
         self.assertTrue(p.groups_ok(three,len(p.planned_groups("user",True))))
@@ -246,5 +247,44 @@ class SessionProofControls(unittest.TestCase):
         self.assertTrue(p.format_allowed([port],""))
         self.assertFalse(p.format_allowed([port.replace("Digest.java","DigestAdjacent.java")],""))
         self.assertFalse(p.format_allowed([port],"untracked.java"))
+
+
+class LegacyProofControls(unittest.TestCase):
+    def test_legacy_receipt_requires_exact_actual_case_flags_and_exit(self):
+        good={"legacyChecks":dict.fromkeys(p.LEGACY_FLAGS,True),
+              "counts":{"tests":1,"failures":0,"errors":0,"skipped":0},
+              "cases":[{"name":"test_default_legacy_password_and_app_otp","outcome":"pass"}]}
+        self.assertEqual("LEGACY_PASSWORD_MFA_GREEN",p.legacy_classification(good,0))
+        red=copy.deepcopy(good);red["legacyChecks"]["appMfaMissingWrongCorrect"]=False
+        red["counts"]["failures"]=1;red["cases"][0]["outcome"]="failure"
+        self.assertEqual("LEGACY_PASSWORD_MFA_ASSERTION_FAILURE",p.legacy_classification(red,1))
+        for flag in p.LEGACY_FLAGS:
+            for value in (False,1,"true",None):
+                bad=copy.deepcopy(good);bad["legacyChecks"][flag]=value
+                with self.subTest(flag=flag,value=value),self.assertRaises(RuntimeError):p.legacy_classification(bad,0)
+        for exit_code in (1,124,-9,True,None):
+            with self.assertRaises(RuntimeError):p.legacy_classification(good,exit_code)
+        for mutate in (lambda x:x["counts"].update(errors=1),lambda x:x["counts"].update(skipped=1),
+                       lambda x:x["cases"][0].update(name="other"),lambda x:x["legacyChecks"].update(private="no-export")):
+            bad=copy.deepcopy(good);mutate(bad)
+            with self.assertRaises(RuntimeError):p.legacy_classification(bad,0)
+        red["legacyChecks"]["productFlowPreserved"]=False
+        with self.assertRaises(RuntimeError):p.legacy_classification(red,1)
+
+    def test_default_legacy_container_omits_all_c_key_model_actor_bindings(self):
+        scoped={key:"synthetic" for key in p.LEGACY_OMITTED_ENV}
+        scoped.update(KC_BOOTSTRAP_ADMIN_USERNAME="fixture",JAVA_OPTS_APPEND="exact-existing-limit",
+                      IDENTITY_ACCOUNT_ADMIN_CLIENT_ID="backend-account-admin")
+        self.assertEqual(scoped,p.native_container_values("native",scoped))
+        legacy=p.native_container_values("legacy",scoped)
+        self.assertFalse(set(legacy)&p.LEGACY_OMITTED_ENV)
+        self.assertEqual({key:value for key,value in scoped.items() if key not in p.LEGACY_OMITTED_ENV},legacy)
+        self.assertEqual(7,len(p.LEGACY_OMITTED_ENV))
+        self.assertTrue(p.legacy_env_omitted(["JAVA_OPTS_APPEND=exact-limit","PATH=/known"]))
+        for key in [*p.LEGACY_OMITTED_ENV,"ORISO_ACCOUNT_LIFECYCLE_ADJACENT"]:
+            self.assertFalse(p.legacy_env_omitted(["JAVA_OPTS_APPEND=exact-limit",key+"="]))
+        for values in (None,{},[True],["no-assignment"]):self.assertFalse(p.legacy_env_omitted(values))
+        for role in ("user","unknown",True,None):
+            with self.assertRaises(RuntimeError):p.native_container_values(role,scoped)
 
 if __name__ == "__main__": unittest.main()
