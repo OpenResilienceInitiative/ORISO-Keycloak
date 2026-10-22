@@ -45,7 +45,7 @@ final class GeneralPolicy {
   }
 
   OrdinaryHuman requireSelf(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
-    if (!Set.of("read", "locale", "profile").contains(request.command())) deny();
+    if (!Set.of("read", "locale", "profile", "password").contains(request.command())) deny();
     return requireSelectedSelf(session, request, rawHumanBearer, "account." + request.command());
   }
 

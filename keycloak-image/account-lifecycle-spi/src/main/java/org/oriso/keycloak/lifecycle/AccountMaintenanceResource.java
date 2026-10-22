@@ -161,9 +161,17 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
     return selfMutation("profile", account, raw, proof, rawHumanBearer);
   }
 
+  @POST
+  @Path("v1/accounts/{account}/password")
+  public Response password(@PathParam("account") String account, byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String rawHumanBearer) {
+    return selfMutation("password", account, raw, proof, rawHumanBearer);
+  }
+
   private Response selfMutation(String command, String account, byte[] raw, String proof,
       String rawHumanBearer) {
-    if (!Set.of("locale", "profile").contains(command)) deny();
+    if (!Set.of("locale", "profile", "password").contains(command)) deny();
     return guarded(() -> {
       var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
       var body = parse(raw);
@@ -194,6 +202,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       }
       if ("locale".equals(command)) targets.locale(request, humanPolicy, rawHumanBearer);
       else if ("profile".equals(command)) targets.profile(request, humanPolicy, rawHumanBearer);
+      else if ("password".equals(command)) targets.password(request, humanPolicy, rawHumanBearer);
       else deny();
       var outcome = JSON.createObjectNode();
       outcome.put("realmId", realm.getId());
