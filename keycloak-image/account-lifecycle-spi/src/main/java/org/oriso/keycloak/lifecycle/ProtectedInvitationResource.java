@@ -739,6 +739,76 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     return result(row, 200);
   }
 
+  @GET
+  @Path("v1/approvals/{approval}/cleanup-status")
+  public Response cleanupStatus(@PathParam("approval") String approval,
+      @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> setupCleanupStatus(approval, proof));
+  }
+
+  private Response setupCleanupStatus(String approval, String proof) {
+    uuid(approval);
+    var body = JSON.createObjectNode();
+    var preflight = machineAuthorization.preflightMachine(session, Set.of("SETUP"));
+    var machine = preflight.machine();
+    String target = "realm/" + config.realmId + "/protected-invitation/" + approval;
+    crypto.verifyProtectedCommand(proof, machine, "protected-invitation.cleanup-status", "GET", target, body);
+    var em = lockedRealm();
+    var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
+    if (row != null) em.refresh(row);
+    machineAuthorization.requireCurrentMachine(session, preflight, Set.of("SETUP"));
+    crypto.verifyProtectedCommand(proof, machine, "protected-invitation.cleanup-status", "GET", target, body);
+    if (row == null) throw new NotFoundException();
+    var scope = parse(row.request).path("scope");
+    if (!machine.clientId().equals(scope.path("setupClient").asText())
+        || !machine.subject().equals(scope.path("setupSubject").asText())) deny();
+    if (!Set.of("CANCELLED", "EXPIRED").contains(row.state)
+        || row.transitionReceipt == null || row.boundAttemptId == null) conflict();
+    var current = lockedBoundAttempt(row, em);
+    if (current == null || !"compensate".equals(current.terminalOperation)
+        || !Set.of("COMPENSATED", "ABANDONED").contains(current.state)
+        || current.recoveryReceipt == null || current.terminalReceipt == null
+        || current.recoveryId == null || !current.recoveryId.equals(current.executionId)
+        || current.recoveryExpected == null || current.recoveryExpected == Long.MAX_VALUE
+        || current.recoveryExpected + 1 != current.generation) conflict();
+    hex(current.terminalDigest);
+    var transition = parse(row.transitionReceipt);
+    var originalBound = transition.path("boundAttemptId");
+    var fence = transition.path("fencedExecution");
+    if (originalBound.isTextual()) {
+      if (!current.attemptId.equals(uuid(originalBound.asText()))) conflict();
+      fields(fence, "executionId", "generation");
+      uuid(text(fence, "executionId", 36, false));
+      long generation = number(fence, "generation", true);
+      if (generation == Long.MAX_VALUE || current.recoveryExpected != generation
+          || !"COMPENSATED".equals(current.state) || current.accountId == null
+          || current.creationProof == null) conflict();
+    } else if (!originalBound.isMissingNode() || !fence.isMissingNode()
+        || !"ABANDONED".equals(current.state) || current.accountId != null
+        || current.creationProof != null || current.recoveryExpected != 0) conflict();
+    // The original restriction and current cleanup have distinct immutable provenance.
+    // This reader never changes the original status route or its saved transition bytes.
+    var restriction = (com.fasterxml.jackson.databind.node.ObjectNode) result(row, 200).getEntity();
+    if (originalBound.isMissingNode()) restriction.putNull("boundAttemptId");
+    else restriction.set("boundAttemptId", originalBound.deepCopy());
+    if (fence.isMissingNode()) restriction.putNull("fencedExecution");
+    else restriction.set("fencedExecution", fence.deepCopy());
+    var terminal = JSON.createObjectNode();
+    terminal.put("attemptId", current.attemptId); terminal.put("accountId", current.accountId);
+    terminal.put("state", current.state);
+    var execution = terminal.putObject("execution");
+    execution.put("executionId", current.executionId); execution.put("generation", current.generation);
+    terminal.put("creationProof", current.creationProof);
+    terminal.put("recoveryReceipt", current.recoveryReceipt);
+    terminal.put("terminalReceipt", current.terminalReceipt);
+    var envelope = JSON.createObjectNode();
+    envelope.put("version", 1); envelope.set("restriction", restriction); envelope.set("terminal", terminal);
+    envelope.put("compensationDigest", current.terminalDigest);
+    envelope.put("receipt", crypto.receipt("protected-approval-cleanup-status/v1", envelope.deepCopy()));
+    if (canonical(envelope).getBytes(StandardCharsets.UTF_8).length > 65536) bad();
+    return Response.ok(envelope).header("Cache-Control", "no-store").build();
+  }
+
   private void materializeAuthorizedExpiry(ProtectedInvitationApproval row, EntityManager em) {
     var now = Instant.now();
     if (!"AUTHORIZED".equals(row.state) || Instant.parse(row.validUntil).isAfter(now)) return;

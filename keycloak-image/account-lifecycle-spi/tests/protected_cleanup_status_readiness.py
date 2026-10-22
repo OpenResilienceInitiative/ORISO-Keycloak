@@ -133,10 +133,14 @@ class CleanupStatusReadiness(BindingReadiness):
         status, result = cleanup_request(helper, approval)
         o["cleanupStatus"] = status
         self.assertEqual(200, status)
-        self.assertEqual({"version", "restriction", "terminal"}, set(result))
+        self.assertEqual({"version", "restriction", "terminal", "compensationDigest", "receipt"}, set(result))
         self.assertEqual(1, result["version"])
         self.assertEqual(restricted, result["restriction"])
         self.assertEqual(terminal, result["terminal"])
+        self.assertEqual(mac("protected-invitation-payload/v1", cleanup), result["compensationDigest"])
+        signed = helper.verified_receipt(result["receipt"], "protected-approval-cleanup-status/v1",
+            65536, {"version", "restriction", "terminal", "compensationDigest"})
+        self.assertEqual({k: v for k, v in result.items() if k != "receipt"}, signed)
         o["exactIndependentTerminalAndOriginalRestrictionVerified"] = True
         self.assertEqual((200, result), cleanup_request(helper, approval))
         self.assertEqual(403, cleanup_request(helper, approval, bad_proof=True)[0])
