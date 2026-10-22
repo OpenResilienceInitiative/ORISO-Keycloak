@@ -3,10 +3,12 @@
 import base64
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 from pathlib import Path
 import time
+import threading
 import unittest
 import uuid
 from urllib.error import HTTPError
@@ -19,6 +21,20 @@ from maintenance_human_fixture import CLIENT, ISSUER, HumanMaintenanceFixture
 
 class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
     @classmethod
+    def setUpClass(cls):
+        # Use the same private, synthetic SMTP sink as the retained original-route fixture.
+        source = Path(__file__).resolve().parents[2] / "otp-config-spi/tests/scenario_c_otp_fixture.py"
+        spec = importlib.util.spec_from_file_location("scoped_otp_mail_fixture", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cls.mail = module.MailSink(("0.0.0.0", 0), module.MailSink.Handler)
+        cls.mail.messages = []
+        cls.addClassCleanup(cls.mail.server_close)
+        cls.addClassCleanup(cls.mail.shutdown)
+        threading.Thread(target=cls.mail.serve_forever, daemon=True).start()
+        super().setUpClass()
+
+    @classmethod
     def extra_launch_arguments(cls):
         jar = Path(os.environ.get("OTP_C_TEST_JAR", ""))
         if not jar.is_file():
@@ -29,6 +45,8 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
             "-e", "ORISO_APP_BASE_URL=https://otp-fixture.internal",
             "-e", "EMAIL_BRANDING_NAME=OTP Fixture",
             "-e", "EMAIL_LEGAL_ORGANISATION_NAME=Fixture Operator",
+            "-v", str(Path(__file__).resolve().parents[2] / "themes/oriso") + ":/opt/keycloak/themes/oriso:ro",
+            "--add-host", "host.docker.internal:host-gateway",
         ]
 
     @classmethod
@@ -159,9 +177,73 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
             error.close()
         phase = {"otp.app-setup": "scoped-otp-app-setup-http",
                  "otp.delete": "scoped-otp-delete-http",
-                 "otp.email-finish": "scoped-otp-email-finish-http"}[operation]
+                 "otp.email-finish": "scoped-otp-email-finish-http",
+                 "otp.email-start": "scoped-otp-email-start-http"}[operation]
         self.phase(phase, status=status, expected_status=expected)
         return status, json.loads(raw) if raw else None
+
+    def test_current_self_email_start_uses_foreground_delivery_and_exact_retry_never_resends(self):
+        human, target = self.human(), self.target()
+        realm = self.admin("GET", "")
+        realm["emailTheme"] = "oriso"
+        realm["smtpServer"] = {
+            "host": "host.docker.internal", "port": str(self.mail.server_address[1]),
+            "from": "otp-fixture@oriso.org", "auth": "false", "ssl": "false",
+            "starttls": "false",
+        }
+        self.admin("PUT", "", realm)
+        self.assertEqual(realm["smtpServer"], self.admin("GET", "")["smtpServer"])
+        self.assertFalse(any(c["type"] in {"otp", "MAIL_OTP_CM"}
+                             for c in self.admin("GET", "/users/" + self.account_id + "/credentials")))
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        bearer = self.token("ACCOUNT_ADMIN")
+        encoded = bearer.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual({"userservice", "oriso-account-lifecycle", "oriso-otp"}, set(claims["aud"]))
+        self.assertEqual(403, call(self.base, "GET", "/admin/realms/" + REALM
+                                  + "/users/" + self.account_id, token=bearer)[0])
+        before_mail = len(self.mail.messages)
+        body = {"target": target, "operationId": str(uuid.uuid4()),
+                "expectedState": current["state"],
+                "otp": {"initialCode": None, "secret": None,
+                        "email": "pending-" + uuid.uuid4().hex + "@oriso.org"}}
+        self.phase("scoped-otp-email-start-preconditions", canonical_admin=True,
+                   exact_three_audiences=True, stock_native_denied=True, actual_self_human=True,
+                   committed_ordinary_target=True, frozen_current_state=True,
+                   no_prior_otp=True, real_smtp_configured=True, reviewed_email_start_selector=True)
+        status, prepared = self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                               "send-verification-mail", 202, bearer=bearer)
+        self.assertEqual(202, status)
+        self.assertEqual(body["operationId"], prepared["operationId"])
+        self.assertEqual("READY", prepared["deliveryState"])
+        # The response is prepared before request completion. Reauthenticated exact-intent
+        # recovery observes its durable final result instead of changing that old response.
+        status, delivered = self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                                "send-verification-mail", 200)
+        self.assertEqual(200, status)
+        self.assertEqual("SENT", delivered["deliveryState"])
+        self.assertEqual(body["operationId"], delivered["operationId"])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        current = self.admin("GET", "/users/" + self.account_id + "/credentials")
+        owned = [c for c in current if c["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(owned))
+        self.assertFalse(json.loads(owned[0]["credentialData"])["active"])
+        encoded, signature = delivered["receipt"].split(".")
+        expected = hmac.new(CONTEXT_KEY, ("otp-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest()
+        self.assertTrue(hmac.compare_digest(expected, signature))
+        payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], payload["ownerSubject"])
+        self.assertEqual("otp.email-start", payload["operation"])
+        self.assertNotIn(body["otp"]["email"], canonical(delivered).decode())
+        self.assertEqual(delivered, self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                                        "send-verification-mail", 200)[1])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        self.assertEqual(owned, [c for c in self.admin("GET", "/users/" + self.account_id
+                                                     + "/credentials") if c["type"] == "MAIL_OTP_CM"])
+        self.phase("scoped-otp-email-start-exact-retry", one_smtp_effect=True,
+                   one_owned_inactive_credential=True, immutable_final_receipt=True,
+                   no_plaintext_destination_in_public_result=True, no_resend=True)
 
     def canonical_admin_with_one_extra_audience(self):
         canonical_bearer = self.token("ACCOUNT_ADMIN")
