@@ -54,12 +54,12 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         value['profiles'].append(dual)
         value['bindings'][0]['protectedProfileIds'].append(dual['id']); value['bindings'][0]['protectedProfileIds'].sort()
         value['bindings'][0]['accountOperations'].append({'authority': 'PLATFORM',
-            'targetProfiles': [PROFILE, dual['id']], 'selfOnly': False,
-            'operations': ['account.read', 'account.profile-transition']})
+            'targetProfiles': sorted([PROFILE, dual['id']]), 'selfOnly': False,
+            'operations': ['account.profile-transition', 'account.read']})
         current_peer = copy.deepcopy(value['peerDelegationPolicies'][0])
         current_peer.update(id='own-tenant-consultant-v2', sourceProfileId=dual['id'],
-            sourceProfileVersion=2, realmRoles=roles, protectedProfileIds=[PROFILE, dual['id']])
-        current_peer['accountOperations'][0]['targetProfiles'] = [PROFILE, dual['id']]
+            sourceProfileVersion=2, realmRoles=roles, protectedProfileIds=sorted([PROFILE, dual['id']]))
+        current_peer['accountOperations'][0]['targetProfiles'] = sorted([PROFILE, dual['id']])
         value['peerDelegationPolicies'].append(current_peer)
         value['workflowOperations'][0]['targetProfiles'].append(dual['id'])
         value['workflowOperations'].append({'kind': 'IMPORT', 'targetProfiles': [PROFILE, dual['id']],
