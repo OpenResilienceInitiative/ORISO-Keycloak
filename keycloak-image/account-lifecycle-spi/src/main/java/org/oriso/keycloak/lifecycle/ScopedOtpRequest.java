@@ -10,7 +10,9 @@ record ScopedOtpRequest(String operation, String accountId, String operationId,
   static ScopedOtpRequest parse(String operation, String accountId, JsonNode body) {
     if (!java.util.Set.of("otp.app-setup", "otp.delete", "otp.email-finish", "otp.email-start").contains(operation)) deny();
     uuid(accountId);
-    fields(body, "target", "operationId", "expectedState", "otp");
+    if ("otp.email-start".equals(operation))
+      fields(body, "target", "operationId", "expectedState", "otp", "authorityValidUntil");
+    else fields(body, "target", "operationId", "expectedState", "otp");
     var read = JSON.createObjectNode();
     read.set("target", body.path("target"));
     var checkedTarget = MaintenanceRequest.parse("read", accountId, read).target();
@@ -25,6 +27,8 @@ record ScopedOtpRequest(String operation, String accountId, String operationId,
     }
     fields(otp, "initialCode", "secret", "email");
     if ("otp.email-start".equals(operation)) {
+      var deadline = body.path("authorityValidUntil");
+      if (!deadline.isIntegralNumber() || !deadline.canConvertToLong() || deadline.longValue() <= 0) bad();
       String email = text(otp, "email", 320, false);
       if (!otp.path("initialCode").isNull() || !otp.path("secret").isNull()
           || !email.equals(email.strip()) || email.chars().anyMatch(c -> c < 33 || c == 127)

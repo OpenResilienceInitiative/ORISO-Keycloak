@@ -204,8 +204,10 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual(403, call(self.base, "GET", "/admin/realms/" + REALM
                                   + "/users/" + self.account_id, token=bearer)[0])
         before_mail = len(self.mail.messages)
+        original_deadline = int(time.time()) + 180
+        self.assertLess(original_deadline, claims["exp"])
         body = {"target": target, "operationId": str(uuid.uuid4()),
-                "expectedState": current["state"],
+                "expectedState": current["state"], "authorityValidUntil": original_deadline,
                 "otp": {"initialCode": None, "secret": None,
                         "email": "pending-" + uuid.uuid4().hex + "@oriso.org"}}
         self.phase("scoped-otp-email-start-preconditions", canonical_admin=True,
@@ -235,6 +237,7 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
         self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], payload["ownerSubject"])
         self.assertEqual("otp.email-start", payload["operation"])
+        self.assertLessEqual(payload["authorityValidUntil"], original_deadline)
         self.assertNotIn(body["otp"]["email"], canonical(delivered).decode())
         self.assertEqual(delivered, self.scoped_mutation(human, body, "otp.email-start", "PUT",
                                                         "send-verification-mail", 200)[1])

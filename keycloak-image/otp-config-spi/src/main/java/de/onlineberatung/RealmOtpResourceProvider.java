@@ -229,12 +229,25 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
             var credential = mailCredentialService.createCredential(otp, context);
             target.bindEmailStartCredential(credential);
             return Response.accepted(new Success().info("OTP mail pending")).build();
-          });
+          }, target -> deliverScopedMail(target, mailSender));
     }
     try {
       return sendVerificationMail(username, org.keycloak.util.JsonSerialization.readValue(raw, OtpSetupDTO.class));
     } catch (java.io.IOException rejected) {
       throw new jakarta.ws.rs.BadRequestException("Invalid OTP request");
+    }
+  }
+
+  private static Response deliverScopedMail(
+      org.oriso.keycloak.lifecycle.ScopedOtpAccess.VerifiedOtpTarget target,
+      de.onlineberatung.otp.OtpMailSender sender) {
+    var selected = MailOtpCredentialModel.createFromCredentialModel(target.emailCredentialForDelivery());
+    if (selected.isActive()) throw new jakarta.ws.rs.ClientErrorException("Current mail OTP credential conflicts", 409);
+    try {
+      sender.sendOtpCode(selected.getOtp(), new CredentialContext(target.session(), target.realm(), target.user()));
+      return Response.ok(new Success().info("OTP mail sent")).build();
+    } catch (MailSendingException unknown) {
+      throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery outcome is unknown");
     }
   }
 

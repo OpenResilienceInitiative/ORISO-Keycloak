@@ -133,10 +133,11 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
 
   jakarta.ws.rs.core.Response startEmailOtpSelf(KeycloakSession session, String username,
       byte[] raw, String proofHeader, String humanHeader,
-      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> prepare) {
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> prepare,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> send) {
     if (authorization == null) LifecycleJson.deny();
     return ScopedOtpAccess.checkedSelfEmailStart(session, authorization, groups, humanPolicy,
-        username, raw, proofHeader, humanHeader, prepare);
+        username, raw, proofHeader, humanHeader, prepare, send);
   }
 
   public void close() {}

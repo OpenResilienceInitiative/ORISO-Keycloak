@@ -115,6 +115,7 @@ public class ScopedOtpRequestTest {
     otp.putNull("initialCode");
     otp.putNull("secret");
     otp.put("email", "pending@test.invalid");
+    exact.put("authorityValidUntil", 1900000000L);
     var decoded = ScopedOtpRequest.parse("otp.email-start", ID, exact);
     assertEquals("pending@test.invalid", decoded.otp().path("email").asText());
     assertFalse(decoded.toString().contains("pending@test.invalid"));
@@ -129,6 +130,11 @@ public class ScopedOtpRequestTest {
     otp.put("initialCode", "123456");
     rejected("otp.email-start", ID, exact);
     otp.putNull("initialCode");
+    exact.put("authorityValidUntil", "1900000000");
+    rejected("otp.email-start", ID, exact);
+    exact.putNull("authorityValidUntil");
+    rejected("otp.email-start", ID, exact);
+    exact.put("authorityValidUntil", 1900000000L);
     otp.put("unreviewed", true);
     rejected("otp.email-start", ID, exact);
   }

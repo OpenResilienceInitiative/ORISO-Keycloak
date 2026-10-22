@@ -50,9 +50,9 @@ public final class ScopedOtpAccess {
 
   public static Response requireSelfEmailStart(KeycloakSession session, String exactPathUsername,
       byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
-      Function<VerifiedOtpTarget, Response> prepare) {
+      Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send) {
     return guarded(session, () -> configuration(session).startEmailOtpSelf(session, exactPathUsername,
-        raw, taskContextHeader, fullImmediateHumanHeader, prepare));
+        raw, taskContextHeader, fullImmediateHumanHeader, prepare, send));
   }
 
   private static AccountLifecycleFactory configuration(KeycloakSession session) {
@@ -230,7 +230,18 @@ public final class ScopedOtpAccess {
   static Response checkedSelfEmailStart(KeycloakSession session, LifecycleAuthorization authorization,
       Map<String, Set<String>> mappings, GeneralPolicy policy, String username,
       byte[] raw, String proofHeader, String humanHeader,
-      Function<VerifiedOtpTarget, Response> prepare) {
+      Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send) {
+    return checkedSelfEmailStart(session, authorization, mappings, policy, username, raw,
+        proofHeader, humanHeader, prepare, send, EmailPhase.REQUEST);
+  }
+
+  private enum EmailPhase { REQUEST, CLAIM, SEND }
+
+  private static Response checkedSelfEmailStart(KeycloakSession session, LifecycleAuthorization authorization,
+      Map<String, Set<String>> mappings, GeneralPolicy policy, String username,
+      byte[] raw, String proofHeader, String humanHeader,
+      Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send,
+      EmailPhase phase) {
     var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
     if (username == null || username.isBlank() || username.length() > 255
         || username.chars().anyMatch(c -> c < 32 || c == 127)) bad();
@@ -263,16 +274,79 @@ public final class ScopedOtpAccess {
           || !LifecycleAuthorization.equal(digest, prior.intentDigest)
           || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState))
         throw new jakarta.ws.rs.ClientErrorException("OTP operation conflicts", 409);
-      policy.requireSelfOtpEmailStart(session, target, humanHeader);
       if (delivery == null) deny();
       em.refresh(delivery);
       if (!id.equals(delivery.id) || !realm.getId().equals(delivery.realmId)
           || !account.equals(delivery.accountId) || !LifecycleAuthorization.equal(digest, delivery.intentDigest)) deny();
-      if (!"READY".equals(delivery.state) || delivery.expiresAt <= java.time.Instant.now().getEpochSecond())
-        throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery could not complete");
-      return Response.status(202).entity(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
+      if (phase == EmailPhase.REQUEST) {
+        policy.requireSelfOtpEmailStart(session, target, humanHeader);
+        if ("SENT".equals(delivery.state) && delivery.finalJson != null)
+          return Response.ok(parse(delivery.finalJson)).header("Cache-Control", "no-store").build();
+        if (!"READY".equals(delivery.state) || delivery.expiresAt <= java.time.Instant.now().getEpochSecond())
+          throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery outcome is unknown");
+        enlistForegroundEmail(session, authorization, mappings, policy, username, raw,
+            proofHeader, humanHeader, send);
+        return Response.status(202).entity(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
+      }
+      // Keep provenance locks before fresh human/native-user locks. Never refresh old CAS/body.
+      var current = new MaintenanceTarget(session, authorization, mappings)
+          .readOtpSelfEmailStart(target, policy, humanHeader);
+      if (delivery.expiresAt <= java.time.Instant.now().getEpochSecond()) deny();
+      var binding = parse(delivery.bindingJson);
+      if (phase == EmailPhase.CLAIM) {
+        if (!"READY".equals(delivery.state)) deny();
+        invoke(session, authorization, username, account, current, request,
+            ignored -> Response.accepted().build(), binding, delivery.expiresAt);
+        delivery.state = "SENDING";
+        em.flush();
+        return Response.accepted().build();
+      }
+      if (!"SENDING".equals(delivery.state)) deny();
+      Invocation sent;
+      try {
+        sent = invoke(session, authorization, username, account, current, request,
+            send, binding, delivery.expiresAt);
+        if (sent.response().getStatus() != 200) throw new IllegalStateException("Unknown delivery outcome");
+        var nativeResult = JSON.valueToTree(sent.response().getEntity());
+        fields(nativeResult, "info");
+        text(nativeResult, "info", 512, false);
+        var outcome = JSON.createObjectNode();
+        outcome.put("realmId", realm.getId());
+        outcome.put("accountId", account);
+        outcome.put("operationId", request.operationId());
+        outcome.put("operation", "otp.email-start");
+        outcome.put("ownerClient", machine.clientId());
+        outcome.put("ownerSubject", machine.subject());
+        outcome.put("intentDigest", digest);
+        outcome.put("previousState", request.expectedState());
+        outcome.set("tenantId", request.target().path("tenantId"));
+        outcome.put("originDigest", authorization.mac("otp-origin", request.target().path("origin")));
+        outcome.put("status", 200);
+        outcome.put("deliveryState", "SENT");
+        outcome.put("authorityValidUntil", delivery.expiresAt);
+        outcome.put("resultDigest", authorization.mac("otp-result", nativeResult));
+        outcome.set("emailCredential", binding);
+        var result = JSON.createObjectNode();
+        result.put("operationId", request.operationId());
+        result.put("accountId", account);
+        result.put("status", 200);
+        result.put("deliveryState", "SENT");
+        result.set("result", nativeResult);
+        result.put("receipt", authorization.receipt("otp-operation-receipt", outcome));
+        delivery.state = "SENT";
+        delivery.finalJson = canonical(result);
+        em.flush();
+        return Response.ok(result).header("Cache-Control", "no-store").build();
+      } catch (RuntimeException unknown) {
+        // SENDING was committed separately before any SMTP. Unknown can never authorize resend.
+        delivery.state = "UNKNOWN";
+        delivery.finalJson = null;
+        em.flush();
+        return Response.status(503).entity(Map.of("error", "OTP delivery outcome is unknown"))
+            .header("Cache-Control", "no-store").build();
+      }
     }
-    if (delivery != null) deny();
+    if (delivery != null || phase != EmailPhase.REQUEST) deny();
     var current = new MaintenanceTarget(session, authorization, mappings)
         .readOtpSelfEmailStart(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
@@ -283,7 +357,9 @@ public final class ScopedOtpAccess {
     if (machineToken.getIat() == null || machineToken.getExp() == null
         || machineToken.getIat() <= 0 || machineToken.getExp() <= machineToken.getIat()
         || machineToken.getExp() <= now) deny();
-    long expiry = Math.min(Math.min(human.validatedJwtExpiresAt(), machineToken.getExp()), now + 600);
+    long expiry = Math.min(request.body().path("authorityValidUntil").longValue(),
+        Math.min(Math.min(human.validatedJwtExpiresAt(), machineToken.getExp()), now + 600));
+    if (expiry <= now) deny();
     var invocation = invoke(session, authorization, username, account, current, request, prepare);
     if (invocation.response().getStatus() != 202 || invocation.emailCredential() == null) deny();
     var nativeResult = JSON.valueToTree(invocation.response().getEntity());
@@ -336,7 +412,49 @@ public final class ScopedOtpAccess {
     // Native inactive credential, immutable READY receipt and delivery ownership commit together.
     // No old VerifiedOtpTarget or request-bound grant escapes this callback.
     em.flush();
+    enlistForegroundEmail(session, authorization, mappings, policy, username, raw,
+        proofHeader, humanHeader, send);
     return Response.status(202).entity(result).header("Cache-Control", "no-store").build();
+  }
+
+  private static void enlistForegroundEmail(KeycloakSession owner, LifecycleAuthorization authorization,
+      Map<String, Set<String>> mappings, GeneralPolicy policy, String username, byte[] raw,
+      String proof, String human, Function<VerifiedOtpTarget, Response> send) {
+    var factory = owner.getKeycloakSessionFactory();
+    String realmId = owner.getContext().getRealm().getId();
+    var actualRequest = owner.getContext().getHttpRequest();
+    var actualConnection = owner.getContext().getConnection();
+    byte[] frozenRaw = raw.clone();
+    owner.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
+      protected void rollbackImpl() {}
+      protected void commitImpl() {
+        var claimed = new java.util.concurrent.atomic.AtomicBoolean(false);
+        try {
+          org.keycloak.models.utils.KeycloakModelUtils.runJobInTransaction(factory, fresh -> {
+            fresh.getContext().setRealm(fresh.realms().getRealm(realmId));
+            fresh.getContext().setHttpRequest(actualRequest);
+            fresh.getContext().setConnection(actualConnection);
+            checkedSelfEmailStart(fresh, authorization, mappings, policy, username, frozenRaw,
+                proof, human, null, send, EmailPhase.CLAIM);
+            fresh.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
+              protected void commitImpl() { claimed.set(true); }
+              protected void rollbackImpl() { claimed.set(false); }
+            });
+          });
+          if (!claimed.get()) return;
+          org.keycloak.models.utils.KeycloakModelUtils.runJobInTransaction(factory, fresh -> {
+            fresh.getContext().setRealm(fresh.realms().getRealm(realmId));
+            fresh.getContext().setHttpRequest(actualRequest);
+            fresh.getContext().setConnection(actualConnection);
+            checkedSelfEmailStart(fresh, authorization, mappings, policy, username, frozenRaw,
+                proof, human, null, send, EmailPhase.SEND);
+          });
+        } catch (RuntimeException refusedOrUnknown) {
+          // No raw provider exception, JWT, address or code leaves the foreground callback.
+          // READY may recover under a new real request. SENDING/UNKNOWN never automatically send.
+        }
+      }
+    });
   }
 
   private record Invocation(Response response, com.fasterxml.jackson.databind.JsonNode emailCredential) {}
@@ -345,6 +463,13 @@ public final class ScopedOtpAccess {
       String username, String account,
       com.fasterxml.jackson.databind.JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action) {
+    return invoke(session, authorization, username, account, current, request, action, null, 0);
+  }
+
+  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+      String username, String account, com.fasterxml.jackson.databind.JsonNode current,
+      ScopedOtpRequest request, Function<VerifiedOtpTarget, Response> action,
+      com.fasterxml.jackson.databind.JsonNode deliveryBinding, long deliveryExpiry) {
     var realm = session.getContext().getRealm();
     if (!username.equals(current.path("username").textValue())) deny();
     var user = session.users().getUserById(realm, account);
@@ -357,6 +482,15 @@ public final class ScopedOtpAccess {
     var lifetime = new Lifetime(session);
     try {
       var checked = new VerifiedOtpTarget(lifetime, authorization, realm, user, request);
+      if (deliveryBinding != null) {
+        fields(deliveryBinding, "credentialId", "generation", "destinationDigest");
+        var selected = user.credentialManager().getStoredCredentialById(
+            uuid(text(deliveryBinding, "credentialId", 36, false)));
+        checked.bindEmailStartCredential(selected);
+        if (!LifecycleAuthorization.equal(canonical(deliveryBinding), canonical(checked.emailCredential))) deny();
+        checked.deliveryCredentialId = selected.getId();
+        checked.deliveryExpiry = deliveryExpiry;
+      }
       var response = action.apply(checked);
       lifetime.check();
       if (response == null) throw new IllegalStateException("OTP callback did not return a response");
@@ -375,6 +509,8 @@ public final class ScopedOtpAccess {
     private final UserModel user;
     private final ScopedOtpRequest request;
     private com.fasterxml.jackson.databind.JsonNode emailCredential;
+    private String deliveryCredentialId;
+    private long deliveryExpiry;
     private VerifiedOtpTarget(Lifetime lifetime, LifecycleAuthorization authorization,
         RealmModel realm, UserModel user, ScopedOtpRequest request) {
       this.lifetime = lifetime;
@@ -389,6 +525,18 @@ public final class ScopedOtpAccess {
     public String initialCode() { lifetime.check(); if (request == null || !Set.of("otp.app-setup", "otp.email-finish").contains(request.operation())) deny(); return request.otp().path("initialCode").textValue(); }
     public String secret() { lifetime.check(); if (request == null || !"otp.app-setup".equals(request.operation())) deny(); return request.otp().path("secret").textValue(); }
     public String email() { lifetime.check(); if (request == null || !"otp.email-start".equals(request.operation())) deny(); return request.otp().path("email").textValue(); }
+    public org.keycloak.credential.CredentialModel emailCredentialForDelivery() {
+      lifetime.check();
+      if (request == null || !"otp.email-start".equals(request.operation()) || deliveryCredentialId == null
+          || deliveryExpiry <= java.time.Instant.now().getEpochSecond()) deny();
+      var selected = user.credentialManager().getStoredCredentialById(deliveryCredentialId);
+      var expected = emailCredential;
+      emailCredential = null;
+      bindEmailCredential(selected);
+      if (!LifecycleAuthorization.equal(canonical(expected), canonical(emailCredential))) deny();
+      lifetime.check();
+      return selected;
+    }
     public void bindEmailStartCredential(org.keycloak.credential.CredentialModel selected) {
       lifetime.check();
       if (request == null || !"otp.email-start".equals(request.operation())) deny();
