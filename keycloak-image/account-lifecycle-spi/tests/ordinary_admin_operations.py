@@ -1,4 +1,5 @@
 """Finite ordinary target operations through the original authenticated maintenance route."""
+import base64
 import copy
 import json
 import uuid
@@ -8,7 +9,7 @@ from maintenance_human_fixture import HumanMaintenanceFixture
 from test_maintenance import MaintenancePermissions
 
 OPERATIONS = ['account.deactivate', 'account.email', 'account.ordinary-profile',
-              'account.profile', 'account.reactivate', 'account.read']
+              'account.profile', 'account.reactivate', 'account.read', 'account.profile-transition']
 
 
 def install_policy(cls, helper, protected):
@@ -18,19 +19,25 @@ def install_policy(cls, helper, protected):
                  [helper.admin('GET', '/roles/consultant')])
     profiles = []
     for group, roles in [('consultant', ['consultant', 'group-chat-consultant']),
-                         ('consultant-basic', ['consultant']), ('user', ['user'])]:
+                         ('consultant-basic', ['consultant']), ('user', ['user']),
+                         ('agency-admin', ['restricted-agency-admin', 'user-admin']),
+                         ('consultant-agency-admin', ['consultant', 'group-chat-consultant', 'restricted-agency-admin', 'user-admin'])]:
         profiles.append({'id': group + '-v1', 'version': 1,
                          'groupId': helper.group_id('/human-roles/' + group),
                          'groupPath': '/human-roles/' + group,
                          'groupParentId': helper.group_id('/human-roles'),
                          'realmRoles': roles, 'clientRoles': {}, 'allowUnassignedTenant': False,
                          'selfOperations': ['account.read']})
+    client = helper.admin('GET', '/clients?clientId=protected-human-web')[0]['id']
+    reviewed_roles = sorted({role for profile in profiles for role in profile['realmRoles']})
+    helper.admin('POST', '/clients/' + client + '/scope-mappings/realm',
+        [helper.admin('GET', '/roles/' + role) for role in reviewed_roles])
     native = {key: copy.deepcopy(protected[key]) for key in
               ['realmId', 'issuer', 'technicalSubjects', 'technicalGroupIds', 'technicalRoles']}
     native.update(clientIds=['protected-human-web'], audienceSets=[['userservice']])
     config = {'version': 1, 'native': native, 'ordinaryProfiles': profiles,
               'adminOperations': [{'authority': authority, 'selfOnly': False,
-                                   'targetProfiles': ['consultant-v1', 'consultant-basic-v1', 'user-v1'],
+                                   'targetProfiles': ['consultant-v1', 'consultant-basic-v1', 'user-v1', 'agency-admin-v1', 'consultant-agency-admin-v1'],
                                    'operations': OPERATIONS} for authority in ['PLATFORM', 'TENANT_PEER']]}
     username = 'adopted-ordinary-' + uuid.uuid4().hex
     helper.admin('POST', '/users', {'username': username, 'enabled': True, 'email': username + '@oriso.org',
@@ -66,7 +73,9 @@ def install_policy(cls, helper, protected):
         setattr(cls, 'ordinary_' + label.replace('-', '_') + '_account', control)
 
     config['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': ['consultant-v1', 'user-v1'],
-        'operations': ['account.deactivate', 'account.reactivate', 'account.read']}]
+        'operations': ['account.deactivate', 'account.reactivate', 'account.read']},
+        {'kind': 'IMPORT', 'targetProfiles': ['consultant-v1', 'consultant-agency-admin-v1'],
+         'operations': ['account.read', 'account.ordinary-profile']}]
     command = cls.command.copy()
     for index, argument in enumerate(command):
         if argument.startswith('ORISO_ACCOUNT_LIFECYCLE_GROUPS='):
@@ -187,6 +196,10 @@ def exercise(test, helper, primary, peer, observed):
             {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': current_native['username'],
              'password': 'Finite-reactivation-fixture-937451', 'scope': 'openid'}, form=True)
         test.assertEqual(200, login_status)
+        encoded = login['access_token'].split('.')[1]
+        claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+        test.assertEqual({'consultant'}, set(claims.get('realm_access', {}).get('roles', [])))
+        records['postRoleSelfTokenExactCurrentRoles'] = True
         self_target = copy.deepcopy(target); self_target['origin'].update(kind='SELF', humanSubject=account, humanAuthority=None)
         status, self_current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': self_target}, login['access_token'], 200)
         records['postRoleSelf'] = {'status': status, 'preconditions': True}

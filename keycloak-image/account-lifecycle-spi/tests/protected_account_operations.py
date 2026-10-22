@@ -42,6 +42,28 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'operations': ['account.deactivate', 'account.reactivate']})
         value['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': [PROFILE, 'platform-v1'],
             'operations': ['account.deactivate', 'account.reactivate', 'account.read']}]
+        parent = helper.group_id('/protected-admins')
+        helper.admin('POST', '/groups/' + parent + '/children', {'name': 'tenant-consultants'})
+        group = helper.group_id('/protected-admins/tenant-consultants')
+        roles = ['consultant', 'group-chat-consultant', 'tenant-admin']
+        helper.admin('POST', '/groups/' + group + '/role-mappings/realm',
+            [helper.admin('GET', '/roles/' + role) for role in roles])
+        dual = copy.deepcopy(next(profile for profile in value['profiles'] if profile['id'] == PROFILE))
+        dual.update(id='tenant-consultant-v2', version=2, groupId=group,
+            groupPath='/protected-admins/tenant-consultants', realmRoles=roles)
+        value['profiles'].append(dual)
+        value['bindings'][0]['protectedProfileIds'].append(dual['id']); value['bindings'][0]['protectedProfileIds'].sort()
+        value['bindings'][0]['accountOperations'].append({'authority': 'PLATFORM',
+            'targetProfiles': [PROFILE, dual['id']], 'selfOnly': False,
+            'operations': ['account.read', 'account.profile-transition']})
+        current_peer = copy.deepcopy(value['peerDelegationPolicies'][0])
+        current_peer.update(id='own-tenant-consultant-v2', sourceProfileId=dual['id'],
+            sourceProfileVersion=2, realmRoles=roles, protectedProfileIds=[PROFILE, dual['id']])
+        current_peer['accountOperations'][0]['targetProfiles'] = [PROFILE, dual['id']]
+        value['peerDelegationPolicies'].append(current_peer)
+        value['workflowOperations'][0]['targetProfiles'].append(dual['id'])
+        value['workflowOperations'].append({'kind': 'IMPORT', 'targetProfiles': [PROFILE, dual['id']],
+            'operations': ['account.read']})
         from ordinary_admin_operations import install_policy
         from protected_adoption_operations import install
         install_policy(cls, helper, value)
@@ -149,6 +171,10 @@ class ProtectedOperationRead(PeerReadiness):
         causal(self, helper, o)
         from tenant_reassignment_operations import exercise as reassignment
         reassignment(self, helper, primary, (account, human), o)
+        from profile_transition_operations import exercise as transitions
+        transitions(self, helper, primary, (account, human), o)
+        from import_workflow_operations import exercise as imported
+        imported(self, helper, primary, (account, human), o)
         from inactivity_operations import exercise as inactivity
         inactivity(self, helper, primary, (account, human), o)
         from ordinary_adoption_operations import exercise as ordinary_adoption
