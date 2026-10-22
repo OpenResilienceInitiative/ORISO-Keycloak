@@ -3,6 +3,7 @@ import copy
 import uuid
 
 from maintenance_human_fixture import HumanMaintenanceFixture
+from lifecycle_fixture import LifecycleFixture, REALM, call
 
 
 def exercise(test, helper, primary, peer, observed):
@@ -40,4 +41,17 @@ def exercise(test, helper, primary, peer, observed):
             conflict_status, conflict = HumanMaintenanceFixture.invoke(helper, 'reassign-tenant', changed, primary, 409)
             test.assertEqual(409, conflict_status); test.assertNotIn('receipt', conflict)
             records[label]['effectLineageAndExactRetryVerified'] = True
+            if label == 'committed':
+                native = helper.admin('GET', '/users/' + account)
+                login_status, login = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
+                    {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': native['username'],
+                     'password': LifecycleFixture.creation(helper)['account']['password'], 'scope': 'openid'}, form=True)
+                test.assertEqual(200, login_status)
+                fresh_self = copy.deepcopy(updated); fresh_self['origin'].update(kind='SELF', humanSubject=account)
+                old_status, _ = HumanMaintenanceFixture.invoke(helper, 'read', {'target': fresh_self}, peer[1], 403)
+                test.assertEqual(403, old_status)
+                new_status, new_current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': fresh_self}, login['access_token'], 200)
+                records[label]['newTenantSelfReadStatus'] = new_status
+                test.assertEqual(200, new_status); test.assertEqual('22', new_current['tenantId'])
+                records[label]['oldTokenDeniedNewTokenCurrentTenantVerified'] = True
     helper.account_id, helper.creation_input = original_account, original_creation

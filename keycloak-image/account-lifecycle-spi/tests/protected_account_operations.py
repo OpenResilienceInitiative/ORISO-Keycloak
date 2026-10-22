@@ -146,6 +146,8 @@ class ProtectedOperationRead(PeerReadiness):
         inactivity(self, helper, primary, (account, human), o)
         from ordinary_adoption_operations import exercise as ordinary_adoption
         ordinary_adoption(self, helper, o)
+        from ordinary_adoption_operations import timestamp_boundaries
+        timestamp_boundaries(self, helper, o)
         from protected_adoption_operations import incarnation
         incarnation(self, helper, primary, o)
 

@@ -28,3 +28,27 @@ def exercise(test, helper, observed):
         test.assertEqual(200, status); test.assertEqual('DELETED', result['result'])
         test.assertEqual((status, result), MaintenancePermissions.maintenance(helper, 'delete', account, body))
         observed['ordinaryAdoption']['actualDeleteExactRetryAndRoleDriftDenial'] = True
+
+
+def timestamp_boundaries(test, helper, observed):
+    from urllib.request import Request, urlopen
+    from lifecycle_fixture import REALM
+    results = observed['ordinaryAdoptionTimestamp'] = {}
+    for boundary in ['null', 'zero']:
+        account = getattr(type(helper), 'ordinary_' + boundary + '_adopted_account')
+        if boundary == 'null':
+            request = Request(helper.base + '/admin/realms/' + REALM + '/users/' + account,
+                headers={'Authorization': 'Bearer ' + helper.installer,
+                         'X-ORISO-Adoption-Null-Timestamp-Fixture': account})
+            with urlopen(request, timeout=30) as reply:
+                test.assertEqual(200, reply.status)
+                test.assertEqual(account, reply.headers.get('X-ORISO-Adoption-Null-Timestamp-Fixture-Applied'))
+        native = helper.admin('GET', '/users/' + account)
+        test.assertEqual(None if boundary == 'null' else 0, native.get('createdTimestamp'))
+        test.assertEqual(['/human-roles/user'], [g['path'] for g in helper.admin('GET', '/users/' + account + '/groups')])
+        target = {'accountId': account, 'tenantId': '11', 'origin': {'kind': 'DELETION',
+            'workflowId': str(uuid.uuid4()), 'humanSubject': None, 'humanIssuer': None, 'humanClient': None, 'humanAuthority': None}}
+        status, _ = MaintenancePermissions.maintenance(helper, 'read', account, {'target': target})
+        test.assertEqual(403, status)
+        results[boundary] = {'accountId': account, 'reason': 'NATIVE_CREATED_TIMESTAMP_' + ('NULL' if boundary == 'null' else 'NON_POSITIVE'), 'actualNativeTimestamp': native.get('createdTimestamp'), 'status': status,
+            'configuredUserProfileDeniedWithoutGlobalStartupFailure': True}

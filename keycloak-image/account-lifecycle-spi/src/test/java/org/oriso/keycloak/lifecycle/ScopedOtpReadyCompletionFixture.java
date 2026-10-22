@@ -13,7 +13,39 @@ import org.keycloak.utils.KeycloakSessionUtil;
 @Provider
 @Priority(20)
 public final class ScopedOtpReadyCompletionFixture implements ContainerResponseFilter {
+  private static void nullAdoptionTimestamp(ContainerRequestContext request, ContainerResponseContext response, String account) {
+    if (!account.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+        || !"GET".equals(request.getMethod()) || response.getStatus() != 200
+        || !(response.getEntity() instanceof org.keycloak.representations.idm.UserRepresentation user)
+        || !account.equals(user.getId()) || user.getUsername() == null || !user.getUsername().startsWith("adopted-null-"))
+      throw new IllegalStateException("Invalid isolated null adoption fixture scope");
+    var session=KeycloakSessionUtil.getKeycloakSession();
+    if(session==null || session.getContext().getRealm()==null || !session.getTransactionManager().isActive())
+      throw new IllegalStateException("Isolated adoption fixture requires native transaction");
+    var realm=session.getContext().getRealm();
+    if(!request.getUriInfo().getPath().replaceFirst("^/", "").equals("admin/realms/"+realm.getName()+"/users/"+account))
+      throw new IllegalStateException("Isolated adoption fixture requires exact stock native user read");
+    var config=LifecycleJson.parse(System.getenv("ORISO_ACCOUNT_MAINTENANCE_CONFIG"));boolean selected=false;
+    for(var entry:config.path("adoptedAccounts")) if(account.equals(entry.path("accountId").asText())
+        && "user-v1".equals(entry.path("ordinaryProfileId").asText()) && entry.path("profileVersion").asLong()==1) selected=true;
+    if(!selected)throw new IllegalStateException("Exact synthetic adoption fixture is not configured");
+    var em=session.getProvider(JpaConnectionProvider.class).getEntityManager();
+    var locked=em.createNativeQuery("select CREATED_TIMESTAMP from USER_ENTITY where ID=:id and REALM_ID=:realm for update")
+        .setParameter("id",account).setParameter("realm",realm.getId()).getResultList();
+    if(locked.size()!=1 || locked.get(0)==null)throw new IllegalStateException("Synthetic native incarnation missing");
+    if(em.createNativeQuery("update USER_ENTITY set CREATED_TIMESTAMP=null where ID=:id and REALM_ID=:realm")
+        .setParameter("id",account).setParameter("realm",realm.getId()).executeUpdate()!=1)
+      throw new IllegalStateException("Synthetic native timestamp fixture did not complete");
+    em.flush();
+    var cache=session.getProvider(org.keycloak.models.cache.UserCache.class);
+    if(cache!=null){var nativeUser=session.users().getUserById(realm,account);if(nativeUser!=null)cache.evict(realm,nativeUser);}
+    user.setCreatedTimestamp(null);
+    response.getHeaders().putSingle("X-ORISO-Adoption-Null-Timestamp-Fixture-Applied",account);
+  }
+
   public void filter(ContainerRequestContext request, ContainerResponseContext response) {
+    String nullAdoption = request.getHeaderString("X-ORISO-Adoption-Null-Timestamp-Fixture");
+    if (nullAdoption != null) { nullAdoptionTimestamp(request, response, nullAdoption); return; }
     String operation = request.getHeaderString("X-ORISO-Ready-Fixture");
     if (operation == null) return;
     if (!operation.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

@@ -41,6 +41,19 @@ def install_policy(cls, helper, protected):
     helper.admin('PUT', '/users/' + account + '/groups/' + helper.group_id('/human-roles/user'))
     config['adoptedAccounts'] = [{'accountId': account, 'ordinaryProfileId': 'user-v1', 'profileVersion': 1}]
     cls.ordinary_adopted_account = account
+    for boundary, timestamp in [('null', None), ('zero', 0)]:
+        username = 'adopted-' + boundary + '-' + uuid.uuid4().hex
+        representation = {'username': username, 'enabled': True, 'email': username + '@oriso.org',
+            'firstName': 'Timestamp', 'lastName': 'Boundary', 'attributes': {'tenantId': ['11']}}
+        if timestamp is not None: representation['createdTimestamp'] = timestamp
+        helper.admin('POST', '/users', representation)
+        controls = helper.admin('GET', '/users?username=' + username + '&exact=true'); helper.assertEqual(1, len(controls))
+        control = controls[0]['id']; defaults = helper.admin('GET', '/users/' + control + '/role-mappings/realm')
+        if defaults: helper.admin('DELETE', '/users/' + control + '/role-mappings/realm', defaults)
+        helper.admin('PUT', '/users/' + control + '/groups/' + helper.group_id('/human-roles/user'))
+        config['adoptedAccounts'].append({'accountId': control, 'ordinaryProfileId': 'user-v1', 'profileVersion': 1})
+        setattr(cls, 'ordinary_' + boundary + '_adopted_account', control)
+
     config['workflowOperations'] = [{'kind': 'INACTIVITY', 'targetProfiles': ['consultant-v1'],
         'operations': ['account.deactivate', 'account.reactivate', 'account.read']}]
     command = cls.command.copy()
