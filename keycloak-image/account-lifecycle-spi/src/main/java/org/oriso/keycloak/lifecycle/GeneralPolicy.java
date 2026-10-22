@@ -12,13 +12,15 @@ final class GeneralPolicy {
   private final List<Profile> profiles;
   private final List<AdminGrant> adminOperations;
   final WorkflowOperations workflowOperations;
+  final Map<String,Adoption> adoptedAccounts;
+  record Adoption(String accountId,String profileId,long profileVersion) {}
 
   private record AdminGrant(String authority, Set<String> profiles, Set<String> operations) {}
 
   GeneralPolicy(JsonNode config) {
     if (config == null || !config.isObject()) bad();
     var required = (com.fasterxml.jackson.databind.node.ObjectNode) config.deepCopy();
-    required.remove("adminOperations"); required.remove("workflowOperations");
+    required.remove("adminOperations"); required.remove("workflowOperations"); required.remove("adoptedAccounts");
     fields(required, "version", "native", "ordinaryProfiles");
     if (number(config, "version", true) != 1) bad();
     nativePolicy = CurrentNativeHumanIdentity.nativePolicy(config.path("native"));
@@ -37,6 +39,18 @@ final class GeneralPolicy {
     profiles = List.copyOf(found);
     adminOperations = parseAdminOperations(config, ids);
     workflowOperations = new WorkflowOperations(config, ids);
+    var adoptions=new TreeMap<String,Adoption>();
+    if(config.has("adoptedAccounts")){
+      var suppliedAdoptions=config.path("adoptedAccounts");if(!suppliedAdoptions.isArray()||suppliedAdoptions.size()>1000)bad();
+      for(var value:suppliedAdoptions){
+        fields(value,"accountId","ordinaryProfileId","profileVersion");
+        String account=uuid(text(value,"accountId",36,false));String profileId=text(value,"ordinaryProfileId",100,false);
+        long version=number(value,"profileVersion",true);
+        if(profiles.stream().noneMatch(p->p.id.equals(profileId)&&p.version==version)
+            ||adoptions.put(account,new Adoption(account,profileId,version))!=null)bad();
+      }
+    }
+    adoptedAccounts=Map.copyOf(adoptions);
   }
 
   private static List<AdminGrant> parseAdminOperations(JsonNode config, Set<String> profileIds) {
