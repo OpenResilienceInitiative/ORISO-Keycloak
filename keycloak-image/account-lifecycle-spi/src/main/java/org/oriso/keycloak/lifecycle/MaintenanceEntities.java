@@ -9,7 +9,7 @@ public final class MaintenanceEntities implements JpaEntityProviderFactory {
   public JpaEntityProvider create(KeycloakSession session) {
     return new JpaEntityProvider() {
       public List<Class<?>> getEntities() {
-        return List.of(AccountMaintenanceLineage.class, AccountMaintenanceOperation.class, OtpEmailDelivery.class, ProtectedOtpBootstrapState.class);
+        return List.of(CausalPasswordClaim.class, AccountMaintenanceLineage.class, AccountMaintenanceOperation.class, OtpEmailDelivery.class, ProtectedOtpBootstrapState.class);
       }
 
       public String getChangelogLocation() {

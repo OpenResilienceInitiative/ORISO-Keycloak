@@ -9,7 +9,7 @@ import org.keycloak.models.KeycloakSession;
 final class MaintenanceResults {
   static Response noEffect(KeycloakSession session, LifecycleAuthorization crypto,
       LifecycleAuthorization.CheckedMachine machine, MaintenanceRequest request, JsonNode body, int status) {
-    if (status != 403 && status != 409) deny();
+    if (!allowedStatus(request.command(), status)) deny();
     String digest = crypto.mac("maintenance-intent", body);
     var payload = payload(session, crypto, machine, request, digest, "NO_EFFECT"); payload.put("status", status);
     var result = JSON.createObjectNode(); result.put("operationId", request.operationId());
@@ -28,7 +28,7 @@ final class MaintenanceResults {
     if (!request.operationId().equals(result.path("operationId").asText())
         || !request.accountId().equals(result.path("accountId").asText())) deny();
     int status = refused ? (int) number(result, "status", true) : 200;
-    if (refused && status != 403 && status != 409 || !refused && !"UPDATED".equals(result.path("result").asText())) deny();
+    if (refused && !allowedStatus(request.command(), status) || !refused && !"UPDATED".equals(result.path("result").asText())) deny();
     var value = JSON.createObjectNode(); value.put("realmId", prior.realmId); value.put("accountId", prior.accountId);
     value.put("operationId", prior.operationId); value.put("command", prior.command); value.put("ownerClient", prior.ownerClient);
     value.put("ownerSubject", prior.ownerSubject); value.put("intentDigest", prior.intentDigest); value.put("previousState", prior.expectedState);
@@ -54,6 +54,18 @@ final class MaintenanceResults {
     saved.accountId = request.accountId(); saved.command = request.command(); saved.ownerClient = machine.clientId();
     saved.ownerSubject = machine.subject(); saved.intentDigest = digest; saved.expectedState = request.expectedState();
     saved.resultJson = canonical(result); CurrentNativeHumanIdentity.entityManager(session).persist(saved);
+  }
+  static Response updated(KeycloakSession session, LifecycleAuthorization crypto,
+      LifecycleAuthorization.CheckedMachine machine, MaintenanceRequest request, JsonNode body) {
+    String digest = crypto.mac("maintenance-intent", body);
+    var result = JSON.createObjectNode(); result.put("operationId", request.operationId());
+    result.put("accountId", request.accountId()); result.put("result", "UPDATED");
+    result.put("receipt", crypto.receipt("maintenance-operation-receipt", payload(session, crypto, machine, request, digest, "UPDATED")));
+    persist(session, machine, request, digest, result); CurrentNativeHumanIdentity.entityManager(session).flush();
+    return Response.ok(result).header("Cache-Control", "no-store").build();
+  }
+  private static boolean allowedStatus(String command, int status) {
+    return status == 403 || status == 409 || status == 400 && java.util.Set.of("password-reset", "self-password").contains(command);
   }
   private MaintenanceResults() {}
 }

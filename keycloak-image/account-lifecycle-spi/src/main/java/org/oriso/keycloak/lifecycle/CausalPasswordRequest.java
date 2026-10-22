@@ -28,7 +28,22 @@ final class CausalPasswordRequest {
     number(workflow, "profileVersion", true);
     return new CausalPasswordRequest(target, workflow);
   }
+  static CausalPasswordRequest mutation(String account, JsonNode body) {
+    fields(body, "target", "workflow", "operationId", "expectedState", "change");
+    var read = JSON.createObjectNode(); read.set("target", body.path("target")); read.set("workflow", body.path("workflow"));
+    var causal = read(account, read);
+    var mutation = JSON.createObjectNode();
+    for (String key : java.util.List.of("target", "operationId", "expectedState", "change")) mutation.set(key, body.path(key));
+    var parsed = MaintenanceRequest.parse("password", account, mutation);
+    if (parsed.change().path("temporary").asBoolean()) bad();
+    causal.command = new MaintenanceRequest("password-reset", account, parsed.target(), parsed.operationId(),
+        parsed.expectedState(), parsed.change(), causal.workflow.path("authorityValidUntil").longValue(), null, null);
+    return causal;
+  }
+  private MaintenanceRequest command;
   MaintenanceRequest target() { return target; }
+  MaintenanceRequest command() { if (command == null) throw new IllegalStateException(); return command; }
+  JsonNode workflow() { return workflow.deepCopy(); }
   void requireLive() {
     if (workflow.path("authorityValidUntil").longValue() <= java.time.Instant.now().getEpochSecond())
       throw new jakarta.ws.rs.BadRequestException("Causal password authority expired");
@@ -38,7 +53,7 @@ final class CausalPasswordRequest {
         || version != workflow.path("profileVersion").longValue()) deny();
   }
   void requireNativeBinding(LifecycleAuthorization crypto, JsonNode current) {
-    if (!workflow.path("expectedUsername").equals(current.path("username"))
+    if (!workflow.path("expectedUsername").asText().equalsIgnoreCase(current.path("username").asText())
         || !current.path("email").isTextual() || current.path("email").asText().isBlank()
         || !LifecycleAuthorization.equal(workflow.path("expectedEmailDigest").asText(),
             crypto.mac("maintenance-workflow-email/v1", current.path("email")))) deny();

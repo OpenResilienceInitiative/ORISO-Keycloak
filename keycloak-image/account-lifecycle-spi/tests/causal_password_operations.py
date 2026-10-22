@@ -43,7 +43,7 @@ def exercise(test, helper, observed):
         helper.admin('PUT', '/users/' + account, native)
         workflow = {'v': 1, 'kind': kind, 'claimId': str(uuid.uuid4()), 'claimVersion': 1,
                     'authorityValidUntil': int(time.time()) + 180,
-                    'expectedUsername': native['username'],
+                    'expectedUsername': native['username'].upper(),
                     'expectedEmailDigest': mac('maintenance-workflow-email/v1', native['email']),
                     'profileKind': profile_kind, 'profileId': profile_id, 'profileVersion': 1}
         target = {'accountId': account, 'tenantId': native['attributes']['tenantId'][0], 'origin': {'kind': 'PASSWORD_RESET',
@@ -52,7 +52,7 @@ def exercise(test, helper, observed):
         read = {'target': target, 'workflow': workflow}
         status, current = invoke(helper, account, 'account.password-reset.read', read)
         label = profile_kind + '.' + kind
-        records[label] = {'readStatus': status, 'preconditions': True, 'withoutHumanHeader': True}
+        records[label] = {'readStatus': status, 'preconditions': True, 'withoutHumanHeader': True, 'uppercaseOriginalUsername': workflow['expectedUsername'] != native['username']}
         with test.subTest(operation='causal.' + label + '.read'):
             test.assertEqual(200, status); test.assertEqual(account, current['id'])
             test.assertEqual(kind == 'EXISTING_SETUP', current['passwordChangeRequired'])

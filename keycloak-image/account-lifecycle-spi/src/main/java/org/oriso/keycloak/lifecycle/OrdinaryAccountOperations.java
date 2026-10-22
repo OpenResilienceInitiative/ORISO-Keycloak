@@ -123,6 +123,7 @@ final class OrdinaryAccountOperations {
     var profile = policy.profile(lineage.profileId(), lineage.profileVersion());
     var desired = "ordinary-profile".equals(request.command())
         ? policy.desiredProfile(request.change().path("group").asText()) : profile;
+    if (!Objects.equals(LifecycleGroups.allowedKind(profile.realmRoles), LifecycleGroups.allowedKind(desired.realmRoles))) deny();
     if (causal != null) causal.requireProfile("ORDINARY", profile.id, profile.version);
     else {
       var source = HumanAdminSource.require(session, crypto, request, human);

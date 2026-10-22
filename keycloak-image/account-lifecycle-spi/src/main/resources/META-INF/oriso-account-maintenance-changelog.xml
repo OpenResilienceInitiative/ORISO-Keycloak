@@ -76,4 +76,24 @@
     <addUniqueConstraint tableName="ORISO_ACCOUNT_MAINTENANCE_LINEAGE" columnNames="REALM_ID,ACCOUNT_ID,SEQUENCE_NO" constraintName="ORISO_MAINT_LINEAGE_SEQUENCE"/>
     <addForeignKeyConstraint baseTableName="ORISO_ACCOUNT_MAINTENANCE_LINEAGE" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_MAINT_LINEAGE_REALM" onDelete="CASCADE"/>
   </changeSet>
+  <changeSet id="oriso-causal-password-claim-v1" author="oriso">
+    <createTable tableName="ORISO_CAUSAL_PASSWORD_CLAIM">
+      <column name="ID" type="VARCHAR(64)"><constraints primaryKey="true" nullable="false"/></column>
+      <column name="REALM_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="ACCOUNT_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="CLAIM_KIND" type="VARCHAR(20)"><constraints nullable="false"/></column>
+      <column name="CLAIM_ID" type="VARCHAR(36)"><constraints nullable="false"/></column>
+      <column name="CLAIM_VERSION" type="BIGINT"><constraints nullable="false"/></column>
+      <column name="OWNER_CLIENT" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="OWNER_SUBJECT" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="TARGET_DIGEST" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="WORKFLOW_DIGEST" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="OPERATION_ID" type="VARCHAR(36)"><constraints nullable="false"/></column>
+      <column name="INTENT_DIGEST" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="EXPECTED_STATE" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="BINDING_MAC" type="VARCHAR(64)"><constraints nullable="false"/></column>
+    </createTable>
+    <addUniqueConstraint tableName="ORISO_CAUSAL_PASSWORD_CLAIM" columnNames="REALM_ID,CLAIM_KIND,CLAIM_ID,CLAIM_VERSION" constraintName="ORISO_CAUSAL_PASSWORD_UNIQUE"/>
+    <addForeignKeyConstraint baseTableName="ORISO_CAUSAL_PASSWORD_CLAIM" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_CAUSAL_PASSWORD_REALM" onDelete="CASCADE"/>
+  </changeSet>
 </databaseChangeLog>

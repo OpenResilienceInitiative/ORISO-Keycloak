@@ -17,9 +17,10 @@ final class ProtectedInvitationConfiguration {
   final Map<String, PeerPolicy> peerPolicies;
   final Map<String, List<OperationGrant>> bindingAccountOperations, peerAccountOperations;
   final Map<String, Adoption> adoptedAccounts;
+  final WorkflowOperations workflowOperations;
 
   private static final Set<String> ACCOUNT_OPERATIONS = Set.of("account.read", "account.profile",
-      "account.email", "account.locale", "account.password", "account.deactivate", "account.reactivate",
+      "account.email", "account.locale", "account.reassign-tenant", "account.password", "account.deactivate", "account.reactivate",
       "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish");
 
   record Binding(String authority, Set<Long> tenants, Set<String> profiles, CurrentHumanAuthorization.Policy policy) {}
@@ -35,7 +36,7 @@ final class ProtectedInvitationConfiguration {
 
   ProtectedInvitationConfiguration(JsonNode config) {
     // The optional installed rule is metadata, never a public human binding.
-    var required = without(config, "peerDelegationPolicies", "adoptedAccounts");
+    var required = without(config, "peerDelegationPolicies", "adoptedAccounts", "workflowOperations");
     fields(required, "realmId", "realmName", "issuer", "technicalSubjects", "technicalGroupIds", "technicalRoles",
         "actorSubjects", "machineAudienceSets", "bindings", "profiles");
     installation = config.deepCopy();
@@ -108,6 +109,7 @@ final class ProtectedInvitationConfiguration {
       peerOperations.put(text(peer, "id", 255, false), operations(peer, "TENANT_PEER"));
     peerAccountOperations = Map.copyOf(peerOperations);
     adoptedAccounts = adoptions(config);
+    workflowOperations = new WorkflowOperations(config, profiles.keySet());
   }
 
   private Map<String, PeerPolicy> peerPolicies(JsonNode config) {
@@ -166,6 +168,9 @@ final class ProtectedInvitationConfiguration {
       }
       var selected = HumanPolicyJson.strings(grant.get("operations"), 1, ACCOUNT_OPERATIONS.size(), 80);
       if (!ACCOUNT_OPERATIONS.containsAll(selected)) bad();
+      if (selected.contains("account.reassign-tenant") && (!"PLATFORM".equals(authority)
+          || grant.path("selfOnly").booleanValue()
+          || targets.stream().anyMatch(id -> !"TENANT_ADMIN".equals(profiles.get(id).kind())))) bad();
       var subjects = grant.has("targetSubjects")
           ? HumanPolicyJson.strings(grant.get("targetSubjects"), 0, 1000, 36) : Set.<String>of();
       for (String subject : subjects) uuid(subject);

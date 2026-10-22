@@ -14,12 +14,16 @@ record MaintenanceRequest(
     String expectedState,
     JsonNode change,
     Long authorityValidUntil,
-    String include) {
+    String include,
+    JsonNode workflow) {
   static MaintenanceRequest parse(String command, String accountId, JsonNode body) {
     if (!Set.of("read", "profile", "email", "locale", "password", "self-password", "ordinary-profile",
-        "deactivate", "reactivate", "delete").contains(command)) bad();
+        "deactivate", "reactivate", "reassign-tenant", "delete").contains(command)) bad();
     boolean read = "read".equals(command);
-    if (read && body.has("include")) fields(body, "target", "include");
+    boolean inactivity = body.has("workflow");
+    if (inactivity && read) fields(body, "target", "workflow");
+    else if (inactivity) fields(body, "target", "workflow", "operationId", "expectedState", "change");
+    else if (read && body.has("include")) fields(body, "target", "include");
     else if (read) fields(body, "target");
     else if ("self-password".equals(command) && body.has("authorityValidUntil"))
       fields(body, "target", "operationId", "expectedState", "change", "authorityValidUntil");
@@ -53,12 +57,17 @@ record MaintenanceRequest(
     if ("SELF".equals(kind) && !actualId.equals(subject)
         || "HUMAN_ADMIN".equals(kind) && authority == null) deny();
     String include = null;
-    if (read && body.has("include")) {
+    boolean inactivity = body.has("workflow");
+    if (inactivity && read) fields(body, "target", "workflow");
+    else if (inactivity) fields(body, "target", "workflow", "operationId", "expectedState", "change");
+    else if (read && body.has("include")) {
       include = text(body, "include", 40, false);
       if (!"TWO_FACTOR_STATUS_V1".equals(include) || !"HUMAN_ADMIN".equals(kind)
           || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority)) bad();
     }
-    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null, null, include);
+    JsonNode workflow = inactivity ? InactivityWorkflow.parse(command, target, body.path("workflow")) : null;
+    if ("INACTIVITY".equals(kind) && workflow == null) deny();
+    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null, null, include, workflow);
     String operationId = text(body, "operationId", 36, false);
     uuid(operationId);
     String state = text(body, "expectedState", 64, false);
@@ -104,15 +113,21 @@ record MaintenanceRequest(
         if (!group.matches("/human-roles/[a-z0-9-]{1,80}")) deny();
       }
       case "reactivate" -> {
+        if (inactivity) { fields(change, "restoreEnabled"); if (!change.path("restoreEnabled").isBoolean()) bad(); break; }
         fields(change, "expectedUsername", "expectedEmail", "password");
         text(change, "expectedUsername", 255, false);
         text(change, "expectedEmail", 255, false);
         text(change, "password", 4096, false);
       }
+      case "reassign-tenant" -> {
+        fields(change, "tenantId"); String desired = text(change,"tenantId",19,false);
+        if(!desired.matches("[1-9][0-9]{0,18}"))bad();
+        try { if(Long.parseLong(desired)<=0)bad(); } catch(NumberFormatException invalid){bad();}
+      }
       case "deactivate", "delete" -> fields(change);
       default -> bad();
     }
-    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy(), deadline, null);
+    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy(), deadline, null, workflow);
   }
 
   void requireEffectDeadline() {

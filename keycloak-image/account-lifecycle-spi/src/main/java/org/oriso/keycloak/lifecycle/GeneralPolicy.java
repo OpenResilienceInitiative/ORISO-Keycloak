@@ -11,13 +11,14 @@ final class GeneralPolicy {
   final CurrentNativeHumanIdentity.NativePolicy nativePolicy;
   private final List<Profile> profiles;
   private final List<AdminGrant> adminOperations;
+  final WorkflowOperations workflowOperations;
 
   private record AdminGrant(String authority, Set<String> profiles, Set<String> operations) {}
 
   GeneralPolicy(JsonNode config) {
     if (config == null || !config.isObject()) bad();
     var required = (com.fasterxml.jackson.databind.node.ObjectNode) config.deepCopy();
-    required.remove("adminOperations");
+    required.remove("adminOperations"); required.remove("workflowOperations");
     fields(required, "version", "native", "ordinaryProfiles");
     if (number(config, "version", true) != 1) bad();
     nativePolicy = CurrentNativeHumanIdentity.nativePolicy(config.path("native"));
@@ -35,6 +36,7 @@ final class GeneralPolicy {
     }
     profiles = List.copyOf(found);
     adminOperations = parseAdminOperations(config, ids);
+    workflowOperations = new WorkflowOperations(config, ids);
   }
 
   private static List<AdminGrant> parseAdminOperations(JsonNode config, Set<String> profileIds) {
@@ -182,9 +184,9 @@ final class GeneralPolicy {
   void requireAdmin(HumanAdminSource source, MaintenanceRequest request, String operation,
       Profile current, Profile desired) {
     source.targetTenant(request.target().path("tenantId"));
-    if (adminOperations.stream().noneMatch(grant -> grant.authority.equals(source.authority())
-        && grant.profiles.contains(current.id) && grant.profiles.contains(desired.id)
-        && grant.operations.contains(operation))) deny();
+    for (var selected : new HashSet<>(List.of(current.id, desired.id)))
+      if (adminOperations.stream().noneMatch(grant -> grant.authority.equals(source.authority())
+          && grant.profiles.contains(selected) && grant.operations.contains(operation))) deny();
   }
 
   /** Classification result carries no peer, protected, creation or arbitrary operation grant. */
