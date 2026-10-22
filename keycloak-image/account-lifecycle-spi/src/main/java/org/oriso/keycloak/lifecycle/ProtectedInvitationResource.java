@@ -523,6 +523,9 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     String reason = text(body, "reason", 30, false);
     if (!Set.of("REVOKED", "SUPERSEDED", "ISSUANCE_ABORTED").contains(reason)) bad();
     var em = lockedRealm();
+    var peers = new ProtectedPeerDelegation(session, config, crypto);
+    // A delegated origin and its attempt precede the target approval/attempt and user locks.
+    var resolved = proof == null ? peers.resolve(NativeHumanBearer.require(session), em) : null;
     var row = em.find(ProtectedInvitationApproval.class, key(config.realmId, approval), LockModeType.PESSIMISTIC_WRITE);
     if (row != null) em.refresh(row);
     var boundAttempt = lockedBoundAttempt(row, em);
@@ -534,10 +537,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
       crypto.verifyProtectedCommand(proof, machine, "protected-invitation.cancel", "POST",
           "realm/" + config.realmId + "/protected-invitation/" + approval, body);
     } else {
-      var nativeHuman = NativeHumanBearer.require(session);
-      binding = config.bindings.get(nativeHuman.getUser().getId());
-      if (binding == null) deny();
-      human = CurrentHumanAuthorization.require(session, binding.policy());
+      binding = resolved.binding();
+      human = peers.require(resolved);
     }
     boolean absent = row == null;
     if (absent) {
@@ -555,10 +556,8 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
     var storedScope = parse(row.request).path("scope");
     if (machine != null && (!machine.clientId().equals(storedScope.path("setupClient").asText())
         || !machine.subject().equals(storedScope.path("setupSubject").asText()))) deny();
-    if (binding != null && "TENANT_PEER".equals(binding.authority())
-        && (!"TENANT_ADMIN".equals(storedScope.path("protectedKind").asText())
-            || !storedScope.path("targetTenantIds").get(0).isIntegralNumber()
-            || storedScope.path("targetTenantIds").get(0).asLong() != human.tenantId())) deny();
+    // Restriction does not expand a human's installed profile, tenant or mode reach.
+    if (binding != null) validateScope(storedScope, binding, human);
     if (!row.workflowId.equals(body.path("workflowId").asText()) || !row.inviteId.equals(body.path("inviteId").asText())
         || row.authorizationRevision != body.path("authorizationRevision").asLong()
         || !LifecycleAuthorization.equal(row.requestDigest, body.path("approvalRequestDigest").asText())
