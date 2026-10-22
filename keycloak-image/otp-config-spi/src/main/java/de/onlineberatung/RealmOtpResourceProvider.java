@@ -223,6 +223,9 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
           session, username, raw, headers.getHeaderString("X-ORISO-Task-Context"),
           headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
             var context = new CredentialContext(target.session(), target.realm(), target.user());
+            var emailOwner = target.session().users().getUserByEmail(target.realm(), target.email());
+            if (emailOwner != null && !target.user().getId().equals(emailOwner.getId()))
+              throw new jakarta.ws.rs.ClientErrorException("Email is not available", 412);
             if (!mailCredentialService.getAllCredentials(context).isEmpty())
               throw new jakarta.ws.rs.ClientErrorException("Current mail OTP credential conflicts", 409);
             var otp = otpService.createOtp(target.email());
