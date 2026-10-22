@@ -3,6 +3,7 @@ package org.oriso.keycloak.lifecycle;
 import static org.oriso.keycloak.lifecycle.LifecycleJson.deny;
 
 import jakarta.ws.rs.NotAuthorizedException;
+import org.keycloak.models.ImpersonationSessionNote;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.Urls;
 import org.keycloak.services.managers.AppAuthManager.BearerTokenAuthenticator;
@@ -38,6 +39,7 @@ final class NativeHumanBearer {
       var humanSession = checked.getSession();
       if (realm == null || token == null || user == null || client == null
           || humanSession == null || humanSession.isOffline()
+          || "impersonate".equals(humanSession.getAuthMethod())
           || !realm.isEnabled() || !user.isEnabled() || !client.isEnabled()
           || user.getServiceAccountClientLink() != null
           || !user.getId().equals(token.getSubject())
@@ -46,6 +48,11 @@ final class NativeHumanBearer {
           || !client.getClientId().equals(token.getIssuedFor())
           || !humanSession.getId().equals(token.getSessionId())
           || !Urls.realmIssuer(context.getUri().getBaseUri(), realm.getName()).equals(token.getIssuer())) deny();
+      // Native26.6.3 creates these notes on the impersonated target's session.
+      // Being the target human is insufficient for that session to approve.
+      for (var note : ImpersonationSessionNote.values()) {
+        if (humanSession.getNote(note.name()) != null) deny();
+      }
       var clientSession = humanSession.getAuthenticatedClientSessionByClient(client.getId());
       if (clientSession == null || !client.getId().equals(clientSession.getClient().getId())
           || !humanSession.getId().equals(clientSession.getUserSession().getId())) deny();
