@@ -18,7 +18,7 @@ record MaintenanceRequest(
     JsonNode workflow) {
   static MaintenanceRequest parse(String command, String accountId, JsonNode body) {
     if (!Set.of("read", "profile", "email", "locale", "password", "self-password", "ordinary-profile",
-        "deactivate", "reactivate", "reassign-tenant", "delete").contains(command)) bad();
+        "deactivate", "reactivate", "reassign-tenant", "profile-transition", "delete").contains(command)) bad();
     boolean read = "read".equals(command);
     boolean inactivity = body.has("workflow");
     if (inactivity && read) fields(body, "target", "workflow");
@@ -62,8 +62,10 @@ record MaintenanceRequest(
       if (!"TWO_FACTOR_STATUS_V1".equals(include) || !"HUMAN_ADMIN".equals(kind)
           || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority)) bad();
     }
-    JsonNode workflow = inactivity ? InactivityWorkflow.parse(command, target, body.path("workflow")) : null;
-    if ("INACTIVITY".equals(kind) && workflow == null) deny();
+    JsonNode workflow = inactivity ? ("IMPORT".equals(body.path("workflow").path("kind").asText())
+        ? ImportWorkflow.parse(command,target,body.path("workflow"))
+        : InactivityWorkflow.parse(command, target, body.path("workflow"))) : null;
+    if (Set.of("INACTIVITY","IMPORT").contains(kind) && workflow == null) deny();
     if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null, null, include, workflow);
     String operationId = text(body, "operationId", 36, false);
     uuid(operationId);
@@ -99,7 +101,8 @@ record MaintenanceRequest(
           throw new jakarta.ws.rs.ClientErrorException("The new password must differ", 409);
       }
       case "ordinary-profile" -> {
-        if (change.has("profile")) {
+        if(workflow!=null&&"IMPORT".equals(workflow.path("kind").asText()))fields(change,"group");
+        else if (change.has("profile")) {
           fields(change, "group", "profile");
           fields(change.path("profile"), "firstName", "lastName", "email");
           text(change.path("profile"), "firstName", 255, true);
@@ -108,6 +111,17 @@ record MaintenanceRequest(
         } else fields(change, "group");
         String group = text(change, "group", 512, false);
         if (!group.matches("/human-roles/[a-z0-9-]{1,80}")) deny();
+      }
+      case "profile-transition" -> {
+        if(workflow!=null||!"HUMAN_ADMIN".equals(kind)||!"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority))deny();
+        if(change.has("group")){
+          fields(change,"transition","group");
+          if(!text(change,"group",512,false).matches("/human-roles/[a-z0-9-]{1,80}"))bad();
+        }else{
+          fields(change,"transition","profileId","profileVersion");
+          text(change,"profileId",255,false);number(change,"profileVersion",true);
+        }
+        if(!Set.of("ADD_CONSULTANT_IDENTITY","ADD_AGENCY_ADMIN_IDENTITY").contains(text(change,"transition",40,false)))bad();
       }
       case "reactivate" -> {
         if (inactivity) { fields(change, "restoreEnabled"); if (!change.path("restoreEnabled").isBoolean()) bad(); break; }

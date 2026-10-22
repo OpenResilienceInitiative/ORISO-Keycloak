@@ -60,7 +60,7 @@ final class GeneralPolicy {
     var result = new ArrayList<AdminGrant>();
     var unique = new HashSet<AdminGrant>();
     var allowed = Set.of("account.read", "account.profile", "account.email",
-        "account.ordinary-profile", "account.deactivate", "account.reactivate");
+        "account.ordinary-profile", "account.deactivate", "account.reactivate", "account.profile-transition");
     for (var value : supplied) {
       fields(value, "authority", "targetProfiles", "operations", "selfOnly");
       String authority = text(value, "authority", 20, false);

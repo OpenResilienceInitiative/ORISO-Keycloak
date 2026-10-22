@@ -11,7 +11,7 @@ import org.keycloak.models.KeycloakSession;
 final class InactivityOperations {
   static JsonNode read(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
       Supplier<GeneralPolicy> policies,GeneralPolicy configured,MaintenanceRequest request,String human){
-    if(request.workflow()==null)deny();
+    if(request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText()))deny();
     if("INACTIVITY".equals(request.target().path("origin").path("kind").asText())&&human!=null)deny();
     if(adoptedOrdinaryTarget(session,configured,request))
       return OrdinaryAccountOperations.read(session,crypto,mappings,human==null?configured:policies.get(),request,human);

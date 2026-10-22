@@ -20,7 +20,7 @@ final class ProtectedInvitationConfiguration {
   final WorkflowOperations workflowOperations;
 
   private static final Set<String> ACCOUNT_OPERATIONS = Set.of("account.read", "account.profile",
-      "account.email", "account.locale", "account.reassign-tenant", "account.password", "account.deactivate", "account.reactivate",
+      "account.email", "account.locale", "account.reassign-tenant", "account.profile-transition", "account.password", "account.deactivate", "account.reactivate",
       "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish");
 
   record Binding(String authority, Set<Long> tenants, Set<String> profiles, CurrentHumanAuthorization.Policy policy) {}
@@ -109,7 +109,7 @@ final class ProtectedInvitationConfiguration {
       peerOperations.put(text(peer, "id", 255, false), operations(peer, "TENANT_PEER"));
     peerAccountOperations = Map.copyOf(peerOperations);
     adoptedAccounts = adoptions(config);
-    workflowOperations = new WorkflowOperations(config, profiles.keySet());
+    workflowOperations = new WorkflowOperations(config, profiles.keySet(), true);
   }
 
   private Map<String, PeerPolicy> peerPolicies(JsonNode config) {
