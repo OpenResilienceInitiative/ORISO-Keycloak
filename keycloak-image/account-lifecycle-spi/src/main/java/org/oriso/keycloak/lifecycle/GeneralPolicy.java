@@ -224,7 +224,9 @@ final class GeneralPolicy {
     final Set<String> realmRoles, selfOperations;
     final Map<String, Set<String>> clientRoles;
     final boolean allowUnassignedTenant;
+    final JsonNode snapshot;
     private Profile(JsonNode value) {
+      snapshot=value.deepCopy();
       fields(value, "id", "version", "groupId", "groupPath", "groupParentId", "realmRoles", "clientRoles", "allowUnassignedTenant", "selfOperations");
       id = text(value, "id", 100, false);
       version = number(value, "version", true);

@@ -49,10 +49,10 @@ final class OrdinaryAccountOperations {
         var desired = session.groups().getGroupById(realm, prepared.desired.groupId);
         var current = session.groups().getGroupById(realm, prepared.profile.groupId);
         if (desired == null || current == null) throw new IllegalStateException("Profile changed during effect");
+        MaintenanceLineage.append(session, crypto, request, body, prepared.lineage,
+            prepared.desired.id, prepared.desired.version, request.target().path("tenantId"), prepared.desired.snapshot);
         if (!prepared.desired.groupId.equals(prepared.profile.groupId)) { user.leaveGroup(current); user.joinGroup(desired); }
         if (request.change().has("profile")) profile(user, request.change().path("profile"));
-        MaintenanceLineage.append(session, crypto, request, body, prepared.lineage,
-            prepared.desired.id, prepared.desired.version, request.target().path("tenantId"));
       }
       case "deactivate" -> user.setEnabled(false);
       case "reactivate" -> {
@@ -120,14 +120,21 @@ final class OrdinaryAccountOperations {
     var origin = JSON.createObjectNode(); origin.put("attempt", row.id); origin.put("creationProof", row.creationProof);
     origin.put("terminalReceipt", row.terminalReceipt); origin.set("scope", scope);
     var lineage = MaintenanceLineage.resolve(session, crypto, request.accountId(), crypto.mac("maintenance-provenance/v1", origin),
-        "ORDINARY", baseline.id, baseline.version, scope.path("tenantId"));
+        "ORDINARY", baseline.id, baseline.version, scope.path("tenantId"), baseline.snapshot);
     var profile = policy.profile(lineage.profileId(), lineage.profileVersion());
     var desired = "ordinary-profile".equals(request.command())
         ? policy.desiredProfile(request.change().path("group").asText()) : profile;
-    if (!Objects.equals(LifecycleGroups.allowedKind(profile.realmRoles), LifecycleGroups.allowedKind(desired.realmRoles))) deny();
+    if (!Objects.equals(LifecycleGroups.allowedKind(profile.realmRoles), LifecycleGroups.allowedKind(desired.realmRoles))
+        ||!canonical(profile.snapshot).equals(canonical(lineage.nativeProfile()))
+        ||!profile.realmRoles.equals(mappings.get(profile.path))||!desired.realmRoles.equals(mappings.get(desired.path))) deny();
+    LifecycleGroups.group(session,realm,profile.path,profile.realmRoles);
+    LifecycleGroups.group(session,realm,desired.path,desired.realmRoles);
     if (causal != null) causal.requireProfile("ORDINARY", profile.id, profile.version);
-    else {
+    else if(request.workflow()!=null && "INACTIVITY".equals(request.target().path("origin").path("kind").asText())) {
+      if(human!=null)deny();policy.workflowOperations.require(profile.id,"account."+request.command());
+    } else {
       var source = HumanAdminSource.require(session, crypto, request, human);
+      if(request.workflow()!=null&&!"PLATFORM".equals(source.authority()))deny();
       policy.requireAdmin(source, request, "account." + request.command(), profile, desired);
       if ("ordinary-profile".equals(request.command()) && request.change().has("profile"))
         policy.requireAdmin(source, request, "account.profile", profile, desired);
@@ -170,7 +177,7 @@ final class OrdinaryAccountOperations {
     }
   }
 
-  private static void verifyCommitted(LifecycleAuthorization crypto, String realmName,
+  static void verifyCommitted(LifecycleAuthorization crypto, String realmName,
       AccountLifecycleAttempt row, JsonNode scope) {
     var creation = JSON.createObjectNode(); creation.put("v", 1); creation.put("realmName", realmName);
     creation.put("realmId", row.realmId); creation.put("attemptId", row.attemptId); creation.put("accountId", row.accountId);

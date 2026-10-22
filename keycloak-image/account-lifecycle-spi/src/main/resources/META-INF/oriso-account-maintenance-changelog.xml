@@ -96,4 +96,27 @@
     <addUniqueConstraint tableName="ORISO_CAUSAL_PASSWORD_CLAIM" columnNames="REALM_ID,CLAIM_KIND,CLAIM_ID,CLAIM_VERSION" constraintName="ORISO_CAUSAL_PASSWORD_UNIQUE"/>
     <addForeignKeyConstraint baseTableName="ORISO_CAUSAL_PASSWORD_CLAIM" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_CAUSAL_PASSWORD_REALM" onDelete="CASCADE"/>
   </changeSet>
+  <changeSet id="oriso-account-maintenance-adoption-v1" author="oriso">
+    <createTable tableName="ORISO_ACCOUNT_MAINTENANCE_ADOPTION">
+      <column name="ID" type="VARCHAR(64)"><constraints primaryKey="true" nullable="false"/></column>
+      <column name="REALM_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="ACCOUNT_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="PROFILE_KIND" type="VARCHAR(20)"><constraints nullable="false"/></column>
+      <column name="SNAPSHOT_JSON" type="TEXT"><constraints nullable="false"/></column>
+      <column name="BINDING_MAC" type="VARCHAR(64)"><constraints nullable="false"/></column>
+    </createTable>
+    <addUniqueConstraint tableName="ORISO_ACCOUNT_MAINTENANCE_ADOPTION" columnNames="REALM_ID,ACCOUNT_ID,PROFILE_KIND" constraintName="ORISO_MAINT_ADOPTION_UNIQUE"/>
+    <addForeignKeyConstraint baseTableName="ORISO_ACCOUNT_MAINTENANCE_ADOPTION" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_MAINT_ADOPTION_REALM" onDelete="CASCADE"/>
+  </changeSet>
+  <changeSet id="oriso-inactivity-suspension-v1" author="oriso">
+    <createTable tableName="ORISO_INACTIVITY_SUSPENSION">
+      <column name="ID" type="VARCHAR(255)"><constraints primaryKey="true" nullable="false"/></column>
+      <column name="REALM_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="ACCOUNT_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="OPERATION_ID" type="VARCHAR(36)"><constraints nullable="false"/></column>
+      <column name="BINDING_JSON" type="TEXT"><constraints nullable="false"/></column>
+      <column name="BINDING_MAC" type="VARCHAR(64)"><constraints nullable="false"/></column>
+    </createTable>
+    <addForeignKeyConstraint baseTableName="ORISO_INACTIVITY_SUSPENSION" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_INACTIVITY_SUSPEND_REALM" onDelete="CASCADE"/>
+  </changeSet>
 </databaseChangeLog>

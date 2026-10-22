@@ -17,9 +17,14 @@ final class MaintenanceTarget {
   private final KeycloakSession session;
   private final LifecycleAuthorization auth;
   private final Map<String, Set<String>> mappings;
+  private final GeneralPolicy configuredPolicy;
 
   MaintenanceTarget(KeycloakSession session, LifecycleAuthorization auth,
       Map<String, Set<String>> mappings) {
+    this(session,auth,mappings,null);
+  }
+  MaintenanceTarget(KeycloakSession session,LifecycleAuthorization auth,Map<String,Set<String>> mappings,GeneralPolicy configuredPolicy) {
+    this.configuredPolicy=configuredPolicy;
     this.session = session;
     this.auth = auth;
     this.mappings = mappings;
@@ -81,11 +86,12 @@ final class MaintenanceTarget {
         AccountLifecycleAttempt.class)
         .setParameter("realm", realm.getId()).setParameter("account", request.accountId())
         .setLockMode(LockModeType.PESSIMISTIC_WRITE).getResultList();
+    if (attempts.isEmpty() && !humanSelf) return readAdopted(request);
     if (attempts.size() != 1) deny();
     var row = attempts.get(0);
     em.refresh(row);
     if (!"COMMITTED".equals(row.state) || !"commit".equals(row.terminalOperation)
-        || row.terminalReceipt == null || row.creationProof == null
+        || row.terminalReceipt == null || row.creationProof == null || row.terminalDigest == null
         || !"backend-account-create".equals(row.ownerClient)
         || !auth.creatorSubject.equals(row.ownerSubject)) deny();
     var scope = parse(row.scope);
@@ -93,6 +99,20 @@ final class MaintenanceTarget {
     if (!scope.path("tenantId").equals(request.target().path("tenantId"))) deny();
     var expectedRoles = mappings.get(scope.path("initialGroup").asText());
     if (expectedRoles == null) deny();
+    OrdinaryAccountOperations.verifyCommitted(auth,realm.getName(),row,scope);
+    var provenance=JSON.createObjectNode();provenance.put("attempt",row.id);provenance.put("creationProof",row.creationProof);
+    provenance.put("terminalReceipt",row.terminalReceipt);provenance.set("scope",scope);
+    var lineage=MaintenanceLineage.ordinaryExisting(session,auth,request.accountId(),auth.mac("maintenance-provenance/v1",provenance),
+        scope.path("initialGroup").asText(),row.groupId,expectedRoles,scope.path("tenantId"));
+    String currentPath=scope.path("initialGroup").asText();String currentGroup=row.groupId;
+    if(lineage!=null){
+      var frozen=lineage.nativeProfile();currentPath=text(frozen,"groupPath",512,false);currentGroup=text(frozen,"groupId",255,false);
+      var desiredRoles=HumanPolicyJson.strings(frozen.path("realmRoles"),1,10,255);
+      if(!desiredRoles.equals(mappings.get(currentPath))||!frozen.path("clientRoles").isObject()||!frozen.path("clientRoles").isEmpty()
+          ||!Objects.equals(LifecycleGroups.allowedKind(expectedRoles),LifecycleGroups.allowedKind(desiredRoles))
+          ||!lineage.tenant().equals(scope.path("tenantId")))deny();
+      expectedRoles=desiredRoles;
+    }
     if (humanSelf) {
       if ("otp.delete".equals(otpOperation)) policy.requireSelfOtpDelete(session, request, rawHumanBearer);
       else if ("otp.app-setup".equals(otpOperation)) policy.requireSelfOtpAppSetup(session, request, rawHumanBearer);
@@ -105,10 +125,12 @@ final class MaintenanceTarget {
     if (entity == null) deny();
     em.refresh(entity);
     var current = lockedSnapshot(em, request.accountId());
-    var group = LifecycleGroups.group(session, realm, scope.path("initialGroup").asText(), expectedRoles);
-    if (!group.getId().equals(row.groupId)
-        || !LifecycleAuthorization.equal(row.roleFingerprint,
-            auth.mac("initial-roles", JSON.valueToTree(new TreeSet<>(expectedRoles))))) deny();
+    var originalRoles=mappings.get(scope.path("initialGroup").asText());
+    var original=LifecycleGroups.group(session,realm,scope.path("initialGroup").asText(),originalRoles);
+    if(!original.getId().equals(row.groupId)||!LifecycleAuthorization.equal(row.roleFingerprint,
+        auth.mac("initial-roles",JSON.valueToTree(new TreeSet<>(originalRoles)))))deny();
+    var group = LifecycleGroups.group(session, realm, currentPath, expectedRoles);
+    if(!group.getId().equals(currentGroup))deny();
     // Positive human-profile membership is required. Absence of a service-account link is insufficient.
     if (!realm.getId().equals(current.path("realmId").asText())
         || !current.path("federationLink").isNull()
@@ -129,6 +151,7 @@ final class MaintenanceTarget {
     state.put("provenance", row.id);
     state.put("groupId", group.getId());
     state.set("effectiveRoles", JSON.valueToTree(new TreeSet<>(expectedRoles)));
+    if(lineage!=null)state.put("lineageDigest",lineage.digest());
     var body = JSON.createObjectNode();
     for (String field : List.of("id", "username", "email", "firstName", "lastName", "enabled", "emailVerified"))
       body.set(field, current.path(field));
@@ -143,6 +166,38 @@ final class MaintenanceTarget {
     body.put("passwordChangeRequired", passwordChange);
     body.put("state", auth.mac("maintenance-state", state));
     return body;
+  }
+
+  private JsonNode readAdopted(MaintenanceRequest request) {
+    if(configuredPolicy==null||!"DELETION".equals(request.target().path("origin").path("kind").asText()))deny();
+    var adoption=configuredPolicy.adoptedAccounts.get(request.accountId());if(adoption==null)deny();
+    var profile=configuredPolicy.profile(adoption.profileId(),adoption.profileVersion());
+    if(!profile.realmRoles.equals(Set.of("user"))||!profile.realmRoles.equals(mappings.get(profile.path))
+        ||!profile.clientRoles.isEmpty()||configuredPolicy.nativePolicy.subjects.contains(request.accountId())
+        ||!session.getContext().getRealm().getId().equals(configuredPolicy.nativePolicy.realmId))deny();
+    var realm=session.getContext().getRealm();var em=CurrentNativeHumanIdentity.entityManager(session);
+    configuredPolicy.validateProfile(session,profile);
+    var group=LifecycleGroups.group(session,realm,profile.path,profile.realmRoles);
+    if(!group.getId().equals(profile.groupId))deny();
+    var current=lockedSnapshot(em,request.accountId());
+    if(!realm.getId().equals(current.path("realmId").asText())||!current.path("federationLink").isNull()
+        ||!current.path("serviceAccountClientLink").isNull()||!current.path("roles").isEmpty()
+        ||current.path("groups").size()!=1||!profile.groupId.equals(current.path("groups").path(0).asText()))deny();
+    var values=current.path("attributes").path("tenantId");
+    JsonNode tenant=values.isMissingNode()||values.isEmpty()?JSON.nullNode():values.path(0);
+    if(!values.isMissingNode()&&values.size()!=1||!tenant.equals(request.target().path("tenantId"))
+        ||tenant.isNull()&&!profile.allowUnassignedTenant)deny();
+    var baseline=MaintenanceAdoption.prepare(session,auth,request.accountId(),"ORDINARY",profile.id,profile.version,profile.snapshot,tenant);
+    if(!baseline.tenant().equals(tenant))deny();baseline.checked(session);
+    var state=JSON.createObjectNode();state.put("realmId",realm.getId());state.set("account",current);state.put("provenance",baseline.provenance());
+    state.put("groupId",profile.groupId);state.set("effectiveRoles",JSON.valueToTree(new TreeSet<>(profile.realmRoles)));
+    var result=JSON.createObjectNode();
+    for(String field:List.of("id","username","email","firstName","lastName","enabled","emailVerified"))result.set(field,current.path(field));
+    result.set("tenantId",tenant);var locale=current.path("attributes").path("locale");if(!locale.isMissingNode()&&locale.size()!=1)deny();
+    result.set("preferredLanguage",locale.isMissingNode()?JSON.nullNode():locale.path(0));
+    result.set("effectiveRoles",JSON.valueToTree(new TreeSet<>(profile.realmRoles)));boolean required=false;
+    for(var action:current.path("requiredActions"))if("UPDATE_PASSWORD".equals(action.asText()))required=true;
+    result.put("passwordChangeRequired",required);result.put("state",auth.mac("maintenance-state",state));return result;
   }
 
   void delete(MaintenanceRequest request) {

@@ -6,10 +6,12 @@ import hmac
 import struct
 import json
 import time
+import os
+from pathlib import Path
 import uuid
 from unittest.mock import patch
 
-from lifecycle_fixture import REALM, ACTORS, SUBJECTS, call
+from lifecycle_fixture import REALM, ACTORS, SUBJECTS, IMAGE, call
 from protected_otp_bootstrap import BootstrapFixture
 from protected_peer_readiness import PeerFixture, PeerReadiness, PROFILE, POLICY, TENANT
 from test_otp_scoped import ScopedOtpRead
@@ -44,6 +46,11 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         from protected_adoption_operations import install
         install_policy(cls, helper, value)
         value = install(cls, helper, value, PROFILE, TENANT)
+        fixture = Path(os.environ.get('SCOPED_OTP_READY_FIXTURE_JAR', ''))
+        if not fixture.is_file(): raise AssertionError('Existing isolated native observer JAR required')
+        command = cls.command.copy(); index = command.index(IMAGE)
+        command[index:index] = ['-v', str(fixture.resolve()) + ':/opt/keycloak/providers/scoped-otp-ready-fixture.jar:ro']
+        cls.command = command
         cls.installed_configuration = copy.deepcopy(value)
         return value
 

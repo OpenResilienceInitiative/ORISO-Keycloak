@@ -50,7 +50,7 @@ final class ProtectedAccountOperations {
     return true;
   }
 
-  record CheckedCurrent(JsonNode current, long humanValidUntil) {}
+  record CheckedCurrent(JsonNode current, long humanValidUntil, MaintenanceLineage.Current lineage, ProtectedInvitationConfiguration.Profile profile) {}
 
   static JsonNode readSelfOperation(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String humanHeader, String operation) {
@@ -71,17 +71,28 @@ final class ProtectedAccountOperations {
   }
 
   static void mutate(KeycloakSession session, LifecycleAuthorization crypto,
-      MaintenanceRequest request, String humanHeader) {
+      MaintenanceRequest request, JsonNode body, String humanHeader) {
     if (!"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
-        || !Set.of("profile", "email").contains(request.command())) deny();
-    var current = readCurrent(session, crypto, request, humanHeader, "account." + request.command());
+        || !Set.of("profile", "email", "reassign-tenant").contains(request.command())) deny();
+    var checked=readChecked(session, crypto, request, humanHeader, "account." + request.command());
+    var current = checked.current();
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
       throw MaintenancePreflightRefusal.current(409);
     var realm = session.getContext().getRealm();
     var user = session.users().getUserById(realm, request.accountId());
     var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
     if (cache != null && user != null) { cache.evict(realm, user); user = session.users().getUserById(realm, request.accountId()); }
-    if (user == null) deny();
+    if (user == null) throw MaintenancePreflightRefusal.current(409);
+    if("reassign-tenant".equals(request.command())) {
+      if(body==null||!"TENANT_ADMIN".equals(checked.profile().kind()))deny();
+      MaintenanceLineage.append(session,crypto,request,body,checked.lineage(),checked.profile().id(),checked.profile().version(),
+          request.change().path("tenantId"),checked.profile().snapshot());
+      user.setSingleAttribute("tenantId",request.change().path("tenantId").asText());
+      var em=CurrentNativeHumanIdentity.entityManager(session);em.flush();var fresh=AccountLifecycleResource.lockedSnapshot(em,request.accountId());
+      if(fresh.path("attributes").path("tenantId").size()!=1||!request.change().path("tenantId").equals(fresh.path("attributes").path("tenantId").path(0))
+        throw new IllegalStateException("Native tenant effect did not complete");
+      return;
+    }
     if ("profile".equals(request.command())) {
       user.setFirstName(request.change().path("firstName").textValue());
       user.setLastName(request.change().path("lastName").textValue());
@@ -110,17 +121,21 @@ final class ProtectedAccountOperations {
 
   private static CheckedCurrent readChecked(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String fullHumanHeader, String operation, CausalPasswordRequest causal) {
-    if (causal == null && (!selected(request.target()) || !Set.of("read", "profile", "email").contains(request.command())
-        || !Set.of("otp.read", "account.read", "account.profile", "account.email", "otp.app-setup",
-            "otp.delete", "otp.email-finish", "otp.email-start").contains(operation))) deny();
-    if (causal == null && (fullHumanHeader == null || fullHumanHeader.length() > 32775
-        || !fullHumanHeader.regionMatches(true, 0, "Bearer ", 0, 7)))
+    boolean inactivity=request.workflow()!=null;
+    boolean scheduled=inactivity&&"INACTIVITY".equals(request.target().path("origin").path("kind").asText());
+    if(causal==null && !inactivity && (!selected(request.target())||!Set.of("read","profile","email","reassign-tenant").contains(request.command())
+        ||!Set.of("otp.read","account.read","account.profile","account.email","account.reassign-tenant","otp.app-setup",
+            "otp.delete","otp.email-finish","otp.email-start").contains(operation)))deny();
+    if(inactivity&&(!Set.of("read","deactivate","reactivate").contains(request.command())||!("account."+request.command()).equals(operation)))deny();
+    boolean needsHuman=causal==null&&!scheduled;
+    if(needsHuman && (fullHumanHeader==null||fullHumanHeader.length()>32775||!fullHumanHeader.regionMatches(true,0,"Bearer ",0,7)))
       throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
-    String rawHuman = causal == null ? fullHumanHeader.substring(7) : null;
+    if(!needsHuman&&fullHumanHeader!=null)deny();
+    String rawHuman=needsHuman?fullHumanHeader.substring(7):null;
     var config = ProtectedInvitationFactory.checkedBootstrapConfiguration(session);
     // This transient authentication supplies a locator only. Fresh operation authority is checked
     // after realm and provenance locks through the shared native current-human implementation.
-    var authenticated = causal == null ? NativeHumanBearer.require(session, rawHuman) : null;
+    var authenticated = needsHuman ? NativeHumanBearer.require(session, rawHuman) : null;
     var realm = session.getContext().getRealm();
     if (!config.realmId.equals(realm.getId()) || !config.realmName.equals(realm.getName())
         || realm.getComponentsStream(realm.getId(), "org.keycloak.storage.UserStorageProvider").findAny().isPresent()) deny();
@@ -140,6 +155,7 @@ final class ProtectedAccountOperations {
     ProtectedInvitationConfiguration.Profile profile;
     String provenance;
     long tenant;
+    MaintenanceAdoption.Baseline adoptionBaseline=null;
     var delegation = new ProtectedPeerDelegation(session, config, crypto);
     if (locators.isEmpty()) {
       var adoption = config.adoptedAccounts.get(request.accountId());
@@ -151,10 +167,10 @@ final class ProtectedAccountOperations {
       try { tenant = Long.parseLong(requestedTenant); }
       catch (NumberFormatException invalid) { deny(); return null; }
       if ("PLATFORM_ADMIN".equals(profile.kind()) ? tenant != 0 : tenant <= 0) deny();
-      var adopted = JSON.createObjectNode(); adopted.put("accountId", adoption.accountId());
-      adopted.put("profileId", adoption.profileId()); adopted.put("profileVersion", adoption.profileVersion());
-      adopted.set("profile", profile.snapshot());
-      provenance = crypto.mac("maintenance-adoption/v1", adopted);
+      adoptionBaseline=MaintenanceAdoption.prepare(session,crypto,request.accountId(),"PROTECTED",profile.id(),profile.version(),
+          profile.snapshot(),request.target().path("tenantId"));
+      tenant=Long.parseLong(adoptionBaseline.tenant().asText());
+      provenance=adoptionBaseline.provenance();
     } else {
       var locator = locators.get(0);
       var scope = parse((String) locator[1]);
@@ -177,16 +193,25 @@ final class ProtectedAccountOperations {
           || profile.version() != adoption.profileVersion())) deny();
       provenance = attempt.id;
     }
-    if (!Long.toString(tenant).equals(request.target().path("tenantId").asText())) deny();
+    var lineage=MaintenanceLineage.resolve(session,crypto,request.accountId(),provenance,"PROTECTED",profile.id(),profile.version(),
+        JSON.valueToTree(Long.toString(tenant)),profile.snapshot());
+    if(!profile.id().equals(lineage.profileId())||profile.version()!=lineage.profileVersion()
+        ||!canonical(profile.snapshot()).equals(canonical(lineage.nativeProfile())))deny();
+    try{tenant=Long.parseLong(lineage.tenant().asText());}catch(NumberFormatException malformed){deny();return null;}
+    if(("PLATFORM_ADMIN".equals(profile.kind())?tenant!=0:tenant<=0)||!Long.toString(tenant).equals(request.target().path("tenantId").asText()))deny();
     long validUntil;
     if (causal != null) {
       causal.requireProfile("PROTECTED", profile.id(), profile.version()); validUntil = 0;
+    } else if(scheduled){
+      config.workflowOperations.require(profile.id(),operation);validUntil=0;
     } else if (approval != null && "PLATFORM_ADMIN".equals(profile.kind())
         && "SELF".equals(request.target().path("origin").path("kind").asText())) {
       validUntil = requireCommittedRecipientSelf(session, config, approval, profile, request, rawHuman, operation, tenant);
     } else {
       var resolved = delegation.resolve(authenticated, em);
       var human = delegation.require(resolved, rawHuman);
+      if((inactivity||"reassign-tenant".equals(request.command()))
+          &&(!"PLATFORM".equals(resolved.binding().authority())||resolved.sourceProfile()!=null||human.tenantId()!=0))deny();
       var origin = request.target().path("origin");
       if ("SELF".equals(origin.path("kind").asText()) && !request.accountId().equals(human.subject())
           || !human.subject().equals(origin.path("humanSubject").asText())
@@ -214,16 +239,18 @@ final class ProtectedAccountOperations {
     var current = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
     var groups = new TreeSet<String>(); current.path("groups").forEach(value -> groups.add(value.asText()));
     var tenantValues = current.path("attributes").path("tenantId");
-    if (!config.realmId.equals(current.path("realmId").asText()) || !current.path("enabled").asBoolean()
+    if (!config.realmId.equals(current.path("realmId").asText()) || !inactivity && !current.path("enabled").asBoolean()
         || !current.path("serviceAccountClientLink").isNull() || !current.path("federationLink").isNull()
         || !current.path("roles").isEmpty() || !groups.equals(Set.of(profile.groupId()))
         || tenantValues.size() != 1 || !Long.toString(tenant).equals(tenantValues.path(0).asText())) deny();
     for (var technical : config.installation.path("technicalSubjects"))
       if (request.accountId().equals(technical.asText())) deny();
     if (causal != null) causal.requireNativeBinding(crypto, current);
+    if(adoptionBaseline!=null)adoptionBaseline.checked(session);
     var state = JSON.createObjectNode();
     state.put("realmId", config.realmId); state.set("account", current);
     state.put("provenance", provenance); state.set("profile", profile.snapshot());
+    if(lineage.digest()!=null)state.put("lineageDigest",lineage.digest());
     var result = JSON.createObjectNode();
     for (String field : java.util.List.of("id", "username", "email", "firstName", "lastName", "enabled", "emailVerified"))
       result.set(field, current.path(field));
@@ -238,10 +265,10 @@ final class ProtectedAccountOperations {
     result.put("passwordChangeRequired", passwordChange);
     result.put("state", crypto.mac("maintenance-state", state));
     if ("TWO_FACTOR_STATUS_V1".equals(request.include())) result.set("twoFactor", NativeOtpStatus.read(current));
-    return new CheckedCurrent(result, validUntil);
+    return new CheckedCurrent(result, validUntil, lineage, profile);
     } catch (jakarta.ws.rs.WebApplicationException refused) {
       int status = refused.getResponse().getStatus();
-      if ("HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
+      if ((inactivity||"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText()))
           && (status == 403 || status == 409)) throw MaintenancePreflightRefusal.current(status);
       throw refused;
     }
