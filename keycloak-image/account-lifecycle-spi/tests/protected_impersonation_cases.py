@@ -11,6 +11,7 @@ from urllib.request import (
     build_opener,
     HTTPCookieProcessor,
     HTTPRedirectHandler,
+    HTTPSHandler,
     Request,
 )
 import uuid
@@ -27,7 +28,11 @@ class ProtectedImpersonationCases:
     def test_actual_impersonated_native_session_cannot_issue_human_approval(self):
         # Empty cookie jar: only the native impersonation endpoint may establish SSO.
         jar = CookieJar()
-        opener = build_opener(HTTPCookieProcessor(jar), NoRedirect())
+        self.assertTrue(self.native_https_base.startswith("https://127.0.0.1:"))
+        opener = build_opener(
+            HTTPSHandler(context=self.native_tls_context),
+            HTTPCookieProcessor(jar), NoRedirect(),
+        )
         client = self.admin("GET", "/clients?clientId=protected-human-web")[0]
         client_id = client["id"]
         original = self.admin("GET", "/clients/" + client_id)
@@ -40,15 +45,19 @@ class ProtectedImpersonationCases:
         observation = {"expectedApprovalStatus": 403}
         type(self).impersonation_observation = observation
 
-        def native_request(method, route, body=None, bearer=None):
+        def native_request(method, route, body=None, bearer=None, form=False):
             headers = {}
             if bearer is not None:
                 headers["Authorization"] = "Bearer " + bearer
-            data = None if body is None else canonical(body)
+            data = None if body is None else (
+                urlencode(body).encode() if form else canonical(body)
+            )
             if data is not None:
-                headers["Content-Type"] = "application/json"
+                headers["Content-Type"] = (
+                    "application/x-www-form-urlencoded" if form else "application/json"
+                )
             request = Request(
-                self.base + route, data=data, headers=headers, method=method
+                self.native_https_base + route, data=data, headers=headers, method=method
             )
             if method == "GET":
                 jar.add_cookie_header(request)
@@ -78,6 +87,7 @@ class ProtectedImpersonationCases:
             )
             observation["nativeImpersonationStatus"] = status
             self.assertEqual(200, status)
+            observation["nativeHttpsVerified"] = True
             self.assertIsInstance(json.loads(raw), dict)
             offered = []
             for header in impersonation_headers.get_all("Set-Cookie") or []:
@@ -85,7 +95,7 @@ class ProtectedImpersonationCases:
                 parsed_cookie.load(header)
                 if "KEYCLOAK_IDENTITY" in parsed_cookie:
                     offered.append(parsed_cookie["KEYCLOAK_IDENTITY"])
-            host = urlsplit(self.base).hostname
+            host = urlsplit(self.native_https_base).hostname
             authorization_path = "/realms/" + REALM + "/protocol/openid-connect/auth"
             observation["nativeIdentityCookieOffered"] = len(offered) == 1
             observation["nativeIdentityCookieDomainMatchesRequest"] = any(
@@ -110,6 +120,7 @@ class ProtectedImpersonationCases:
             observation["nativeIdentityCookieSecure"] = any(
                 c.secure for c in identities
             )
+            self.assertTrue(observation["nativeIdentityCookieSecure"])
             verifier = uuid.uuid4().hex + uuid.uuid4().hex
             challenge = (
                 base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
@@ -133,6 +144,7 @@ class ProtectedImpersonationCases:
                 "GET", "/realms/" + REALM + "/protocol/openid-connect/auth?" + query
             )
             observation["nativeAuthorizationStatus"] = status
+            self.assertTrue(observation["nativeIdentityCookieTransmitted"])
             self.assertEqual(302, status)
             location = headers.get("Location")
             self.assertIsInstance(location, str)
@@ -164,8 +176,7 @@ class ProtectedImpersonationCases:
             self.assertNotIn("error", reply)
             self.assertEqual([state], reply.get("state"))
             self.assertEqual(1, len(reply.get("code", [])))
-            status, token = call(
-                self.base,
+            status, token_raw, _ = native_request(
                 "POST",
                 "/realms/" + REALM + "/protocol/openid-connect/token",
                 {
@@ -179,6 +190,7 @@ class ProtectedImpersonationCases:
             )
             observation["nativeCodeExchangeStatus"] = status
             self.assertEqual(200, status)
+            token = json.loads(token_raw)
             bearer = token.get("access_token")
             self.assertIsInstance(bearer, str)
             # Reuse every existing current native human/client/grant/userinfo check.

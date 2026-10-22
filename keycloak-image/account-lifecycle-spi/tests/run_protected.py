@@ -20,6 +20,7 @@ import xml.etree.ElementTree as ET
 
 from protected_resources import evidence as resource_evidence
 from lifecycle_fixture import IMAGE
+from protected_native_tls import cleanup_native_tls
 
 
 class ProofDeadlineReached(RuntimeError):
@@ -64,6 +65,7 @@ class SanitizedResult(unittest.TestResult):
             "protected_commit_readiness.py",
             "protected_approval_replay_cases.py",
             "protected_impersonation_cases.py",
+            "protected_native_tls.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }
@@ -243,6 +245,7 @@ def cleanup_owned(fixture):
                 timeout=30,
             )
         result["volume"] = "REMOVED_OR_ALREADY_ABSENT"
+    result["nativeTls"] = cleanup_native_tls(fixture)
     data = getattr(fixture, "data", None)
     if data is not None:
         data = Path(data)
@@ -485,6 +488,9 @@ def main():
             and all(
                 impersonation.get(k) is True
                 for k in (
+                    "nativeHttpsVerified",
+                    "nativeIdentityCookieSecure",
+                    "nativeIdentityCookieTransmitted",
                     "actualNativeImpersonationCreatedOneSession",
                     "nativeCodeTokenUsesActualImpersonationSession",
                     "allCurrentNativeHumanPreconditionsPassed",

@@ -34,6 +34,11 @@ from protected_expiry_cases import ProtectedExpiryCases
 from protected_reconciliation_cases import ProtectedReconciliationCases
 from protected_approval_replay_cases import ProtectedApprovalReplayCases
 from protected_impersonation_cases import ProtectedImpersonationCases
+from protected_native_tls import (
+    add_native_tls_arguments,
+    prepare_native_tls,
+    refresh_native_tls_endpoint,
+)
 
 HUMAN = None  # Set only from the actual native user lookup, never a proposed UUID.
 ISSUER = "http://protected-fixture.invalid/realms/" + REALM
@@ -112,6 +117,7 @@ class ProtectedInvitations(
             cls.data.chmod(0o777)
             cls.addClassCleanup(lambda: shutil.rmtree(cls.data))
             cls.data_mount = str(cls.data) + ":/opt/keycloak/data"
+        prepare_native_tls(cls)
         original_run = subprocess.run
 
         def launch(args, *a, **kw):
@@ -126,6 +132,9 @@ class ProtectedInvitations(
                     "-v",
                     cls.data_mount,
                 ]
+                add_native_tls_arguments(cls, args, args.index(
+                    "quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992"
+                ))
                 args.extend(["--hostname=http://protected-fixture.invalid"])
             return original_run(args, *a, **kw)
 
@@ -407,6 +416,11 @@ class ProtectedInvitations(
         cls.configuration_checked = True
         cls.native_configured_profiles = copy.deepcopy(configuration["profiles"])
         cls.phase = "configured-native-ready"
+
+    @classmethod
+    def refresh_endpoint(cls, phase):
+        super().refresh_endpoint(phase)
+        refresh_native_tls_endpoint(cls)
 
     @classmethod
     def prepare_installation(cls, helper, configuration):
