@@ -84,7 +84,8 @@ class MailSink(socketserver.ThreadingTCPServer):
                             break
                         body.append(line)
                     self.server.messages.append(b"".join(body))
-                    self.wfile.write(b"250 accepted\r\n")
+                    self.wfile.write(b"451 synthetic uncertain delivery\r\n" if getattr(
+                        self.server, "reject_after_data", False) else b"250 accepted\r\n")
                 elif verb == b"QUIT":
                     self.wfile.write(b"221 bye\r\n")
                     return

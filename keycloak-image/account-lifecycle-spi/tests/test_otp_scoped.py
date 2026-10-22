@@ -244,9 +244,88 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         self.assertEqual(before_mail + 1, len(self.mail.messages))
         self.assertEqual(owned, [c for c in self.admin("GET", "/users/" + self.account_id
                                                      + "/credentials") if c["type"] == "MAIL_OTP_CM"])
+        extra = self.canonical_admin_with_one_extra_audience()
+        self.assertEqual(403, self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                                  "send-verification-mail", 403, bearer=extra)[0])
+        self.assertEqual(401, self.scoped_mutation(None, body, "otp.email-start", "PUT",
+                                                  "send-verification-mail", 401)[0])
+        changed = json.loads(json.dumps(body))
+        changed["otp"]["email"] = "changed@oriso.org"
+        self.assertEqual(409, self.scoped_mutation(human, changed, "otp.email-start", "PUT",
+                                                  "send-verification-mail", 409)[0])
+        mixed = json.loads(json.dumps(body))
+        mixed["target"]["origin"]["humanIssuer"] = "https://foreign.invalid/realms/other"
+        mixed["operationId"] = str(uuid.uuid4())
+        self.assertEqual(403, self.scoped_mutation(human, mixed, "otp.email-start", "PUT",
+                                                  "send-verification-mail", 403)[0])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
         self.phase("scoped-otp-email-start-exact-retry", one_smtp_effect=True,
                    one_owned_inactive_credential=True, immutable_final_receipt=True,
                    no_plaintext_destination_in_public_result=True, no_resend=True)
+
+    def email_start_body(self, human, target, email):
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        return {"target": target, "operationId": str(uuid.uuid4()),
+                "expectedState": current["state"], "authorityValidUntil": int(time.time()) + 120,
+                "otp": {"initialCode": None, "secret": None, "email": email}}
+
+    def test_current_self_email_start_refuses_another_native_accounts_email_before_effects(self):
+        human, target = self.human(), self.target()
+        realm = self.admin("GET", "")
+        realm["emailTheme"] = "oriso"
+        realm["smtpServer"] = {
+            "host": "host.docker.internal", "port": str(self.mail.server_address[1]),
+            "from": "otp-fixture@oriso.org", "auth": "false", "ssl": "false", "starttls": "false",
+        }
+        self.admin("PUT", "", realm)
+        username = "email-owner-" + uuid.uuid4().hex
+        email = username + "@oriso.org"
+        self.admin("POST", "/users", {"username": username, "email": email, "enabled": True})
+        owners = self.admin("GET", "/users?username=" + username + "&exact=true")
+        self.assertEqual(1, len(owners))
+        self.assertEqual(email, owners[0]["email"])
+        self.addCleanup(self.admin, "DELETE", "/users/" + owners[0]["id"])
+        body = self.email_start_body(human, target, email)
+        credentials = self.admin("GET", "/users/" + self.account_id + "/credentials")
+        self.assertFalse(any(x["type"] in {"otp", "MAIL_OTP_CM"} for x in credentials))
+        before_mail = len(self.mail.messages)
+        self.phase("scoped-otp-email-foreign-destination-preconditions", actual_current_self=True,
+                   real_other_native_owner=True, exact_bounded_cas=True, no_prior_owned_mail=True)
+        status, _ = self.scoped_mutation(human, body, "otp.email-start", "PUT", "send-verification-mail", 412)
+        self.assertEqual(412, status)
+        self.assertEqual(credentials, self.admin("GET", "/users/" + self.account_id + "/credentials"))
+        self.assertEqual(before_mail, len(self.mail.messages))
+
+    def test_current_self_email_smtp_unknown_is_durable_and_exact_retry_never_resends(self):
+        human, target = self.human(), self.target()
+        realm = self.admin("GET", "")
+        realm["emailTheme"] = "oriso"
+        realm["smtpServer"] = {
+            "host": "host.docker.internal", "port": str(self.mail.server_address[1]),
+            "from": "otp-fixture@oriso.org", "auth": "false", "ssl": "false", "starttls": "false",
+        }
+        self.admin("PUT", "", realm)
+        self.mail.reject_after_data = True
+        self.addCleanup(setattr, self.mail, "reject_after_data", False)
+        body = self.email_start_body(human, target, "unknown-" + uuid.uuid4().hex + "@oriso.org")
+        before_mail = len(self.mail.messages)
+        self.phase("scoped-otp-email-unknown-preconditions", actual_current_self=True,
+                   real_smtp_accepts_bytes_then451=True, exact_bounded_cas=True)
+        self.assertEqual(202, self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                                  "send-verification-mail", 202)[0])
+        self.assertEqual(before_mail + 1, len(self.mail.messages))
+        native = self.admin("GET", "/users/" + self.account_id + "/credentials")
+        pending = [x for x in native if x["type"] == "MAIL_OTP_CM"]
+        self.assertEqual(1, len(pending))
+        for _ in range(2):
+            self.assertEqual(503, self.scoped_mutation(human, body, "otp.email-start", "PUT",
+                                                      "send-verification-mail", 503)[0])
+            self.assertEqual(before_mail + 1, len(self.mail.messages))
+            self.assertEqual(pending, [x for x in self.admin("GET", "/users/" + self.account_id
+                                                            + "/credentials") if x["type"] == "MAIL_OTP_CM"])
+        self.phase("scoped-otp-email-unknown-fenced", unknown_visible=True, one_smtp_attempt=True,
+                   no_retry_send=True, no_credential_replacement=True)
 
     def canonical_admin_with_one_extra_audience(self):
         canonical_bearer = self.token("ACCOUNT_ADMIN")
