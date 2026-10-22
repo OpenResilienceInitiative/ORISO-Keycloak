@@ -1,0 +1,119 @@
+name: Scenario C protected pending OTP bootstrap proof
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - keycloak-image/**
+      - keycloak-image/otp-config-spi/**
+      - .github/workflows/scenario-c-protected-otp-bootstrap-proof.yml
+  push:
+    branches: [codex/367-c-maintenance-keycloak-20261021]
+    paths:
+      - keycloak-image/**
+      - keycloak-image/otp-config-spi/**
+      - .github/workflows/scenario-c-protected-otp-bootstrap-proof.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protected-otp-bootstrap-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  protected-pending-otp:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+          cache-dependency-path: |
+            keycloak-image/account-lifecycle-spi/pom.xml
+            keycloak-image/otp-config-spi/pom.xml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Install checksum-verified Maven 3.9.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://archive.apache.org/dist/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.tar.gz \
+            --output "$RUNNER_TEMP/maven.tar.gz"
+          printf '%s  %s\n' \
+            d50af8ab5e6005b46a07f0ce9d3719e67cfdf898da988a84871304cd59fb1af0fef2f99dea709e6e66f21f732f905979b5c2dce6b6860406f60a70e84d9cf0b8 \
+            "$RUNNER_TEMP/maven.tar.gz" | sha512sum --check
+          tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
+      - name: Check evidence gates without starting a native fixture
+        run: |
+          python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_maintenance_ci.py -v
+          python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_scoped_otp_ci.py -v
+          python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_protected_otp_bootstrap_controls.py -q
+      - name: Package default-off source and run all forty-six composed lifecycle Java units
+        working-directory: keycloak-image/account-lifecycle-spi
+        env:
+          MAVEN_OPTS: -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2
+        run: mvn -B -q clean install '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2'
+      - name: Check every Java unit and retain only sanitized method XML
+        if: always()
+        run: python keycloak-image/account-lifecycle-spi/tests/run_maintenance.py units --report proof-reports/bootstrap-lifecycle-units.json
+      - name: Package actual OTP source and run all its Java units
+        working-directory: keycloak-image/otp-config-spi
+        env:
+          MAVEN_OPTS: -Xmx512m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2
+        run: mvn -B -q clean package '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2'
+      - name: Require every source OTP unit suite with zero skips
+        if: always()
+        run: python keycloak-image/account-lifecycle-spi/tests/run_scoped_otp.py units --report proof-reports/bootstrap-units.json
+      - name: Exercise the actual approved disabled account and original OTP GET
+        env:
+          PROTECTED_PROOF_RESOURCE_PROFILE: github-ubuntu-24-amd64-v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info > /dev/null
+          docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
+          export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
+          export OTP_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/otp-config-spi/target/keycloak-otp-config-spi-1.0-SNAPSHOT-keycloak.jar"
+          python keycloak-image/account-lifecycle-spi/tests/run_protected_otp_bootstrap.py \
+            --report proof-reports/bootstrap-native.json
+      - name: Remove only this isolated job's labelled native resources
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import re,subprocess
+          rows=subprocess.run(["docker","ps","-a","--format","{{.ID}} {{.Names}}",
+              "--filter","label=oriso-protected-receiver-test=true"],check=True,
+              capture_output=True,text=True,timeout=30).stdout.splitlines()
+          for row in rows:
+              identifier,name=row.split()
+              if not re.fullmatch(r"oriso-c-lifecycle-[a-f0-9]{10}",name):
+                  raise SystemExit("Unexpected labelled container")
+              subprocess.run(["docker","rm","-fv",identifier],check=True,capture_output=True,timeout=30)
+          volumes=subprocess.run(["docker","volume","ls","-q","--filter",
+              "label=oriso-protected-receiver-test=true"],check=True,capture_output=True,
+              text=True,timeout=30).stdout.splitlines()
+          for volume in volumes:
+              if not re.fullmatch(r"oriso-protected-h2-[a-f0-9]{32}",volume):
+                  raise SystemExit("Unexpected labelled volume")
+              subprocess.run(["docker","volume","rm",volume],check=True,capture_output=True,timeout=30)
+          PYCODE
+      - name: Retain sanitized complete XML and immutable paired source evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scenario-c-protected-pending-otp-bootstrap
+          path: |
+            proof-reports/bootstrap-*.json
+            proof-reports/bootstrap-*.xml
+          if-no-files-found: error
+          retention-days: 14
