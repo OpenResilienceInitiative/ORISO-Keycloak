@@ -80,6 +80,7 @@ public final class CurrentHumanAuthorization {
     public String clientId() { return human.clientId(); }
     public String issuer() { return human.issuer(); }
     public long policyVersion() { return policyVersion; }
+    public long validatedJwtExpiresAt() { return human.validatedJwtExpiresAt(); }
     public Set<String> realmRoles() { return human.realmRoles(); }
     public Map<String, Set<String>> clientRoles() { return human.clientRoles(); }
   }

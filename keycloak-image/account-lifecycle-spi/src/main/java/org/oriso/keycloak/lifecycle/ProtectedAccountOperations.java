@@ -14,7 +14,7 @@ final class ProtectedAccountOperations {
   private static final String MARKER = "PROTECTED_ACCOUNT_OPERATIONS_V1";
 
   static boolean selected(JsonNode target) {
-    return "SELF".equals(target.path("origin").path("kind").asText())
+    return Set.of("SELF", "HUMAN_ADMIN").contains(target.path("origin").path("kind").asText())
         && MARKER.equals(target.path("origin").path("humanAuthority").asText());
   }
 
@@ -33,10 +33,64 @@ final class ProtectedAccountOperations {
     return readCurrent(session, crypto, request, fullHumanHeader, "account.read");
   }
 
+  record CheckedCurrent(JsonNode current, long humanValidUntil) {}
+
+  static JsonNode readSelfOperation(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String humanHeader, String operation) {
+    if (!"SELF".equals(request.target().path("origin").path("kind").asText())
+        || !Set.of("otp.app-setup", "otp.delete", "otp.email-finish", "otp.email-start").contains(operation)) deny();
+    return readCurrent(session, crypto, request, humanHeader, operation);
+  }
+
+  static CheckedCurrent emailStart(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String humanHeader) {
+    if (!"SELF".equals(request.target().path("origin").path("kind").asText())) deny();
+    return readChecked(session, crypto, request, humanHeader, "otp.email-start");
+  }
+
+  static JsonNode readCurrentOperation(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String humanHeader) {
+    return readCurrent(session, crypto, request, humanHeader, "account." + request.command());
+  }
+
+  static void mutate(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String humanHeader) {
+    if (!"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
+        || !Set.of("profile", "email").contains(request.command())) deny();
+    var current = readCurrent(session, crypto, request, humanHeader, "account." + request.command());
+    if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
+      throw new jakarta.ws.rs.ClientErrorException("Current account state conflicts", 409);
+    var realm = session.getContext().getRealm();
+    var user = session.users().getUserById(realm, request.accountId());
+    var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
+    if (cache != null && user != null) { cache.evict(realm, user); user = session.users().getUserById(realm, request.accountId()); }
+    if (user == null) deny();
+    if ("profile".equals(request.command())) {
+      user.setFirstName(request.change().path("firstName").textValue());
+      user.setLastName(request.change().path("lastName").textValue());
+    }
+    if (!request.change().path("email").equals(current.path("email"))) {
+      user.setEmail(request.change().path("email").textValue());
+      user.setEmailVerified(false);
+    }
+    var em = CurrentNativeHumanIdentity.entityManager(session); em.flush();
+    var fresh = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
+    for (var fields = request.change().fields(); fields.hasNext();) {
+      var field = fields.next(); if (!field.getValue().equals(fresh.path(field.getKey())))
+        throw new jakarta.ws.rs.ClientErrorException("Current account state conflicts", 409);
+    }
+  }
+
   private static JsonNode readCurrent(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String fullHumanHeader, String operation) {
-    if (!selected(request.target()) || !"read".equals(request.command())
-        || !Set.of("otp.read", "account.read", "otp.app-setup").contains(operation)) deny();
+    return readChecked(session, crypto, request, fullHumanHeader, operation).current();
+  }
+
+  private static CheckedCurrent readChecked(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String fullHumanHeader, String operation) {
+    if (!selected(request.target()) || !Set.of("read", "profile", "email").contains(request.command())
+        || !Set.of("otp.read", "account.read", "account.profile", "account.email", "otp.app-setup",
+            "otp.delete", "otp.email-finish", "otp.email-start").contains(operation)) deny();
     if (fullHumanHeader == null || fullHumanHeader.length() > 32775
         || !fullHumanHeader.regionMatches(true, 0, "Bearer ", 0, 7))
       throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
@@ -79,13 +133,16 @@ final class ProtectedAccountOperations {
     var delegation = new ProtectedPeerDelegation(session, config, crypto);
     long tenant = delegation.committedOperationTarget(approval, attempt, profile);
     if (!Long.toString(tenant).equals(request.target().path("tenantId").asText())) deny();
-    if ("PLATFORM_ADMIN".equals(profile.kind())) {
-      requireCommittedRecipientSelf(session, config, approval, profile, request, rawHuman, operation, tenant);
+    long validUntil;
+    if ("PLATFORM_ADMIN".equals(profile.kind())
+        && "SELF".equals(request.target().path("origin").path("kind").asText())) {
+      validUntil = requireCommittedRecipientSelf(session, config, approval, profile, request, rawHuman, operation, tenant);
     } else {
       var resolved = delegation.resolve(authenticated, em);
       var human = delegation.require(resolved, rawHuman);
       var origin = request.target().path("origin");
-      if (!request.accountId().equals(human.subject()) || !human.subject().equals(origin.path("humanSubject").asText())
+      if ("SELF".equals(origin.path("kind").asText()) && !request.accountId().equals(human.subject())
+          || !human.subject().equals(origin.path("humanSubject").asText())
           || !human.issuer().equals(origin.path("humanIssuer").asText())
           || !human.clientId().equals(origin.path("humanClient").asText())) deny();
       var grants = config.bindingAccountOperations.get(human.subject());
@@ -103,6 +160,7 @@ final class ProtectedAccountOperations {
               && (grant.targetSubjects().isEmpty() || grant.targetSubjects().contains(request.accountId())))) deny();
       if ("TENANT_PEER".equals(resolved.binding().authority()) && human.tenantId() != tenant
           || "PLATFORM".equals(resolved.binding().authority()) && human.tenantId() != 0) deny();
+      validUntil = human.validatedJwtExpiresAt();
     }
     config.validateProfile(session, profile);
     var current = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
@@ -130,10 +188,10 @@ final class ProtectedAccountOperations {
       if (org.keycloak.models.UserModel.RequiredAction.UPDATE_PASSWORD.name().equals(action.asText())) passwordChange = true;
     result.put("passwordChangeRequired", passwordChange);
     result.put("state", crypto.mac("maintenance-state", state));
-    return result;
+    return new CheckedCurrent(result, validUntil);
   }
 
-  private static void requireCommittedRecipientSelf(KeycloakSession session,
+  private static long requireCommittedRecipientSelf(KeycloakSession session,
       ProtectedInvitationConfiguration config, ProtectedInvitationApproval approval,
       ProtectedInvitationConfiguration.Profile profile, MaintenanceRequest request,
       String rawHuman, String operation, long tenant) {
@@ -157,6 +215,7 @@ final class ProtectedAccountOperations {
         || human.tenantId() == null || human.tenantId() != 0
         || !profile.realmRoles().equals(human.realmRoles())
         || !profile.clientRoles().equals(human.clientRoles())) deny();
+    return human.validatedJwtExpiresAt();
   }
 
   private ProtectedAccountOperations() {}

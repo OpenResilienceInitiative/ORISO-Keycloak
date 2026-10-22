@@ -192,8 +192,11 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse(command, account, body);
-      if (!"SELF".equals(request.target().path("origin").path("kind").asText())) deny();
-      var humanPolicy = humanPolicies.get();
+      boolean protectedAdmin = ProtectedAccountOperations.selected(request.target())
+          && "HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
+          && Set.of("profile", "email").contains(command);
+      if (!("SELF".equals(request.target().path("origin").path("kind").asText()) || protectedAdmin)) deny();
+      var humanPolicy = protectedAdmin ? null : humanPolicies.get();
       var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
       var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
       if (lockedRealm == null) deny();
@@ -211,7 +214,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           throw new ClientErrorException("Maintenance operation conflicts", 409);
         // The immutable operation is the retry provenance; verify the current actual human,
         // then return before mutable target/CAS resolution or any second native effect.
-        humanPolicy.requireSelf(session, request, rawHumanBearer);
+        if (protectedAdmin) ProtectedAccountOperations.readCurrentOperation(session, auth, request, rawHumanBearer);
+        else humanPolicy.requireSelf(session, request, rawHumanBearer);
         return Response.ok(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
       }
       request.requireEffectDeadline();
@@ -219,7 +223,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           || machine.nativeAuth().getToken().getExp() <= java.time.Instant.now().getEpochSecond()) deny();
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
-      if ("locale".equals(command)) targets.locale(request, humanPolicy, rawHumanBearer);
+      if (protectedAdmin) ProtectedAccountOperations.mutate(session, auth, request, rawHumanBearer);
+      else if ("locale".equals(command)) targets.locale(request, humanPolicy, rawHumanBearer);
       else if ("profile".equals(command)) targets.profile(request, humanPolicy, rawHumanBearer);
       else if (Set.of("password", "self-password").contains(command)) targets.password(request, humanPolicy, rawHumanBearer);
       else deny();
