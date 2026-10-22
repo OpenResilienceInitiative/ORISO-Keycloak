@@ -147,13 +147,21 @@ def source_manifest(module):
 def unit_evidence(folder):
     files = sorted(folder.glob("TEST-*.xml"))
     totals = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
+    expected = {"org.oriso.keycloak.lifecycle.LifecycleJsonTest": 13,
+                "org.oriso.keycloak.lifecycle.ProtectedPeerPolicyTest": 10}
+    inventory, cases = {}, []
     for path in files:
         suite = ET.parse(path).getroot()
+        inventory[suite.attrib.get("name")] = int(suite.attrib.get("tests", "0"))
+        cases.extend((case.attrib.get("classname"), case.attrib.get("name"))
+                     for case in suite.findall("testcase"))
         for key in totals:
             totals[key] += int(suite.attrib.get(key, "0"))
-    if totals != {"tests": 13, "failures": 0, "errors": 0, "skipped": 0}:
-        raise AssertionError("Required13unit XML gate did not pass")
-    return {"totals": totals, "xmlSHA256": {path.name: digest(path) for path in files}}
+    if (inventory != expected or len(cases) != len(set(cases)) or len(cases) != 23
+            or totals != {"tests": 23, "failures": 0, "errors": 0, "skipped": 0}):
+        raise AssertionError("Required original13 plus peer10 exact unit XML gate did not pass")
+    return {"totals": totals, "catalog": inventory,
+            "xmlSHA256": {path.name: digest(path) for path in files}}
 
 
 def cleanup_owned(fixture):
