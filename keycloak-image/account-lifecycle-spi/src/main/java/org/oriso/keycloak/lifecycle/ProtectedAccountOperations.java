@@ -89,7 +89,7 @@ final class ProtectedAccountOperations {
           request.change().path("tenantId"),checked.profile().snapshot());
       user.setSingleAttribute("tenantId",request.change().path("tenantId").asText());
       var em=CurrentNativeHumanIdentity.entityManager(session);em.flush();var fresh=AccountLifecycleResource.lockedSnapshot(em,request.accountId());
-      if(fresh.path("attributes").path("tenantId").size()!=1||!request.change().path("tenantId").equals(fresh.path("attributes").path("tenantId").path(0))
+      if(fresh.path("attributes").path("tenantId").size()!=1||!request.change().path("tenantId").equals(fresh.path("attributes").path("tenantId").path(0)))
         throw new IllegalStateException("Native tenant effect did not complete");
       return;
     }
