@@ -369,7 +369,7 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
                 self.token("ACCOUNT_ADMIN"),True,proof(body,self.realm_id))
         nearby={otp_code(counter+offset) for offset in range(-5,6)}
         wrong=next(str(value).zfill(6) for value in range(100) if str(value).zfill(6) not in nearby)
-        self.assertEqual(401,mfa_exchange(wrong)[0])
+        self.assertEqual(400,mfa_exchange(wrong)[0])
         self.assertEqual(expected_sessions,session_ids())
         status,mfa_reply=mfa_exchange(otp_code(counter))
         self.assertEqual(200,status)
