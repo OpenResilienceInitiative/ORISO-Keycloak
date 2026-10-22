@@ -10,16 +10,18 @@ import org.keycloak.models.KeycloakSession;
 /** Explicit scheduled grant or actual manual PLATFORM source; no synthesized human or password. */
 final class InactivityOperations {
   static JsonNode read(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
-      Supplier<GeneralPolicy> policies,MaintenanceRequest request,String human){
+      Supplier<GeneralPolicy> policies,GeneralPolicy configured,MaintenanceRequest request,String human){
     if(request.workflow()==null)deny();
     if("INACTIVITY".equals(request.target().path("origin").path("kind").asText())&&human!=null)deny();
+    if(adoptedOrdinaryTarget(session,configured,request))
+      return OrdinaryAccountOperations.read(session,crypto,mappings,human==null?configured:policies.get(),request,human);
     return ProtectedAccountOperations.protectedTarget(session,request)
         ? ProtectedAccountOperations.readCurrentOperation(session,crypto,request,human)
         : OrdinaryAccountOperations.read(session,crypto,mappings,policies.get(),request,human);
   }
   static void mutate(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
-      Supplier<GeneralPolicy> policies,LifecycleAuthorization.CheckedMachine machine,MaintenanceRequest request,JsonNode body,String human){
-    var current=read(session,crypto,mappings,policies,request,human);
+      Supplier<GeneralPolicy> policies,GeneralPolicy configured,LifecycleAuthorization.CheckedMachine machine,MaintenanceRequest request,JsonNode body,String human){
+    var current=read(session,crypto,mappings,policies,configured,request,human);
     if(!LifecycleAuthorization.equal(request.expectedState(),current.path("state").asText()))throw MaintenancePreflightRefusal.current(409);
     boolean suspend="deactivate".equals(request.command());
     if(suspend && "INACTIVITY".equals(request.target().path("origin").path("kind").asText())
@@ -42,6 +44,18 @@ final class InactivityOperations {
     var em=CurrentNativeHumanIdentity.entityManager(session);em.flush();
     var fresh=AccountLifecycleResource.lockedSnapshot(em,request.accountId());
     if(!fresh.path("enabled").isBoolean()||fresh.path("enabled").booleanValue()!=enabled)throw new IllegalStateException("Native status effect incomplete");
+  }
+  private static boolean adoptedOrdinaryTarget(KeycloakSession session,GeneralPolicy configured,MaintenanceRequest request){
+    if(configured==null||!configured.adoptedAccounts.containsKey(request.accountId()))return false;
+    var em=CurrentNativeHumanIdentity.entityManager(session);var realm=session.getContext().getRealm();
+    var locked=em.find(org.keycloak.models.jpa.entities.RealmEntity.class,realm.getId(),LockModeType.PESSIMISTIC_WRITE);
+    if(locked==null)deny();em.refresh(locked);
+    var attempts=em.createQuery("select a.id from AccountLifecycleAttempt a where a.realmId=:realm and a.accountId=:account",String.class)
+        .setParameter("realm",realm.getId()).setParameter("account",request.accountId()).setMaxResults(2).getResultList();
+    if(!attempts.isEmpty())return false;
+    if(ProtectedInvitationFactory.configuredAdoptedTarget(session,request.accountId()))deny();
+    // This is a locator only. The selected receiver must check its grant, baseline and full native profile.
+    return true;
   }
   private static void record(KeycloakSession session,LifecycleAuthorization crypto,LifecycleAuthorization.CheckedMachine machine,
       MaintenanceRequest request,JsonNode body,boolean enabled){

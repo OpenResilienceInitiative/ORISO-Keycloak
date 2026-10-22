@@ -24,6 +24,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   private final MaintenanceTarget targets;
   private final Map<String, Set<String>> mappings;
   private final Supplier<GeneralPolicy> humanPolicies;
+  private final GeneralPolicy configuredPolicy;
 
   AccountMaintenanceResource(KeycloakSession session, LifecycleAuthorization auth,
       Map<String, Set<String>> mappings, Supplier<GeneralPolicy> humanPolicies) {
@@ -34,6 +35,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
     this.session = session;
     this.auth = auth;
     this.humanPolicies = humanPolicies;
+    this.configuredPolicy = configuredPolicy;
     this.targets = new MaintenanceTarget(session, auth, mappings, configuredPolicy);
     this.mappings = mappings;
   }
@@ -70,7 +72,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("read", account, body);
       if(request.workflow()!=null)
-        return Response.ok(InactivityOperations.read(session,auth,mappings,humanPolicies,request,rawHumanBearer)).header("Cache-Control","no-store").build();
+        return Response.ok(InactivityOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,request,rawHumanBearer)).header("Cache-Control","no-store").build();
       if (ProtectedAccountOperations.selected(request.target())) {
         var current = ProtectedAccountOperations.protectedTarget(session, request)
             ? ProtectedAccountOperations.readAccount(session, auth, request, rawHumanBearer)
@@ -312,7 +314,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
       try {
-        if(inactivity) InactivityOperations.mutate(session,auth,mappings,humanPolicies,machine,request,body,rawHumanBearer);
+        if(inactivity) InactivityOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,machine,request,body,rawHumanBearer);
         else if (humanAdmin) {
           if (ProtectedAccountOperations.protectedTarget(session, request))
             ProtectedAccountOperations.mutate(session, auth, request, body, rawHumanBearer);

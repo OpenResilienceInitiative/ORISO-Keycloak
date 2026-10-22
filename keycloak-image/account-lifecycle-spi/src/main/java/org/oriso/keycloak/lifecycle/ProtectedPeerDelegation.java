@@ -52,6 +52,16 @@ final class ProtectedPeerDelegation {
     long tenant = provenance(origin, attempt, profile);
     if (!subject.equals(attempt.accountId)
         || !origin.delegationSnapshot.equals(snapshot(origin, attempt, profile, policy, tenant))) deny();
+    // The original consumed snapshot above stays byte-exact. Only the approved append-only
+    // native lineage may supply a changed current tenant/profile for this same person.
+    var lineage=MaintenanceLineage.resolve(session,crypto,subject,attempt.id,"PROTECTED",profile.id(),profile.version(),
+        JSON.valueToTree(Long.toString(tenant)),profile.snapshot());
+    var currentProfile=config.profiles.get(lineage.profileId());
+    if(currentProfile==null||currentProfile.version()!=lineage.profileVersion()||!"TENANT_ADMIN".equals(currentProfile.kind())
+        ||!canonical(currentProfile.snapshot()).equals(canonical(lineage.nativeProfile())))deny();
+    var currentPolicy=policy(currentProfile);if(currentPolicy==null)deny();
+    try{tenant=Long.parseLong(lineage.tenant().asText());}catch(NumberFormatException malformed){deny();return null;}
+    if(tenant<=0)deny();profile=currentProfile;policy=currentPolicy;
     var value = JSON.createObjectNode();
     for (String name : List.of("realmId", "issuer", "technicalSubjects", "technicalGroupIds", "technicalRoles"))
       value.set(name, config.installation.path(name).deepCopy());

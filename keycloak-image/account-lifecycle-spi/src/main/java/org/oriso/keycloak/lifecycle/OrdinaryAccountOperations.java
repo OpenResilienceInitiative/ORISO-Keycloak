@@ -107,20 +107,33 @@ final class OrdinaryAccountOperations {
     var rows = em.createQuery("select a from AccountLifecycleAttempt a where a.realmId=:realm and a.accountId=:account",
         AccountLifecycleAttempt.class).setParameter("realm", realm.getId()).setParameter("account", request.accountId())
         .setLockMode(LockModeType.PESSIMISTIC_WRITE).setMaxResults(2).getResultList();
-    if (rows.size() != 1) deny(); var row = rows.get(0); em.refresh(row);
-    if (!"COMMITTED".equals(row.state) || !"commit".equals(row.terminalOperation)
-        || !"backend-account-create".equals(row.ownerClient) || !crypto.creatorSubject.equals(row.ownerSubject)
-        || row.creationProof == null || row.terminalReceipt == null || row.terminalDigest == null) deny();
-    var scope = parse(row.scope); LifecycleGroups.scope(scope);
-    var originalRoles = mappings.get(scope.path("initialGroup").asText());
-    if (originalRoles == null || !LifecycleAuthorization.equal(row.roleFingerprint,
-        crypto.mac("initial-roles", JSON.valueToTree(new TreeSet<>(originalRoles))))) deny();
-    var baseline = policy.profileForGroup(row.groupId, originalRoles);
-    verifyCommitted(crypto, realm.getName(), row, scope);
-    var origin = JSON.createObjectNode(); origin.put("attempt", row.id); origin.put("creationProof", row.creationProof);
-    origin.put("terminalReceipt", row.terminalReceipt); origin.set("scope", scope);
-    var lineage = MaintenanceLineage.resolve(session, crypto, request.accountId(), crypto.mac("maintenance-provenance/v1", origin),
-        "ORDINARY", baseline.id, baseline.version, scope.path("tenantId"), baseline.snapshot);
+    GeneralPolicy.Profile baseline; JsonNode originalTenant; String provenance; String stateProvenance;
+    MaintenanceAdoption.Baseline adoptionBaseline=null;
+    if(rows.isEmpty()) {
+      // Only the separately granted claimed inactivity workflow can adopt this ordinary target here.
+      if(request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText()))deny();
+      var adoption=policy.adoptedAccounts.get(request.accountId());if(adoption==null)deny();
+      baseline=policy.profile(adoption.profileId(),adoption.profileVersion());
+      adoptionBaseline=MaintenanceAdoption.prepare(session,crypto,request.accountId(),"ORDINARY",baseline.id,baseline.version,
+          baseline.snapshot,request.target().path("tenantId"));
+      originalTenant=adoptionBaseline.tenant();provenance=adoptionBaseline.provenance();stateProvenance=provenance;
+    } else {
+      if(rows.size()!=1)deny();var row=rows.get(0);em.refresh(row);
+      if (!"COMMITTED".equals(row.state) || !"commit".equals(row.terminalOperation)
+          || !"backend-account-create".equals(row.ownerClient) || !crypto.creatorSubject.equals(row.ownerSubject)
+          || row.creationProof == null || row.terminalReceipt == null || row.terminalDigest == null) deny();
+      var scope = parse(row.scope); LifecycleGroups.scope(scope);
+      var originalRoles = mappings.get(scope.path("initialGroup").asText());
+      if (originalRoles == null || !LifecycleAuthorization.equal(row.roleFingerprint,
+          crypto.mac("initial-roles", JSON.valueToTree(new TreeSet<>(originalRoles))))) deny();
+      baseline = policy.profileForGroup(row.groupId, originalRoles);
+      verifyCommitted(crypto, realm.getName(), row, scope);
+      var origin = JSON.createObjectNode(); origin.put("attempt", row.id); origin.put("creationProof", row.creationProof);
+      origin.put("terminalReceipt", row.terminalReceipt); origin.set("scope", scope);
+      provenance=crypto.mac("maintenance-provenance/v1",origin);originalTenant=scope.path("tenantId");stateProvenance=row.id;
+    }
+    var lineage = MaintenanceLineage.resolve(session, crypto, request.accountId(), provenance,
+        "ORDINARY", baseline.id, baseline.version, originalTenant, baseline.snapshot);
     var profile = policy.profile(lineage.profileId(), lineage.profileVersion());
     var desired = "ordinary-profile".equals(request.command())
         ? policy.desiredProfile(request.change().path("group").asText()) : profile;
@@ -141,7 +154,7 @@ final class OrdinaryAccountOperations {
     }
     // All failures below are definite target/CAS preflight refusals for the actual authorized source.
     try {
-      if (!lineage.tenant().equals(request.target().path("tenantId"))
+      if (!realm.getId().equals(policy.nativePolicy.realmId) || !lineage.tenant().equals(request.target().path("tenantId"))
           || policy.nativePolicy.subjects.contains(request.accountId())) deny();
       policy.validateProfile(session, profile); policy.validateProfile(session, desired);
       var current = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
@@ -153,8 +166,9 @@ final class OrdinaryAccountOperations {
       if (!tenants.isMissingNode() && tenants.size() != 1 || !actualTenant.equals(lineage.tenant())
           || actualTenant.isNull() && !profile.allowUnassignedTenant) deny();
       if (causal != null) causal.requireNativeBinding(crypto, current);
+      if(adoptionBaseline!=null)adoptionBaseline.checked(session);
       var state = JSON.createObjectNode(); state.set("account", current); state.put("realmId", realm.getId());
-      state.put("provenance", row.id); state.put("groupId", profile.groupId);
+      state.put("provenance", stateProvenance); state.put("groupId", profile.groupId);
       state.set("effectiveRoles", JSON.valueToTree(new TreeSet<>(profile.realmRoles)));
       if (lineage.digest() != null) state.put("lineageDigest", lineage.digest());
       var result = JSON.createObjectNode();

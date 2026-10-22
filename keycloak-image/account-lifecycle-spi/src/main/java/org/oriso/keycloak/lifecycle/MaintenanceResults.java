@@ -61,7 +61,17 @@ final class MaintenanceResults {
     var result = JSON.createObjectNode(); result.put("operationId", request.operationId());
     result.put("accountId", request.accountId()); result.put("result", "UPDATED");
     result.put("receipt", crypto.receipt("maintenance-operation-receipt", payload(session, crypto, machine, request, digest, "UPDATED")));
-    persist(session, machine, request, digest, result); CurrentNativeHumanIdentity.entityManager(session).flush();
+    persist(session, machine, request, digest, result);
+    var realm=session.getContext().getRealm();
+    if(realm.isAdminEventsEnabled()){
+      var event=new org.keycloak.events.admin.AdminEvent();event.setTime(System.currentTimeMillis());event.setRealmId(realm.getId());
+      event.setOperationType(org.keycloak.events.admin.OperationType.UPDATE);event.setResourceType(org.keycloak.events.admin.ResourceType.USER);
+      event.setResourcePath("accounts/"+request.accountId());
+      var details=new org.keycloak.events.admin.AuthDetails();details.setRealmId(realm.getId());
+      details.setClientId(machine.clientId());details.setUserId(machine.subject());event.setAuthDetails(details);
+      session.getProvider(org.keycloak.events.EventStoreProvider.class).onEvent(event,false);
+    }
+    CurrentNativeHumanIdentity.entityManager(session).flush();
     return Response.ok(result).header("Cache-Control", "no-store").build();
   }
   private static boolean allowedStatus(MaintenanceRequest request, int status) {
