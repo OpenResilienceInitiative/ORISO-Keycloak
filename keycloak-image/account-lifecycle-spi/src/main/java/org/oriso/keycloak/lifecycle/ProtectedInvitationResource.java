@@ -452,6 +452,17 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
           || !"AUTHORIZED".equals(row.state)) conflict();
       return result(row, 200);
     }
+    // A different URL cannot reissue the same immutable workflow revision.
+    // Use a current locking scalar read under the realm lock, not an RR snapshot.
+    if (!em.createNativeQuery(
+            "select ID from ORISO_PROTECTED_INVITATION_APPROVAL where REALM_ID = :realm"
+                + " and WORKFLOW_ID = :workflow and INVITE_ID = :invite"
+                + " and AUTHORIZATION_REVISION = :revision for update")
+        .setParameter("realm", config.realmId)
+        .setParameter("workflow", scope.path("workflowId").asText())
+        .setParameter("invite", scope.path("inviteId").asText())
+        .setParameter("revision", scope.path("authorizationRevision").asLong())
+        .getResultList().isEmpty()) conflict();
     Instant expires = Instant.parse(text(scope, "validUntil", 30, false)), now = Instant.now();
     // Actual AccountInviteService.validExpiryDays permits at most365days.
     if (!expires.isAfter(now) || expires.isAfter(now.plusSeconds(365L * 24 * 60 * 60))) deny();
