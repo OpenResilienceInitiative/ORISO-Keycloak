@@ -1,0 +1,141 @@
+"""Finite ordinary target operations through the original authenticated maintenance route."""
+import copy
+import json
+import uuid
+
+from lifecycle_fixture import ACTORS, SUBJECTS, REALM, IMAGE, LifecycleFixture, call
+from maintenance_human_fixture import HumanMaintenanceFixture
+from test_maintenance import MaintenancePermissions
+
+OPERATIONS = ['account.deactivate', 'account.email', 'account.ordinary-profile',
+              'account.profile', 'account.reactivate', 'account.read']
+
+
+def install_policy(cls, helper, protected):
+    parent = helper.group_id('/human-roles')
+    helper.admin('POST', '/groups/' + parent + '/children', {'name': 'consultant-basic'})
+    helper.admin('POST', '/groups/' + helper.group_id('/human-roles/consultant-basic') + '/role-mappings/realm',
+                 [helper.admin('GET', '/roles/consultant')])
+    profiles = []
+    for group, roles in [('consultant', ['consultant', 'group-chat-consultant']),
+                         ('consultant-basic', ['consultant']), ('user', ['user'])]:
+        profiles.append({'id': group + '-v1', 'version': 1,
+                         'groupId': helper.group_id('/human-roles/' + group),
+                         'groupPath': '/human-roles/' + group,
+                         'groupParentId': helper.group_id('/human-roles'),
+                         'realmRoles': roles, 'clientRoles': {}, 'allowUnassignedTenant': False,
+                         'selfOperations': ['account.read']})
+    native = {key: copy.deepcopy(protected[key]) for key in
+              ['realmId', 'issuer', 'technicalSubjects', 'technicalGroupIds', 'technicalRoles']}
+    native.update(clientIds=['protected-human-web'], audienceSets=[['userservice']])
+    config = {'version': 1, 'native': native, 'ordinaryProfiles': profiles,
+              'adminOperations': [{'authority': authority, 'selfOnly': False,
+                                   'targetProfiles': ['consultant-v1', 'consultant-basic-v1', 'user-v1'],
+                                   'operations': OPERATIONS} for authority in ['PLATFORM', 'TENANT_PEER']]}
+    command = cls.command.copy()
+    index = command.index(IMAGE)
+    command[index:index] = ['-e', 'ORISO_ACCOUNT_MAINTENANCE_CONFIG=' + json.dumps(config, separators=(',', ':'))]
+    cls.command = command
+    cls.ordinary_installed_configuration = copy.deepcopy(config)
+
+
+def exercise(test, helper, primary, peer, observed):
+    """A separate command gets a separate subassertion; no fixture/setup exception is RED."""
+    records = observed['ordinaryOperations'] = {}
+    account, creation = committed(test, helper)
+    target = {'accountId': account, 'tenantId': '11', 'origin': {
+        'kind': 'HUMAN_ADMIN', 'workflowId': str(uuid.uuid4()), 'humanSubject': helper.human_subject,
+        'humanIssuer': type(helper).native_issuer, 'humanClient': 'protected-human-web',
+        'humanAuthority': 'PROTECTED_ACCOUNT_OPERATIONS_V1'}}
+    old_account, old_create = helper.account_id, helper.creation_input
+    helper.account_id, helper.creation_input = account, creation
+    try:
+        bearer = helper.token('ACCOUNT_ADMIN')
+        test.assertEqual(403, call(helper.base, 'GET', '/admin/realms/' + REALM + '/users/' + account, token=bearer)[0])
+        test.assertTrue(helper.admin('GET', '/users/' + account)['enabled'])
+        test.assertEqual(['11'], helper.admin('GET', '/users/' + account)['attributes']['tenantId'])
+
+        def invoke(command, change=None):
+            body = {'target': target}
+            if command != 'read':
+                # This independent checked deletion read supplies fixture CAS only while the
+                # original profile remains unchanged; it confers no human admin authority.
+                status, current = HumanMaintenanceFixture.invoke(helper, 'read', body, primary, 200)
+                if status == 403:
+                    deletion = MaintenancePermissions.target(account, creation)
+                    status, current = MaintenancePermissions.maintenance(helper, 'read', account, {'target': deletion})
+                test.assertEqual(200, status)
+                body.update(operationId=str(uuid.uuid4()), expectedState=current['state'], change=change)
+            before = helper.admin('GET', '/users/' + account)
+            status, result = HumanMaintenanceFixture.invoke(helper, command, body, primary, 200)
+            unchanged = before == helper.admin('GET', '/users/' + account)
+            records['account.' + command] = {'status': status, 'expected': 200,
+                'preconditions': True, 'unchangedOnDenial': unchanged}
+            if status == 403:
+                test.assertTrue(unchanged)
+            with test.subTest(operation='ordinary.account.' + command):
+                test.assertEqual(200, status)
+                if command == 'read':
+                    test.assertEqual(account, result['id'])
+                else:
+                    test.assertEqual('UPDATED', result['result'])
+                    test.assertEqual(body['operationId'], result['operationId'])
+                    test.assertEqual((status, result), HumanMaintenanceFixture.invoke(helper, command, body, primary, 200))
+                    fresh = helper.admin('GET', '/users/' + account)
+                    if command in {'profile', 'email'}:
+                        for field, expected in change.items():
+                            test.assertEqual(expected, fresh.get(field))
+                    elif command == 'ordinary-profile':
+                        test.assertEqual({helper.group_id(change['group'])},
+                                         {row['id'] for row in helper.admin('GET', '/users/' + account + '/groups')})
+                        for field, expected in change.get('profile', {}).items():
+                            test.assertEqual(expected, fresh.get(field))
+                    elif command in {'deactivate', 'reactivate'}:
+                        test.assertEqual(command == 'reactivate', fresh['enabled'])
+                records['account.' + command]['effectAndRetryVerified'] = True
+            return status
+
+        invoke('read')
+        status, projection = HumanMaintenanceFixture.invoke(helper, 'read',
+            {'target': target, 'include': 'TWO_FACTOR_STATUS_V1'}, primary, 200)
+        records['account.read.two-factor'] = {'status': status, 'expected': 200, 'preconditions': True}
+        with test.subTest(operation='ordinary.account.read.two-factor'):
+            test.assertEqual(200, status)
+            test.assertEqual({'configured': False, 'active': False}, projection['twoFactor'])
+            test.assertEqual({'id', 'username', 'email', 'firstName', 'lastName', 'enabled', 'emailVerified',
+                              'tenantId', 'preferredLanguage', 'effectiveRoles', 'passwordChangeRequired',
+                              'state', 'twoFactor'}, set(projection))
+        for invalid in [None, True, 1, 'OTP_SECRET', {'twoFactor': True}]:
+            invalid_status, _ = HumanMaintenanceFixture.invoke(helper, 'read',
+                {'target': target, 'include': invalid}, primary, 400)
+            test.assertEqual(400, invalid_status)
+        invoke('profile', {'firstName': 'Ordinary', 'lastName': 'Managed', 'email': creation['account']['email']})
+        invoke('email', {'email': 'ordinary-' + uuid.uuid4().hex + '@oriso.org'})
+        invoke('ordinary-profile', {'group': '/human-roles/consultant-basic',
+                                    'profile': {'firstName': 'Combined', 'lastName': 'Atomic',
+                                                'email': helper.admin('GET', '/users/' + account)['email']}})
+        inactive = invoke('deactivate', {})
+        if inactive == 403:
+            fresh = helper.admin('GET', '/users/' + account); fresh['enabled'] = False
+            helper.admin('PUT', '/users/' + account, fresh)
+        native = helper.admin('GET', '/users/' + account)
+        invoke('reactivate', {'expectedUsername': native['username'], 'expectedEmail': native['email'],
+                              'password': 'Finite-reactivation-fixture-937451'})
+        # An actual independently committed peer from tenant17 cannot touch tenant11.
+        cross = copy.deepcopy(target); cross['origin']['humanSubject'] = peer[0]
+        status, _ = HumanMaintenanceFixture.invoke(helper, 'read', {'target': cross}, peer[1], 403)
+        test.assertEqual(403, status)
+        observed['ordinaryCrossTenantPeerDenied'] = True
+    finally:
+        helper.account_id, helper.creation_input = old_account, old_create
+
+
+def committed(test, helper):
+    attempt = str(uuid.uuid4())
+    creation = LifecycleFixture.creation(helper)
+    status, opened = LifecycleFixture.request(helper, 'create', attempt, creation)
+    test.assertEqual(201, status)
+    status, terminal = LifecycleFixture.request(helper, 'commit', attempt, LifecycleFixture.finish(helper, creation, opened))
+    test.assertEqual(200, status)
+    test.assertEqual('COMMITTED', terminal['state'])
+    return opened['accountId'], creation

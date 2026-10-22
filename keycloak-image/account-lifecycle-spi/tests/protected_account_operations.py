@@ -32,6 +32,10 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'authority': 'PLATFORM', 'targetProfiles': ['platform-v1', PROFILE], 'selfOnly': False,
             'operations': ['account.email', 'account.profile', 'account.read'],
         }]
+        from ordinary_admin_operations import install_policy
+        from protected_adoption_operations import install
+        install_policy(cls, helper, value)
+        value = install(cls, helper, value, PROFILE, TENANT)
         cls.installed_configuration = copy.deepcopy(value)
         return value
 
@@ -115,6 +119,16 @@ class ProtectedOperationRead(PeerReadiness):
                                if c['type'] == 'otp'])
         o['protectedSelfAppNativeEffectAndExactRetryVerified'] = True
         self.remaining_operations(helper, account, human, target, o)
+        primary = helper.human(record=False)
+        admin_target = copy.deepcopy(target)
+        admin_target['origin'].update(kind='HUMAN_ADMIN', workflowId=str(uuid.uuid4()),
+                                      humanSubject=helper.human_subject)
+        from protected_terminal_operations import exercise as terminal
+        from ordinary_admin_operations import exercise as ordinary
+        from protected_adoption_operations import exercise as adoption
+        terminal(self, helper, primary, admin_target, o)
+        ordinary(self, helper, primary, (account, human), o)
+        adoption(self, helper, primary, o)
 
     def remaining_operations(self, helper, account, human, target, observed):
         """Five finite public receiver assertions; every setup error remains an error."""

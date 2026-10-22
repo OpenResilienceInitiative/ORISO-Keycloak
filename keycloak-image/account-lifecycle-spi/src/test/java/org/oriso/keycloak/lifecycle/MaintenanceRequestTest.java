@@ -76,6 +76,28 @@ public class MaintenanceRequestTest {
     }
   }
 
+  @Test
+  public void combinedOrdinaryProfileRetainsExactFiniteProfileShape() {
+    accepted("ordinary-profile", "{\"group\":\"/human-roles/consultant\",\"profile\":{\"firstName\":\"Reviewed\",\"lastName\":\"Native\",\"email\":\"synthetic@example.invalid\"}}");
+    rejected("ordinary-profile", "{\"group\":\"/human-roles/consultant\",\"profile\":{\"firstName\":\"Reviewed\",\"lastName\":\"Native\",\"email\":null,\"roles\":[\"realm-admin\"]}}");
+    rejected("ordinary-profile", "{\"group\":\"/human-roles/consultant\",\"profile\":null}");
+  }
+
+  @Test
+  public void nonsecretFactorProjectionIsAnExplicitClosedHumanAdminRead() {
+    var target = parse("{" + TARGET + "}");
+    var origin = (com.fasterxml.jackson.databind.node.ObjectNode) target.path("target").path("origin");
+    origin.put("kind", "HUMAN_ADMIN"); origin.put("humanAuthority", "PROTECTED_ACCOUNT_OPERATIONS_V1");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) target).put("include", "TWO_FACTOR_STATUS_V1");
+    try { assertEquals("read", MaintenanceRequest.parse("read", ID, target).command()); }
+    catch (WebApplicationException rejected) { fail("Reviewed nonsecret factor projection rejected with status " + rejected.getResponse().getStatus()); }
+    for (var invalid : java.util.List.of(JSON.nullNode(), JSON.getNodeFactory().booleanNode(true), JSON.getNodeFactory().numberNode(1), JSON.getNodeFactory().textNode("OTP_SECRET"))) {
+      var foreign = target.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode)foreign).set("include", invalid);
+      try { MaintenanceRequest.parse("read", ID, foreign); fail("Unreviewed read projection accepted"); }
+      catch (WebApplicationException rejected) { assertEquals(400, rejected.getResponse().getStatus()); }
+    }
+  }
+
   private static MaintenanceRequest accepted(String operation, String change) {
     try {
       return MaintenanceRequest.parse(operation, ID, parse(command(change)));
