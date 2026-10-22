@@ -129,6 +129,8 @@ class ProtectedOperationRead(PeerReadiness):
         terminal(self, helper, primary, admin_target, o)
         ordinary(self, helper, primary, (account, human), o)
         adoption(self, helper, primary, o)
+        from causal_password_operations import exercise as causal
+        causal(self, helper, o)
 
     def remaining_operations(self, helper, account, human, target, observed):
         """Five finite public receiver assertions; every setup error remains an error."""

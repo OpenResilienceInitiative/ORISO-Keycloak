@@ -13,12 +13,14 @@ record MaintenanceRequest(
     String operationId,
     String expectedState,
     JsonNode change,
-    Long authorityValidUntil) {
+    Long authorityValidUntil,
+    String include) {
   static MaintenanceRequest parse(String command, String accountId, JsonNode body) {
     if (!Set.of("read", "profile", "email", "locale", "password", "self-password", "ordinary-profile",
         "deactivate", "reactivate", "delete").contains(command)) bad();
     boolean read = "read".equals(command);
-    if (read) fields(body, "target");
+    if (read && body.has("include")) fields(body, "target", "include");
+    else if (read) fields(body, "target");
     else if ("self-password".equals(command) && body.has("authorityValidUntil"))
       fields(body, "target", "operationId", "expectedState", "change", "authorityValidUntil");
     else fields(body, "target", "operationId", "expectedState", "change");
@@ -50,7 +52,13 @@ record MaintenanceRequest(
         || !human && (subject != null || issuer != null || client != null || authority != null)) deny();
     if ("SELF".equals(kind) && !actualId.equals(subject)
         || "HUMAN_ADMIN".equals(kind) && authority == null) deny();
-    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null, null);
+    String include = null;
+    if (read && body.has("include")) {
+      include = text(body, "include", 40, false);
+      if (!"TWO_FACTOR_STATUS_V1".equals(include) || !"HUMAN_ADMIN".equals(kind)
+          || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority)) bad();
+    }
+    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null, null, include);
     String operationId = text(body, "operationId", 36, false);
     uuid(operationId);
     String state = text(body, "expectedState", 64, false);
@@ -85,7 +93,13 @@ record MaintenanceRequest(
           throw new jakarta.ws.rs.ClientErrorException("The new password must differ", 409);
       }
       case "ordinary-profile" -> {
-        fields(change, "group");
+        if (change.has("profile")) {
+          fields(change, "group", "profile");
+          fields(change.path("profile"), "firstName", "lastName", "email");
+          text(change.path("profile"), "firstName", 255, true);
+          text(change.path("profile"), "lastName", 255, true);
+          text(change.path("profile"), "email", 255, true);
+        } else fields(change, "group");
         String group = text(change, "group", 512, false);
         if (!group.matches("/human-roles/[a-z0-9-]{1,80}")) deny();
       }
@@ -98,7 +112,7 @@ record MaintenanceRequest(
       case "deactivate", "delete" -> fields(change);
       default -> bad();
     }
-    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy(), deadline);
+    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy(), deadline, null);
   }
 
   void requireEffectDeadline() {
