@@ -66,6 +66,13 @@ class WriterControls(unittest.TestCase):
                 fixture.admin("PUT", "", {"smtpServer": {"password": "never-copy"}})
         self.assertEqual({"method": "PUT", "route": "REALM_CONFIGURATION", "status": 401,
                           "cachedNativeTokenExpired": True}, BootstrapRead.observation["installerAdminFailure"])
+        from otp_writer_fixture import delegate_rows
+        import json
+        row = {"schema": 1, "phase": "CONSTRUCTED", "nativeDefaultPresent": False,
+               "nativeDefaultClassExact": False}
+        self.assertEqual([row], delegate_rows("ORISO_PROOF_OTP_DELEGATE_V1 " + json.dumps(row)))
+        with self.assertRaises(AssertionError):
+            delegate_rows("ORISO_PROOF_OTP_DELEGATE_V1 " + json.dumps(dict(row, rawError="never-copy")))
 
     def test_companion_remains_outside_product_and_delegates_native_smtp(self):
         tests = Path(__file__).parent

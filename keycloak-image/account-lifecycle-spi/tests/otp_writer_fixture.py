@@ -15,6 +15,31 @@ FACTS = {"schema", "phase", "actualNativeWriterTransaction", "exactPrivateSendin
          "defaultSmtpReturned", "writerCommitted", "observerFailed"}
 
 
+def delegate_rows(output):
+    rows = []
+    prefix = "ORISO_PROOF_OTP_DELEGATE_V1 "
+    for line in output.splitlines():
+        if prefix not in line:
+            continue
+        row = json.loads(line.split(prefix, 1)[1])
+        if (set(row) != {"schema", "phase", "nativeDefaultPresent", "nativeDefaultClassExact"}
+                or row["schema"] != 1
+                or row["phase"] not in {"CONSTRUCTION_ENTERED", "CONSTRUCTED", "VALIDATED", "VALIDATION_FAILED"}
+                or type(row["nativeDefaultPresent"]) is not bool
+                or type(row["nativeDefaultClassExact"]) is not bool):
+            raise AssertionError("Closed native delegate observation required")
+        rows.append(row)
+    if len(rows) > 64:
+        raise AssertionError("Native delegate observation exceeds fixture bound")
+    return rows
+
+
+def delegate_observations(fixture):
+    result = subprocess.run(["docker", "logs", fixture.name], check=True,
+                            capture_output=True, text=True, timeout=10)
+    return delegate_rows(result.stdout + result.stderr)
+
+
 def setup(fixture):
     supplied = os.environ.get("OTP_WRITER_PROOF_JAR")
     fixture.writer_enabled = supplied is not None

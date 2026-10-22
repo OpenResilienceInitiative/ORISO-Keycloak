@@ -33,11 +33,22 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
     private final EmailSenderProvider delegate;
     Sender(KeycloakSession session) {
       this.session = session;
+      delegateObservation("CONSTRUCTION_ENTERED", false, false);
       delegate = session.getProvider(EmailSenderProvider.class, "default");
+      delegateObservation("CONSTRUCTED", delegate != null, delegate != null
+          && "org.keycloak.email.DefaultEmailSenderProvider".equals(delegate.getClass().getName()));
       if (delegate == null || !"org.keycloak.email.DefaultEmailSenderProvider".equals(delegate.getClass().getName()))
         throw new IllegalStateException("Exact native SMTP delegate required");
     }
-    public void validate(Map<String, String> config) throws EmailException { delegate.validate(config); }
+    public void validate(Map<String, String> config) throws EmailException {
+      try {
+        delegate.validate(config);
+        delegateObservation("VALIDATED", true, true);
+      } catch (EmailException | RuntimeException failure) {
+        delegateObservation("VALIDATION_FAILED", true, true);
+        throw failure;
+      }
+    }
     public void send(Map<String, String> config, String address, String subject, String text, String html)
         throws EmailException {
       if (Files.isRegularFile(CONTROL)) throw new EmailException("Proof requires actual native user");
@@ -106,6 +117,15 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
       }
     }
     public void close() {} // Session independently owns and closes the cached native delegate.
+  }
+
+  private static void delegateObservation(String phase, boolean present, boolean exact) {
+    try {
+      System.out.println("ORISO_PROOF_OTP_DELEGATE_V1 " + new ObjectMapper().writeValueAsString(
+          Map.of("schema", 1, "phase", phase, "nativeDefaultPresent", present, "nativeDefaultClassExact", exact)));
+    } catch (java.io.IOException unavailable) {
+      throw new IllegalStateException("Native delegate observation unavailable");
+    }
   }
 
   private static final class Witness {

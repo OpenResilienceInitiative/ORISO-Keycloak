@@ -490,19 +490,31 @@ class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
             self.assertEqual(200, status)
             self.assertNotIn(password, canonical(changed_password).decode())
             encoded, signature = changed_password["receipt"].split(".")
-            self.assertTrue(hmac.compare_digest(signature, hmac.new(CONTEXT_KEY,
-                ("maintenance-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest()))
+            receipt_mac = hmac.compare_digest(signature, hmac.new(CONTEXT_KEY,
+                ("maintenance-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest())
             receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            self.phase("human-password-receipt-comparison", mac_valid=receipt_mac,
+                       command_matches=receipt.get("command") == "password",
+                       intent_matches=receipt.get("intentDigest") == mac("maintenance-intent", command),
+                       owner_matches=receipt.get("ownerSubject") == SUBJECTS["ACCOUNT_ADMIN"])
+            self.assertTrue(receipt_mac)
             self.assertEqual("password", receipt["command"])
             self.assertEqual(mac("maintenance-intent", command), receipt["intentDigest"])
             self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], receipt["ownerSubject"])
-            self.assertEqual(200, login(password))
-            self.assertEqual(401, login(self.creation_input["account"]["password"]))
+            self.phase("human-password-receipt-verified", actual_admin_owner=True,
+                       exact_original_intent=True, no_plaintext_password=True)
+            new_login = login(password)
+            original_login = login(self.creation_input["account"]["password"])
+            self.phase("human-password-native-login", new_status=new_login, original_status=original_login)
+            self.assertEqual(200, new_login)
+            self.assertEqual(401, original_login)
             self.admin("PUT", "/users/" + self.account_id + "/reset-password",
                        {"type": "password", "value": later_password, "temporary": False})
             self.assertEqual((200, changed_password), self.invoke("password", command, human, 200))
-            self.assertEqual(200, login(later_password))
-            self.assertEqual(401, login(password))
+            later_login, replayed_login = login(later_password), login(password)
+            self.phase("human-password-native-retry-login", later_status=later_login, replayed_status=replayed_login)
+            self.assertEqual(200, later_login)
+            self.assertEqual(401, replayed_login)
             conflicting = json.loads(json.dumps(command))
             conflicting["change"]["password"] = "Synthetic-conflict-" + uuid.uuid4().hex
             self.assertEqual(409, self.invoke("password", conflicting, human, 409)[0])
