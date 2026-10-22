@@ -196,6 +196,10 @@ def legacy_classification(receipt,exit_code):
     raise RuntimeError("Incomplete legacy result")
 
 
+def accepted_outcome(status,classification):
+    return type(status) is int and status==0 and classification in ("USER_FOCUSED_GREEN","NATIVE_TRACER_GREEN_INCOMPLETE","LEGACY_PASSWORD_MFA_GREEN")
+
+
 def runtime_known(cleanup, planned):
     if (not isinstance(planned,list) or len(planned)!=3
             or sorted(row.get("kind") for row in planned)!=["container","container","network"]
@@ -786,7 +790,8 @@ def main():
         if not report["sourceStable"] or not report["totalDeadlineRetained"] or not report["groupsAbsent"] or not report["runtimeKnown"]:
             report["classification"] = "SOURCE_RESOURCE_OR_INCOMPLETE_REFUSAL"
             status = 1
-        report["accepted"] = status == 0 and report["classification"] in ("USER_FOCUSED_GREEN", "NATIVE_TRACER_GREEN_INCOMPLETE")
+        report["accepted"] = accepted_outcome(status,report["classification"])
+        if not report["accepted"]:status=1
         (out / "source-receipt.json").write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps({k:report.get(k) for k in ("role","classification","accepted","sourceStable","groupsAbsent","runtimeKnown","totalDeadlineRetained")}))
     return status

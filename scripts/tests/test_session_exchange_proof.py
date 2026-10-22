@@ -250,6 +250,13 @@ class SessionProofControls(unittest.TestCase):
 
 
 class LegacyProofControls(unittest.TestCase):
+    def test_final_eligibility_includes_only_exact_green_roles_and_zero_exit(self):
+        for classification in ("USER_FOCUSED_GREEN","NATIVE_TRACER_GREEN_INCOMPLETE","LEGACY_PASSWORD_MFA_GREEN"):
+            self.assertTrue(p.accepted_outcome(0,classification))
+            for status in (1,124,-9,True,None):self.assertFalse(p.accepted_outcome(status,classification))
+        for classification in ("LEGACY_PASSWORD_MFA_ASSERTION_FAILURE","UNKNOWN",None):
+            self.assertFalse(p.accepted_outcome(0,classification))
+
     def test_legacy_receipt_requires_exact_actual_case_flags_and_exit(self):
         good={"legacyChecks":dict.fromkeys(p.LEGACY_FLAGS,True),
               "counts":{"tests":1,"failures":0,"errors":0,"skipped":0},
