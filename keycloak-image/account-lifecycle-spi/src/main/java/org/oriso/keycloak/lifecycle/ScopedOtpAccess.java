@@ -2,6 +2,8 @@ package org.oriso.keycloak.lifecycle;
 
 import static org.oriso.keycloak.lifecycle.LifecycleJson.*;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -151,6 +153,8 @@ public final class ScopedOtpAccess {
       if (!("otp.delete".equals(operation) ? Set.of(200) : Set.of(200, 201, 401)).contains(status)) deny();
       return Response.status(status).entity(saved).header("Cache-Control", "no-store").build();
     }
+    var linked = "otp.email-finish".equals(operation) && body.has("emailStartOperationId")
+        ? requireLinkedEmailStart(em, realm, authorization, machine, request) : null;
     var targets = new MaintenanceTarget(session, authorization, mappings);
     var current = "otp.delete".equals(operation)
         ? targets.readOtpSelfDelete(target, policy, humanHeader)
@@ -158,7 +162,7 @@ public final class ScopedOtpAccess {
         : targets.readOtpSelfAppSetup(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
       throw new jakarta.ws.rs.ClientErrorException("Current OTP target state conflicts", 409);
-    var invocation = invoke(session, authorization, username, account, current, request, setup);
+    var invocation = invoke(session, authorization, username, account, current, request, setup, linked);
     var nativeResponse = invocation.response();
     int status = nativeResponse.getStatus();
     var nativeResult = JSON.valueToTree(nativeResponse.getEntity());
@@ -188,6 +192,7 @@ public final class ScopedOtpAccess {
     if ("otp.email-finish".equals(operation)) {
       if (invocation.emailCredential() == null) deny();
       outcome.set("emailCredential", invocation.emailCredential());
+      if (linked != null) outcome.put("emailStartOperationId", linked.operationId());
     }
     var result = JSON.createObjectNode();
     result.put("operationId", request.operationId());
@@ -406,6 +411,8 @@ public final class ScopedOtpAccess {
     delivery.accountId = account;
     delivery.intentDigest = digest;
     delivery.bindingJson = canonical(invocation.emailCredential());
+    delivery.incarnationDigest = invocation.emailIncarnation();
+    delivery.originWorkflowId = uuid(text(request.target().path("origin"), "workflowId", 36, false));
     delivery.expiresAt = expiry;
     delivery.state = "READY";
     em.persist(delivery);
@@ -457,19 +464,83 @@ public final class ScopedOtpAccess {
     });
   }
 
-  private record Invocation(Response response, com.fasterxml.jackson.databind.JsonNode emailCredential) {}
+  private record LinkedEmailStart(String operationId, JsonNode binding, String incarnationDigest) {}
+
+  private static LinkedEmailStart requireLinkedEmailStart(
+      jakarta.persistence.EntityManager em, RealmModel realm, LifecycleAuthorization authorization,
+      LifecycleAuthorization.CheckedMachine machine, ScopedOtpRequest request) {
+    String operation = uuid(text(request.body(), "emailStartOperationId", 36, false));
+    String id = realm.getId() + ":" + operation;
+    var start = em.find(AccountMaintenanceOperation.class, id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    var delivery = em.find(OtpEmailDelivery.class, id, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    if (start == null || delivery == null) throw linkedConflict();
+    em.refresh(start); em.refresh(delivery);
+    if (!realm.getId().equals(start.realmId) || !realm.getId().equals(delivery.realmId)
+        || !request.accountId().equals(start.accountId) || !request.accountId().equals(delivery.accountId)
+        || !operation.equals(start.operationId) || !"otp.email-start".equals(start.command)
+        || !machine.clientId().equals(start.ownerClient) || !machine.subject().equals(start.ownerSubject)
+        || !LifecycleAuthorization.equal(start.intentDigest, delivery.intentDigest)
+        || !"SENT".equals(delivery.state) || delivery.finalJson == null
+        || delivery.incarnationDigest == null || !delivery.incarnationDigest.matches("[a-f0-9]{64}")
+        || delivery.originWorkflowId == null)
+      throw linkedConflict();
+    var binding = parse(delivery.bindingJson);
+    fields(binding, "credentialId", "generation", "destinationDigest");
+    uuid(text(binding, "credentialId", 36, false));
+    hex(text(binding, "generation", 64, false)); hex(text(binding, "destinationDigest", 64, false));
+    var result = parse(delivery.finalJson);
+    fields(result, "operationId", "accountId", "status", "deliveryState", "result", "receipt");
+    if (!operation.equals(text(result, "operationId", 36, false))
+        || !request.accountId().equals(text(result, "accountId", 36, false))
+        || !result.path("status").isIntegralNumber() || result.path("status").intValue() != 200
+        || !"SENT".equals(text(result, "deliveryState", 16, false))) throw linkedConflict();
+    var nativeResult = result.path("result"); fields(nativeResult, "info");
+    if (!"OTP mail sent".equals(text(nativeResult, "info", 512, false))) throw linkedConflict();
+    var origin = request.target().path("origin").deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) origin).put("workflowId", uuid(delivery.originWorkflowId));
+    var expected = JSON.createObjectNode();
+    expected.put("realmId", realm.getId()); expected.put("accountId", request.accountId());
+    expected.put("operationId", operation); expected.put("operation", "otp.email-start");
+    expected.put("ownerClient", machine.clientId()); expected.put("ownerSubject", machine.subject());
+    expected.put("intentDigest", start.intentDigest); expected.put("previousState", start.expectedState);
+    expected.set("tenantId", request.target().path("tenantId"));
+    expected.put("originDigest", authorization.mac("otp-origin", origin)); expected.put("status", 200);
+    expected.put("deliveryState", "SENT"); expected.put("authorityValidUntil", delivery.expiresAt);
+    expected.put("resultDigest", authorization.mac("otp-result", nativeResult)); expected.set("emailCredential", binding);
+    if (!LifecycleAuthorization.equal(text(result, "receipt", 8192, false),
+        authorization.receipt("otp-operation-receipt", expected))) throw linkedConflict();
+    return new LinkedEmailStart(operation, binding.deepCopy(), delivery.incarnationDigest);
+  }
+
+  private static jakarta.ws.rs.ClientErrorException linkedConflict() {
+    return new jakarta.ws.rs.ClientErrorException("Linked OTP workflow conflicts", 409);
+  }
+
+  private record Invocation(Response response, JsonNode emailCredential, String emailIncarnation) {}
 
   private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
       String username, String account,
       com.fasterxml.jackson.databind.JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action) {
-    return invoke(session, authorization, username, account, current, request, action, null, 0);
+    return invoke(session, authorization, username, account, current, request, action, null, 0, null);
   }
 
   private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
-      String username, String account, com.fasterxml.jackson.databind.JsonNode current,
-      ScopedOtpRequest request, Function<VerifiedOtpTarget, Response> action,
-      com.fasterxml.jackson.databind.JsonNode deliveryBinding, long deliveryExpiry) {
+      String username, String account, JsonNode current, ScopedOtpRequest request,
+      Function<VerifiedOtpTarget, Response> action, LinkedEmailStart linked) {
+    return invoke(session, authorization, username, account, current, request, action, null, 0, linked);
+  }
+
+  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+      String username, String account, JsonNode current, ScopedOtpRequest request,
+      Function<VerifiedOtpTarget, Response> action, JsonNode deliveryBinding, long deliveryExpiry) {
+    return invoke(session, authorization, username, account, current, request, action, deliveryBinding, deliveryExpiry, null);
+  }
+
+  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+      String username, String account, JsonNode current, ScopedOtpRequest request,
+      Function<VerifiedOtpTarget, Response> action, JsonNode deliveryBinding, long deliveryExpiry,
+      LinkedEmailStart linked) {
     var realm = session.getContext().getRealm();
     if (!username.equals(current.path("username").textValue())) deny();
     var user = session.users().getUserById(realm, account);
@@ -481,7 +552,7 @@ public final class ScopedOtpAccess {
     if (user == null || !username.equals(user.getUsername())) deny();
     var lifetime = new Lifetime(session);
     try {
-      var checked = new VerifiedOtpTarget(lifetime, authorization, realm, user, request);
+      var checked = new VerifiedOtpTarget(lifetime, authorization, realm, user, request, linked);
       if (deliveryBinding != null) {
         fields(deliveryBinding, "credentialId", "generation", "destinationDigest");
         var selected = user.credentialManager().getStoredCredentialById(
@@ -495,7 +566,7 @@ public final class ScopedOtpAccess {
       lifetime.check();
       if (response == null) throw new IllegalStateException("OTP callback did not return a response");
       return new Invocation(Response.fromResponse(response).header("Cache-Control", "no-store").build(),
-          checked.emailCredential == null ? null : checked.emailCredential.deepCopy());
+          checked.emailCredential == null ? null : checked.emailCredential.deepCopy(), checked.emailIncarnation);
     } finally {
       lifetime.open = false;
     }
@@ -509,16 +580,20 @@ public final class ScopedOtpAccess {
     private final UserModel user;
     private final ScopedOtpRequest request;
     private com.fasterxml.jackson.databind.JsonNode emailCredential;
+    private String emailIncarnation;
+    private final LinkedEmailStart linkedStart;
     private String deliveryCredentialId;
     private long deliveryExpiry;
     private VerifiedOtpTarget(Lifetime lifetime, LifecycleAuthorization authorization,
-        RealmModel realm, UserModel user, ScopedOtpRequest request) {
+        RealmModel realm, UserModel user, ScopedOtpRequest request, LinkedEmailStart linkedStart) {
       this.lifetime = lifetime;
       this.authorization = authorization;
       this.realm = realm;
       this.user = user;
       this.request = request;
+      this.linkedStart = linkedStart;
     }
+    public boolean hasLinkedEmailStart() { lifetime.check(); return linkedStart != null; }
     public KeycloakSession session() { lifetime.check(); return lifetime.session; }
     public RealmModel realm() { lifetime.check(); return realm; }
     public UserModel user() { lifetime.check(); return user; }
@@ -548,6 +623,10 @@ public final class ScopedOtpAccess {
       if (request == null || !"otp.email-finish".equals(request.operation())
           || emailCredential != null || selected == null) deny();
       bindEmailCredential(selected);
+      if (linkedStart != null && (!LifecycleAuthorization.equal(linkedStart.incarnationDigest(), emailIncarnation)
+          || !linkedStart.binding().path("credentialId").equals(emailCredential.path("credentialId"))
+          || !linkedStart.binding().path("destinationDigest").equals(emailCredential.path("destinationDigest"))))
+        throw linkedConflict();
     }
     private void bindEmailCredential(org.keycloak.credential.CredentialModel selected) {
       lifetime.check();
@@ -571,6 +650,19 @@ public final class ScopedOtpAccess {
       binding.put("generation", authorization.mac("otp-email-credential-generation", generation));
       binding.put("destinationDigest", authorization.mac("otp-email-destination", JSON.valueToTree(destination)));
       emailCredential = binding;
+      var data = parse(owned.getCredentialData());
+      var allowed = Set.of("ttlInSeconds", "email", "failedVerifications", "active", "mailsSentAt", "lockedUntil", "lockoutLevel");
+      var names = new java.util.HashSet<String>(); data.fieldNames().forEachRemaining(names::add);
+      if (!allowed.containsAll(names) || !names.containsAll(Set.of("ttlInSeconds", "email", "failedVerifications", "active"))
+          || !data.path("ttlInSeconds").isIntegralNumber() || data.path("ttlInSeconds").longValue() <= 0
+          || !data.path("failedVerifications").isIntegralNumber() || data.path("failedVerifications").longValue() < 0
+          || !data.path("active").isBoolean()) deny();
+      var immutable = (com.fasterxml.jackson.databind.node.ObjectNode) data.deepCopy();
+      immutable.remove("failedVerifications"); immutable.remove("active");
+      var incarnation = JSON.createObjectNode();
+      incarnation.put("credentialId", id); incarnation.put("createdDate", owned.getCreatedDate());
+      incarnation.set("credentialData", immutable); incarnation.set("secretData", parse(owned.getSecretData()));
+      emailIncarnation = authorization.mac("otp-email-credential-incarnation", incarnation);
       lifetime.check();
     }
     @Override public String toString() { return "VerifiedOtpTarget[redacted]"; }

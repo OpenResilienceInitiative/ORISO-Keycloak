@@ -12,7 +12,10 @@ record ScopedOtpRequest(String operation, String accountId, String operationId,
     uuid(accountId);
     if ("otp.email-start".equals(operation))
       fields(body, "target", "operationId", "expectedState", "otp", "authorityValidUntil");
-    else fields(body, "target", "operationId", "expectedState", "otp");
+    else if ("otp.email-finish".equals(operation) && body.has("emailStartOperationId")) {
+      fields(body, "target", "operationId", "expectedState", "otp", "emailStartOperationId");
+      uuid(text(body, "emailStartOperationId", 36, false));
+    } else fields(body, "target", "operationId", "expectedState", "otp");
     var read = JSON.createObjectNode();
     read.set("target", body.path("target"));
     var checkedTarget = MaintenanceRequest.parse("read", accountId, read).target();

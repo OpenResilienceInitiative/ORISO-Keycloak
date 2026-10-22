@@ -11,6 +11,8 @@ public class OtpEmailDelivery {
   @Column(name = "ACCOUNT_ID", length = 255, nullable = false, updatable = false) String accountId;
   @Column(name = "INTENT_DIGEST", length = 64, nullable = false, updatable = false) String intentDigest;
   @Column(name = "BINDING_JSON", length = 1024, nullable = false, updatable = false) String bindingJson;
+  @Column(name = "INCARNATION_DIGEST", length = 64, updatable = false) String incarnationDigest;
+  @Column(name = "ORIGIN_WORKFLOW_ID", length = 36, updatable = false) String originWorkflowId;
   @Column(name = "EXPIRES_AT", nullable = false, updatable = false) long expiresAt;
   @Column(name = "STATE", length = 16, nullable = false) String state;
   @Column(name = "FINAL_JSON", length = 16000) String finalJson;

@@ -349,8 +349,17 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
           .entity(new Error().error(INVALID_GRANT_ERROR).errorDescription(
               validation == ValidationResult.EXPIRED ? "Code expired" : "Invalid code")).build();
     }
+    if (target.hasLinkedEmailStart()) {
+      var owner = target.session().users().getUserByEmail(target.realm(), credential.getOtp().getEmail());
+      if (owner != null && !target.user().getId().equals(owner.getId()))
+        throw new jakarta.ws.rs.ClientErrorException("Email is not available", 412);
+    }
     mailCredentialService.activate(credential, context);
     appCredentialService.deleteCredentials(context);
+    if (target.hasLinkedEmailStart()) {
+      target.user().setEmail(credential.getOtp().getEmail());
+      target.user().setEmailVerified(true);
+    }
     return Response.status(Status.CREATED).entity(new Success().info("OTP setup created")).build();
   }
 
