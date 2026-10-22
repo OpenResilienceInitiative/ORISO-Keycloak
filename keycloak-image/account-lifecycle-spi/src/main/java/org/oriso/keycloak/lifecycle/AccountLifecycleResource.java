@@ -27,6 +27,28 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
   private final LifecycleAuthorization auth;
   private final Map<String, Set<String>> mappings;
 
+  // Only the protected resource's private policy supplies this internal binding.
+  // Ordinary HTTP requests always use the null-policy path below.
+  record LifecycleBinding(
+      String rowId, String ownerClient, String ownerSubject, JsonNode scope,
+      String creationFingerprint, String groupId, String roleFingerprint) {
+    LifecycleBinding {
+      scope = scope.deepCopy();
+    }
+    @Override public JsonNode scope() { return scope.deepCopy(); }
+  }
+
+  interface LifecyclePolicy {
+    LifecycleBinding binding();
+    GroupModel approvedGroup(RealmModel realm);
+    void verifyCreate(JsonNode internalBody);
+    void verifyExistingCreation(AccountLifecycleAttempt attempt);
+    String commandDigest();
+    void before(String command, AccountLifecycleAttempt attempt, EntityManager em);
+    void after(String command, AccountLifecycleAttempt attempt, EntityManager em);
+    default boolean restrictExpiredCommit(AccountLifecycleAttempt attempt, EntityManager em) { return false; }
+  }
+
   AccountLifecycleResource(
       KeycloakSession session, LifecycleAuthorization auth, Map<String, Set<String>> mappings) {
     this.session = session;
@@ -131,10 +153,29 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     String actor =
         auth.require(
             session, proof, operation, "create".equals(command) ? "PUT" : "POST", attemptId, body);
+    return execute(command, attemptId, body, actor, null);
+  }
+
+  Response executeProtected(
+      String command, String attemptId, JsonNode neutralBody, String checkedActor,
+      LifecyclePolicy policy) {
+    // Each protected command is enabled only with its own public HTTP tracer.
+    if (policy == null || !Set.of("create", "owned-read", "commit", "recover", "compensate").contains(command)
+        || !("ACCOUNT_CREATE".equals(checkedActor)
+            || Set.of("recover", "compensate").contains(command) && "ACCOUNT_ADMIN".equals(checkedActor))) deny();
+    return guarded(() -> execute(command, attemptId, neutralBody, checkedActor, policy));
+  }
+
+  private Response execute(
+      String command, String attemptId, JsonNode body, String actor, LifecyclePolicy policy) {
+    uuid(attemptId);
     var identity = body.path("identity");
     fields(identity, "scope", "creationFingerprint");
     var scope = identity.path("scope");
-    LifecycleGroups.scope(scope);
+    var binding = policy == null ? null : policy.binding();
+    if (binding == null) LifecycleGroups.scope(scope);
+    else if (!canonical(binding.scope()).equals(canonical(scope))
+        || !LifecycleAuthorization.equal(binding.creationFingerprint(), identity.path("creationFingerprint").asText())) deny();
     hex(text(identity, "creationFingerprint", 64, false));
     var realm = session.getContext().getRealm();
     var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
@@ -144,22 +185,23 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     var row =
         em.find(
             AccountLifecycleAttempt.class,
-            realm.getId() + ":" + attemptId,
+            binding == null ? realm.getId() + ":" + attemptId : binding.rowId(),
             LockModeType.PESSIMISTIC_WRITE);
     if (row != null) {
-      if (!"backend-account-create".equals(row.ownerClient)
-          || !auth.creatorSubject.equals(row.ownerSubject)
+      if (!(binding == null ? "backend-account-create" : binding.ownerClient()).equals(row.ownerClient)
+          || !(binding == null ? auth.creatorSubject : binding.ownerSubject()).equals(row.ownerSubject)
           || !canonical(scope).equals(row.scope)
           || !LifecycleAuthorization.equal(
               row.creationFingerprint, identity.path("creationFingerprint").asText())) deny();
     }
-    if ("create".equals(command)) return create(body, realm, row, attemptId, em);
-    if ("recover".equals(command)) return recover(body, realm, row, attemptId, em);
+    if ("create".equals(command)) return create(body, realm, row, attemptId, em, policy);
+    if ("recover".equals(command)) return recover(body, realm, row, attemptId, em, policy);
     if (row == null) deny();
     if ("owned-read".equals(command)) {
       fields(body, "identity", "execution", "accountId", "creationProof");
       owned(body, row);
-      if (!"OPEN".equals(row.state)) conflict();
+      if (policy == null && !"OPEN".equals(row.state)) conflict();
+      if (policy != null) policy.before("owned-read", row, em);
       var user = integrity(row, realm, LifecycleGroups.pending(session, realm));
       if (user == null) conflict();
       return ok(projection(user), 200);
@@ -174,7 +216,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
         commit ? "localCommit" : "localCleanup");
     outcome(body.path(commit ? "localCommit" : "localCleanup"));
     owned(body, row);
-    String digest = auth.mac("payload", body);
+    String digest = policy == null ? auth.mac("payload", body) : policy.commandDigest();
     if (row.terminalOperation != null) {
       if (command.equals(row.terminalOperation)
           && LifecycleAuthorization.equal(digest, row.terminalDigest)) return result(row, 200);
@@ -182,14 +224,22 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     }
     if (commit) {
       if (!"OPEN".equals(row.state)) conflict();
-      var group = approvedGroup(realm, scope);
+      if (policy != null) policy.before("commit", row, em);
+      var group = policy == null ? approvedGroup(realm, scope) : policy.approvedGroup(realm);
       var pending = LifecycleGroups.pending(session, realm);
       var roles = mappings.get(scope.path("initialGroup").asText());
       if (!group.getId().equals(row.groupId)
-          || !auth.mac("initial-roles", JSON.valueToTree(new TreeSet<>(roles)))
+          || !(binding == null ? auth.mac("initial-roles", JSON.valueToTree(new TreeSet<>(roles)))
+                  : binding.roleFingerprint())
               .equals(row.roleFingerprint)) conflict();
       var user = integrity(row, realm, pending);
       if (user == null) conflict();
+      if (policy != null && policy.restrictExpiredCommit(row, em)) {
+        em.flush();
+        // A restriction is durable even though activation is refused. Returning
+        // normally lets the request transaction commit; throwing would roll it back.
+        return ok(JSON.valueToTree(Map.of("error", "Protected invitation rejected")), 409);
+      }
       user.user().leaveGroup(pending);
       user.user().joinGroup(group);
       user.user().setEnabled(true);
@@ -206,6 +256,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       audit(realm, actor, OperationType.UPDATE, row.accountId);
     } else {
       if (!Set.of("OPEN", "RECOVERY_CLAIMED", "ABANDONED").contains(row.state)) conflict();
+      if (policy != null) policy.before("compensate", row, em);
       if (!"ABANDONED".equals(row.state)) {
         var user = integrity(row, realm, LifecycleGroups.pending(session, realm));
         if (user != null && !session.users().removeUser(realm, user.user())) conflict();
@@ -217,6 +268,10 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     row.terminalDigest = digest;
     if (row.terminalReceipt == null)
       row.terminalReceipt = auth.receipt("terminal-receipt", receipt(row, command, digest));
+    if (policy != null) {
+      if (row.terminalReceipt.getBytes(StandardCharsets.UTF_8).length > 16000) bad();
+      policy.after(command, row, em);
+    }
     em.flush();
     return result(row, 200);
   }
@@ -226,7 +281,8 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       RealmModel realm,
       AccountLifecycleAttempt row,
       String attempt,
-      EntityManager em) {
+      EntityManager em,
+      LifecyclePolicy policy) {
     fields(body, "identity", "execution", "account");
     execution(body.path("execution"));
     if (number(body.path("execution"), "generation", false) != 0) conflict();
@@ -248,27 +304,39 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     if (!passwordNode.isNull()
         && (!passwordNode.isTextual() || passwordNode.asText().length() > 4096)) bad();
     if (!account.path("passwordTemporary").isBoolean()) bad();
-    var original = JSON.createObjectNode();
-    original.set("scope", body.path("identity").path("scope"));
-    original.set("account", account);
-    String fingerprint = auth.mac("creation-payload", original);
-    if (!LifecycleAuthorization.equal(
-        fingerprint, body.path("identity").path("creationFingerprint").asText())) deny();
+    if (policy == null) {
+      var original = JSON.createObjectNode();
+      original.set("scope", body.path("identity").path("scope"));
+      original.set("account", account);
+      String fingerprint = auth.mac("creation-payload", original);
+      if (!LifecycleAuthorization.equal(
+          fingerprint, body.path("identity").path("creationFingerprint").asText())) deny();
+    } else policy.verifyCreate(body);
     if (row != null) {
+      if (policy != null) {
+        policy.verifyExistingCreation(row);
+        if (!Objects.equals(row.createExecution, body.path("execution").path("executionId").asText()))
+          conflict();
+        // Reconcile the actual saved outcome, including a later restriction or
+        // terminal state. This does not renew activation or look up a native user.
+        return result(row, 200);
+      }
       if (!"OPEN".equals(row.state)
           || !row.executionId.equals(body.path("execution").path("executionId").asText())
           || row.generation != 0) conflict();
+      if (policy != null) policy.before("create", row, em);
       return result(row, 200);
     }
     requireLocalRealm(realm);
-    var group = approvedGroup(realm, body.path("identity").path("scope"));
+    if (policy != null) policy.before("create", null, em);
+    var group = policy == null ? approvedGroup(realm, body.path("identity").path("scope")) : policy.approvedGroup(realm);
     var pending = LifecycleGroups.pending(session, realm);
     String email = text(account, "email", 255, true);
     if (session.users().getUserByUsername(realm, username) != null)
       throw new AvailabilityConflict(Unavailable.USERNAME_NOT_AVAILABLE);
     if (email != null && session.users().getUserByEmail(realm, email) != null)
       throw new AvailabilityConflict(Unavailable.EMAIL_NOT_AVAILABLE);
-    row = newRow(body.path("identity"), realm, group, attempt);
+    row = newRow(body.path("identity"), realm, group, attempt, policy);
     row.createExecution = body.path("execution").path("executionId").asText();
     row.executionId = row.createExecution;
     row.state = "OPEN";
@@ -352,6 +420,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     row.creationProof = auth.creationReceipt(creation);
     if (row.creationProof.getBytes(StandardCharsets.UTF_8).length > 16384) bad();
     audit(realm, "ACCOUNT_CREATE", OperationType.CREATE, user.getId());
+    if (policy != null) policy.after("create", row, em);
     em.flush();
     return result(row, 201);
   }
@@ -361,11 +430,12 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       RealmModel realm,
       AccountLifecycleAttempt row,
       String attempt,
-      EntityManager em) {
+      EntityManager em,
+      LifecyclePolicy policy) {
     fields(body, "identity", "expectedGeneration", "recoveryId");
     long expected = number(body, "expectedGeneration", false);
     String recovery = uuid(text(body, "recoveryId", 36, false));
-    String digest = auth.mac("payload", body);
+    String digest = policy == null ? auth.mac("payload", body) : policy.commandDigest();
     if (row != null && recovery.equals(row.recoveryId)) {
       if (!LifecycleAuthorization.equal(digest, row.recoveryDigest)
           || row.recoveryExpected == null
@@ -376,6 +446,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
       if (expected != row.generation) conflict();
       return result(row, 200);
     }
+    if (policy != null) policy.before("recover", row, em);
     boolean absent = row == null;
     if (absent) {
       if (expected != 0) conflict();
@@ -383,8 +454,9 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
           newRow(
               body.path("identity"),
               realm,
-              approvedGroup(realm, body.path("identity").path("scope")),
-              attempt);
+              policy == null ? approvedGroup(realm, body.path("identity").path("scope")) : null,
+              attempt,
+              policy);
       row.state = "ABANDONED";
     } else {
       if (expected != row.generation || !Set.of("OPEN", "RECOVERY_CLAIMED").contains(row.state))
@@ -400,23 +472,31 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     row.recoveryReceipt = auth.receipt("recovery-receipt", receipt(row, "recover", digest));
     if ("ABANDONED".equals(row.state))
       row.terminalReceipt = auth.receipt("terminal-receipt", receipt(row, "abandon", digest));
+    if (policy != null) {
+      if (row.recoveryReceipt.getBytes(StandardCharsets.UTF_8).length > 16000
+          || row.terminalReceipt != null
+              && row.terminalReceipt.getBytes(StandardCharsets.UTF_8).length > 16000) bad();
+      policy.after("recover", row, em);
+    }
     if (absent) em.persist(row);
     em.flush();
     return result(row, 200);
   }
 
   private AccountLifecycleAttempt newRow(
-      JsonNode identity, RealmModel realm, GroupModel group, String attempt) {
+      JsonNode identity, RealmModel realm, GroupModel group, String attempt,
+      LifecyclePolicy policy) {
+    var binding = policy == null ? null : policy.binding();
     var row = new AccountLifecycleAttempt();
-    row.id = realm.getId() + ":" + attempt;
+    row.id = binding == null ? realm.getId() + ":" + attempt : binding.rowId();
     row.realmId = realm.getId();
     row.attemptId = attempt;
-    row.ownerClient = "backend-account-create";
-    row.ownerSubject = auth.creatorSubject;
+    row.ownerClient = binding == null ? "backend-account-create" : binding.ownerClient();
+    row.ownerSubject = binding == null ? auth.creatorSubject : binding.ownerSubject();
     row.scope = canonical(identity.path("scope"));
-    row.groupId = group.getId();
+    row.groupId = binding == null ? group.getId() : binding.groupId();
     row.roleFingerprint =
-        auth.mac(
+        binding != null ? binding.roleFingerprint() : auth.mac(
             "initial-roles",
             JSON.valueToTree(
                 new TreeSet<>(mappings.get(identity.path("scope").path("initialGroup").asText()))));

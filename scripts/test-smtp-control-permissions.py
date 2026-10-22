@@ -9,7 +9,9 @@ import concurrent.futures
 import hmac
 import json
 import os
+import re
 import subprocess
+import sys
 import time
 import unittest
 import uuid
@@ -21,6 +23,7 @@ from urllib.request import Request, urlopen
 IMAGE = "quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992"
 KEY = b"synthetic-smtp-control-key-00001"  # Exactly 32 bytes; the accepted lower bound.
 ROLES = ["smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical"]
+AUDIENCES = ["oriso-task-commands", "tenantservice", "agencyservice", "consultingtypeservice", "userservice"]
 SUBJECT = "15438b20-6ab7-473f-93c5-8aac79a9ff81"
 REALM = "smtp-control-fixture"
 SECRET = "synthetic-mail-client-secret-00000000000001"
@@ -75,10 +78,26 @@ def call(base, method, path, body=None, token=None, context=None, form=False):
 
 class SmtpControlPermissions(unittest.TestCase):
     @classmethod
+    def require_headroom(cls):
+        if sys.platform == "darwin":
+            output = subprocess.check_output(["memory_pressure", "-Q"], text=True)
+            match = re.search(r"memory free percentage:\s*(\d+)%", output)
+            if match is None or int(match[1]) < 25:
+                raise AssertionError("Native SMTP fixture requires25 percent memory headroom")
+
+    @classmethod
     def setUpClass(cls):
-        cls.name = "oriso-smtp-proposal-" + uuid.uuid4().hex[:10]
+        cls.require_headroom()
+        cls.run_id = uuid.uuid4().hex
+        cls.name = "oriso-smtp-proposal-" + cls.run_id[:12]
+        cls.network = "oriso-smtp-native-" + cls.run_id[:12]
+        cls.addClassCleanup(cls.stop)
+        subprocess.run(["docker", "network", "create", "--label", "oriso-smtp-run-id=" + cls.run_id,
+                        cls.network], check=True, capture_output=True)
         cmd = ["docker", "run", "-d", "--name", cls.name, "--label", "oriso-smtp-control-test=true",
-               "-p", "127.0.0.1::8080", "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2",
+               "--label", "oriso-smtp-run-id=" + cls.run_id, "--network", cls.network,
+               "--memory=768m", "--memory-swap=768m", "--cpus=2", "--pids-limit=256",
+               "-p", "127.0.0.1::8080", "-e", "JAVA_OPTS_APPEND=-Xmx384m -XX:ActiveProcessorCount=2",
                "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer",
                "-e", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + INSTALLER,
                "-e", "ORISO_SMTP_CONTROL_ENABLED=true", "-e", "ORISO_SMTP_CONTROL_REALM=" + REALM,
@@ -91,7 +110,6 @@ class SmtpControlPermissions(unittest.TestCase):
             cmd += ["-v", str(Path(jar).resolve()) + ":/opt/keycloak/providers/smtp-control-spi.jar:ro"]
         cmd += [IMAGE, "start-dev"]
         subprocess.run(cmd, check=True, capture_output=True)
-        cls.addClassCleanup(cls.stop)
         address = subprocess.run(["docker", "port", cls.name, "8080/tcp"], check=True,
                                  capture_output=True, text=True).stdout.strip().splitlines()[0]
         cls.base = "http://" + address
@@ -112,8 +130,22 @@ class SmtpControlPermissions(unittest.TestCase):
 
     @classmethod
     def stop(cls):
-        logs = subprocess.run(["docker", "logs", cls.name], capture_output=True, text=True)
-        subprocess.run(["docker", "rm", "-f", cls.name], check=True, capture_output=True)
+        inspected = subprocess.run(["docker", "inspect", "--format",
+            '{{index .Config.Labels "oriso-smtp-run-id"}}', cls.name], capture_output=True, text=True)
+        logs = None
+        if inspected.returncode == 0:
+            if inspected.stdout.strip() != cls.run_id:
+                raise AssertionError("Refuse SMTP fixture cleanup: run label differs")
+            logs = subprocess.run(["docker", "logs", cls.name], capture_output=True, text=True)
+            subprocess.run(["docker", "rm", "-f", cls.name], check=True, capture_output=True)
+        network = subprocess.run(["docker", "network", "inspect", "--format",
+            '{{index .Labels "oriso-smtp-run-id"}}', cls.network], capture_output=True, text=True)
+        if network.returncode == 0:
+            if network.stdout.strip() != cls.run_id:
+                raise AssertionError("Refuse SMTP fixture network cleanup: run label differs")
+            subprocess.run(["docker", "network", "rm", cls.network], check=True, capture_output=True)
+        if logs is None:
+            return
         destination = os.environ.get("SMTP_CONTROL_TEST_SERVER_LOG")
         if destination:
             sanitized = logs.stdout + logs.stderr
@@ -130,6 +162,7 @@ class SmtpControlPermissions(unittest.TestCase):
         return response
 
     def setUp(self):
+        self.require_headroom()
         client = {"clientId": "backend-mail", "secret": SECRET,
                    "publicClient": False, "serviceAccountsEnabled": True,
                    "standardFlowEnabled": False, "directAccessGrantsEnabled": False,
@@ -139,8 +172,10 @@ class SmtpControlPermissions(unittest.TestCase):
                         "protocolMapper": "oidc-usermodel-realm-role-mapper",
                         "config": {"claim.name": "realm_access.roles", "access.token.claim": "true",
                                    "multivalued": "true", "jsonType.label": "String"}},
-                       {"name": "audience", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
-                        "config": {"included.custom.audience": "oriso-task-commands", "access.token.claim": "true"}}]}
+                       *[{"name": "audience" if audience == "oriso-task-commands" else "audience-" + audience,
+                          "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+                          "config": {"included.custom.audience": audience, "access.token.claim": "true"}}
+                         for audience in AUDIENCES]]}
         status, response = call(self.base, "POST", "/admin/realms", {"realm": REALM, "id": REALM,
                         "enabled": True, "adminPermissionsEnabled": True,
                         "displayName": "unchanged", "registrationAllowed": False,
@@ -187,6 +222,30 @@ class SmtpControlPermissions(unittest.TestCase):
         status, result = self.smtp(context=proof({}, "SMTP_STATUS"), method="GET")
         self.assertEqual(200, status, result)
         self.assertEqual({"revision": 1, "status": "APPLIED"}, result)
+
+    def test_missing_or_extra_native_bearer_audience_is_denied_before_any_write(self):
+        original = self.admin("GET", "/clients/" + self.client)
+        before = self.admin("GET")["smtpServer"]
+        for audiences in (["oriso-task-commands"], AUDIENCES + ["oriso-smtp-control"]):
+            with self.subTest(audiences=audiences):
+                changed = dict(original)
+                changed["protocolMappers"] = [m for m in original["protocolMappers"]
+                                                if m["protocolMapper"] != "oidc-audience-mapper"]
+                changed["protocolMappers"] += [
+                    {"name": "native-audience-" + str(index), "protocol": "openid-connect",
+                     "protocolMapper": "oidc-audience-mapper",
+                     "config": {"included.custom.audience": audience, "access.token.claim": "true"}}
+                    for index, audience in enumerate(audiences)]
+                self.admin("PUT", "/clients/" + self.client, changed)
+                bearer = self.token()
+                payload = bearer.split(".")[1]
+                issued = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+                self.assertEqual(set(audiences), set(issued["aud"])
+                                 if isinstance(issued["aud"], list) else {issued["aud"]})
+                self.assertEqual(403, self.smtp(PAYLOAD, proof(PAYLOAD), token=bearer)[0])
+                self.assertEqual(before, self.admin("GET")["smtpServer"])
+        self.admin("PUT", "/clients/" + self.client, original)
+        self.assert_unconsumed_revision(self.token())
 
     def assert_membership_refusal_preserves_revision(self, token):
         before = self.admin("GET")["smtpServer"]
@@ -300,6 +359,14 @@ class SmtpControlPermissions(unittest.TestCase):
         for context in malformed:
             status, _ = self.smtp(PAYLOAD, context, token=token)
             self.assertEqual(403, status)
+        # A valid MAC authenticates the complete bytes, not just the first JSON value.
+        claims = base64.urlsafe_b64decode(signed.split(".")[0] + "=" * (-len(signed.split(".")[0]) % 4))
+        for trailing in (b" {}", b" true", b"\n[]"):
+            with self.subTest(trailing_json=trailing.decode().strip()):
+                payload = encoded(claims + trailing)
+                context = payload + "." + encoded(hmac.digest(KEY, b"proof\n" + payload.encode(), "sha256"))
+                self.assertEqual(403, self.smtp(PAYLOAD, context, token=token)[0])
+                self.assertEqual(before, self.admin("GET"))
         status, _ = self.smtp(dict(PAYLOAD, globalSmtpHost="changed.fixture.internal"), signed, token=token)
         self.assertEqual(403, status)
         status, _ = self.smtp(context=proof({}, method="PUT"), method="GET", token=token)

@@ -1,2 +1,3 @@
 org.oriso.keycloak.lifecycle.AccountLifecycleFactory
 org.oriso.keycloak.lifecycle.AccountMaintenanceFactory
+org.oriso.keycloak.lifecycle.ProtectedInvitationFactory

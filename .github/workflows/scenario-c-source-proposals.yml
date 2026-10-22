@@ -38,7 +38,7 @@ jobs:
             script: scripts/test-smtp-control-permissions.py
             jar: keycloak-image/smtp-control-spi/target/smtp-control-spi-1.0-SNAPSHOT.jar
             jar_env: SMTP_CONTROL_TEST_JAR
-            floor: 19
+            floor: 20
           - proposal: otp
             module: keycloak-image/otp-config-spi
             script: keycloak-image/otp-config-spi/tests/test_scenario_c_otp_permissions.py

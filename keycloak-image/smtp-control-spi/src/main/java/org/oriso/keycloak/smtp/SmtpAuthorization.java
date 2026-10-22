@@ -1,6 +1,7 @@
 package org.oriso.keycloak.smtp;
 
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.ForbiddenException;
@@ -34,7 +35,8 @@ import org.keycloak.services.resources.admin.fgap.AdminPermissions;
 /** Bearer identity plus one short-lived, purpose-separated command proof. */
 final class SmtpAuthorization {
   static final ObjectMapper JSON = new ObjectMapper()
-      .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+      .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+      .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   private static final Set<String> ROLES = Set.of(
       "smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical");
   private static final Set<String> AUDIENCES = Set.of(
@@ -70,8 +72,8 @@ final class SmtpAuthorization {
         || user == null || !user.isEnabled() || !subject.equals(user.getId())
         || !subject.equals(token.getSubject()) || !client.getId().equals(user.getServiceAccountClientLink())
         || token.getAudience() == null
-        || !Arrays.asList(token.getAudience()).contains("oriso-task-commands")
-        || !AUDIENCES.containsAll(Arrays.asList(token.getAudience()))) denied();
+        || token.getAudience().length != AUDIENCES.size()
+        || !AUDIENCES.equals(new HashSet<>(Arrays.asList(token.getAudience())))) denied();
     var expected = session.users().getServiceAccount(client);
     if (expected == null || !subject.equals(expected.getId())) denied();
     var memberships = user.getGroupsStream().limit(2).collect(Collectors.toList());
