@@ -92,6 +92,8 @@ def native_classification(receipt):
         return "ACTUAL_NATIVE_SESSION_ASSERTION_RED"
     if counts == {"tests":1,"failures":0,"errors":0,"skipped":0} and observed["magicStatus"] == 200 and receipt["cases"][0]["outcome"] == "pass":
         return "NATIVE_TRACER_GREEN_INCOMPLETE"
+    if counts == {"tests":1,"failures":1,"errors":0,"skipped":0} and observed["magicStatus"] > 0 and receipt["cases"][0]["outcome"] == "failure":
+        return "ACTUAL_NATIVE_SESSION_ASSERTION_FAILURE"
     raise RuntimeError("Native tracer outcome is not qualified")
 
 
@@ -105,12 +107,23 @@ def named_groups_ok(groups, executed, planned):
     return isinstance(planned,list) and executed == planned and groups_ok(groups,len(planned))
 
 
+NATIVE_OWNED_SOURCES = {"LifecycleAuthorization.java","MagicLinkFlow.java","MagicLinkAuthority.java",
+    "MagicLinkAuthenticator.java","MagicLinkPasswordCondition.java","MagicLinkSession.java",
+    "MagicLinkSessionAttach.java","MagicLinkEntities.java"}
+
+
 def compile_diagnostics(log):
     value = log.read_text(errors="replace")
+    frames = []
+    for name,line,column in re.findall(r"([A-Za-z0-9_]+\.java):\[(\d+),(\d+)\]",value):
+        if name in NATIVE_OWNED_SOURCES:
+            frame = {"file":name,"line":int(line),"column":int(column)}
+            if frame not in frames: frames.append(frame)
     return {"spotlessConfirmed": "The following files had format violations:" in value
             and "Run 'mvn spotless:apply'" in value,
             "ownedFilesMentioned": [Path(p).name for p in USER_FILES if Path(p).name in value],
-            "compilerFailure": "maven-compiler-plugin" in value and "[ERROR]" in value}
+            "compilerFailure": "maven-compiler-plugin" in value and "[ERROR]" in value,
+            "ownedSourceFrames":frames[:12]}
 
 
 def native_failure_frames(value):

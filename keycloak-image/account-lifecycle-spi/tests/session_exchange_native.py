@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One finite native SPI tracer; actor/claim are fixture inputs, not final User authority proof."""
 import base64
+import copy
 from collections import Counter
 import hashlib
 import hmac
@@ -77,7 +78,22 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             if method == "POST" and path == "/admin/realms":
                 self.assertFalse(imported)
                 imported.append(True)
-                body = {**body, "clientScopes": source_scopes, "authenticationFlows": selected,
+                wired = copy.deepcopy(selected)
+                direct = next(flow for flow in wired if flow["alias"] == "direct-grant-2fa")
+                credentials = [step for step in direct["authenticationExecutions"]
+                               if step.get("authenticator") in {"direct-grant-validate-username","direct-grant-validate-password"}]
+                self.assertEqual(2,len(credentials))
+                direct["authenticationExecutions"] = [
+                    {"authenticator":"oriso-claimed-magic-link","authenticatorFlow":False,"requirement":"REQUIRED","priority":0},
+                    {"flowAlias":"oriso-ordinary-password","authenticatorFlow":True,"requirement":"CONDITIONAL","priority":10},
+                    *[step for step in direct["authenticationExecutions"] if step not in credentials],
+                    {"authenticator":"oriso-claimed-magic-link-attach","authenticatorFlow":False,"requirement":"REQUIRED","priority":50},
+                ]
+                wired.append({"alias":"oriso-ordinary-password","providerId":"basic-flow","topLevel":False,"builtIn":False,
+                              "authenticationExecutions":[
+                                  {"authenticator":"oriso-magic-link-ordinary-password","authenticatorFlow":False,"requirement":"REQUIRED","priority":0},
+                                  *credentials]})
+                body = {**body, "clientScopes": source_scopes, "authenticationFlows": wired,
                         "authenticatorConfig": source.get("authenticatorConfig", []),
                         "directGrantFlow": "direct-grant-2fa"}
             return original(base, method, path, body, token, form, proof)
@@ -91,8 +107,13 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             for flow in selected for step in flow.get("authenticationExecutions", [])
             if step.get("authenticator"))
         actual = self.admin("GET", "/authentication/flows/direct-grant-2fa/executions")
+        self.magic_providers = {"oriso-claimed-magic-link","oriso-claimed-magic-link-attach","oriso-magic-link-ordinary-password"}
         self.assertEqual(self.expected_executions, Counter((step["providerId"],step["requirement"])
-            for step in actual if step.get("providerId") and not step.get("authenticationFlow")))
+            for step in actual if step.get("providerId") and not step.get("authenticationFlow")
+            and step["providerId"] not in self.magic_providers))
+        self.assertEqual("oriso-claimed-magic-link",actual[0]["providerId"])
+        self.assertEqual("oriso-claimed-magic-link-attach",actual[-1]["providerId"])
+        self.assertEqual(self.magic_providers,{step.get("providerId") for step in actual}&self.magic_providers)
         OBSERVATIONS["sourceOtpExecutionsPreserved"] = True
 
     def test_checked_claim_enters_native_session_path(self):
@@ -178,13 +199,12 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
                                "/users/"+target["id"]+"/logout",token=self.installer)
         self.assertEqual(204,status)
         self.assertEqual([],self.admin("GET","/users/"+target["id"]+"/sessions"))
-        self.admin("POST", "/authentication/flows/direct-grant-2fa/executions/execution",
-                   {"provider": "oriso-claimed-magic-link", "priority": -1})
         steps = self.admin("GET", "/authentication/flows/direct-grant-2fa/executions")
         self.assertEqual("oriso-claimed-magic-link", steps[0]["providerId"])
+        self.assertEqual("oriso-claimed-magic-link-attach", steps[-1]["providerId"])
         self.assertEqual(self.expected_executions, Counter((step["providerId"],step["requirement"])
             for step in steps if step.get("providerId") and not step.get("authenticationFlow")
-            and step["providerId"] != "oriso-claimed-magic-link"))
+            and step["providerId"] not in self.magic_providers))
         workflow = str(uuid.uuid4())
         body = {"version": 1, "workflowId": workflow, "targetUserId": target["id"],
                 "tenantId": int(creation["identity"]["scope"]["tenantId"]), "clientId": "app", "expiresAt": int(time.time()) + 900,

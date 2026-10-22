@@ -23,22 +23,32 @@ class SessionProofControls(unittest.TestCase):
         good["counts"]["failures"] = 0
         good["cases"][0]["outcome"] = "pass"
         self.assertEqual("NATIVE_TRACER_GREEN_INCOMPLETE",p.native_classification(good))
+        reached=self.row(); reached["observed"]["nativeRouterSelected"]=False
+        self.assertEqual("ACTUAL_NATIVE_SESSION_ASSERTION_FAILURE",p.native_classification(reached))
+        reached["observed"]["magicStatus"]=0
+        with self.assertRaises(RuntimeError):p.native_classification(reached)
 
     def test_failed_unknown_and_missing_preconditions_never_count_as_native_red(self):
         for key in p.OBSERVATION_FLAGS:
             for value in (False,None,1,"true"):
                 row = self.row()
                 row["observed"][key] = value
-                with self.subTest(key=key,value=value), self.assertRaises(RuntimeError):
-                    p.native_classification(row)
+                if key == "nativeRouterSelected" and value is False:
+                    self.assertEqual("ACTUAL_NATIVE_SESSION_ASSERTION_FAILURE",p.native_classification(row))
+                else:
+                    with self.subTest(key=key,value=value), self.assertRaises(RuntimeError):
+                        p.native_classification(row)
 
     def test_wrong_counts_skips_errors_and_names_never_count_as_native_red(self):
         for key in ("tests","failures","errors","skipped"):
             for value in (True,-1,2):
                 row = self.row()
                 row["counts"][key] = value
-                with self.subTest(key=key,value=value), self.assertRaises(RuntimeError):
-                    p.native_classification(row)
+                if key == "nativeRouterSelected" and value is False:
+                    self.assertEqual("ACTUAL_NATIVE_SESSION_ASSERTION_FAILURE",p.native_classification(row))
+                else:
+                    with self.subTest(key=key,value=value), self.assertRaises(RuntimeError):
+                        p.native_classification(row)
         row = self.row()
         row["cases"][0]["name"] = "unrelated"
         with self.assertRaises(RuntimeError): p.native_classification(row)
@@ -72,11 +82,13 @@ class SessionProofControls(unittest.TestCase):
             secret="private-provider-message-never-export"
             log.write_text("spotless-maven-plugin:check "+secret)
             self.assertIs(p.compile_diagnostics(log)["spotlessConfirmed"],False)
-            log.write_text("The following files had format violations:\nRun 'mvn spotless:apply'\n"+secret)
+            log.write_text("The following files had format violations:\nRun 'mvn spotless:apply'\n/secret/path/MagicLinkAuthority.java:[65,15] "+secret+"\n/secret/path/Unknown.java:[7,8] private")
             result=p.compile_diagnostics(log)
             self.assertIs(result["spotlessConfirmed"],True)
             self.assertNotIn(secret,str(result))
-            self.assertEqual({"spotlessConfirmed","ownedFilesMentioned","compilerFailure"},set(result))
+            self.assertEqual({"spotlessConfirmed","ownedFilesMentioned","compilerFailure","ownedSourceFrames"},set(result))
+            self.assertEqual([{"file":"MagicLinkAuthority.java","line":65,"column":15}],result["ownedSourceFrames"])
+            self.assertNotIn("/secret",str(result))
 
     def test_formatter_replaces_unstarted_tests_in_exact_three_group_catalogue(self):
         self.assertEqual(["toolchain","user-compile","user-formatter"],p.planned_groups("user",True))

@@ -179,6 +179,11 @@ final class LifecycleAuthorization {
         "proof", "payload");
   }
 
+  void verifyMagicLinkCommand(String proof, CheckedMachine machine, String target, JsonNode body) {
+    verifyCommand(proof, machine, "oriso-session-exchange", "SESSION_EXCHANGE",
+        "session.magic-link.exchange", "POST", target, body, "magic-link-proof/v1", "magic-link-command/v1");
+  }
+
   void verifyProtectedCommand(String proof, CheckedMachine machine, String operation,
       String method, String target, JsonNode originalHttpBody) {
     String purpose = switch (machine.actor()) {

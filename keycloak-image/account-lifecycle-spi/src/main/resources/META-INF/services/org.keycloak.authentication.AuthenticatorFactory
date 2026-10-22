@@ -1,1 +1,3 @@
 org.oriso.keycloak.lifecycle.MagicLinkAuthenticator
+org.oriso.keycloak.lifecycle.MagicLinkPasswordCondition
+org.oriso.keycloak.lifecycle.MagicLinkSessionAttach
