@@ -80,12 +80,13 @@ final class ProtectedPeerDelegation {
   }
 
   void recordConsumed(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt) {
-    if (origin.delegatedSubject != null || origin.delegationSnapshot != null) conflict();
+    if (origin.delegatedSubject != null || origin.delegationSnapshot != null)
+      throw new jakarta.ws.rs.ClientErrorException(409);
     var stored = parse(origin.scope).path("profile");
     if (!"TENANT_ADMIN".equals(stored.path("kind").asText())) return;
+    var policy = policy(text(stored, "id", 255, false), number(stored, "version", true));
+    if (policy == null) return; // Optional withdrawal cannot add a new first-COMMIT check.
     var profile = sourceProfile(origin);
-    var policy = policy(profile);
-    if (policy == null) return; // Optional installed delegation is default-empty.
     long tenant = provenance(origin, attempt, profile);
     String immutable = snapshot(origin, attempt, profile, policy, tenant);
     if (immutable.getBytes(StandardCharsets.UTF_8).length > 16000) bad();
@@ -103,8 +104,12 @@ final class ProtectedPeerDelegation {
   }
 
   private ProtectedInvitationConfiguration.PeerPolicy policy(ProtectedInvitationConfiguration.Profile profile) {
+    return policy(profile.id(), profile.version());
+  }
+
+  private ProtectedInvitationConfiguration.PeerPolicy policy(String profileId, long profileVersion) {
     var policies = config.peerPolicies.values().stream().filter(candidate ->
-        profile.id().equals(candidate.sourceProfileId()) && profile.version() == candidate.sourceProfileVersion()).toList();
+        profileId.equals(candidate.sourceProfileId()) && profileVersion == candidate.sourceProfileVersion()).toList();
     if (policies.size() > 1) deny();
     return policies.isEmpty() ? null : policies.get(0);
   }
