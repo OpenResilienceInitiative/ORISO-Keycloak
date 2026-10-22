@@ -12,12 +12,12 @@ import org.junit.Test;
 public class GeneralPolicyTest {
   @Test
   public void existingReviewedSelfOperationsStillParse() {
-    accepted("account.read", "account.locale");
+    accepted("account.read", "account.locale", "account.profile", "account.password");
   }
 
   @Test
   public void exactReviewedSelfPolicyCanNameClosedOtpOperations() {
-    accepted("account.read", "account.locale", "otp.read", "otp.app-setup",
+    accepted("account.read", "account.locale", "account.profile", "account.password", "otp.read", "otp.app-setup",
         "otp.delete", "otp.email-start", "otp.email-finish");
   }
 

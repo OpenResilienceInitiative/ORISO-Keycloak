@@ -181,6 +181,53 @@ final class MaintenanceTarget {
     if (!locale.equals(scalarText(stored[0])) || stored[1] != null) conflict();
   }
 
+  void profile(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer) {
+    var current = read(request, policy, rawHumanBearer);
+    if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText())) conflict();
+    // This first profile capability changes names only. Email enrollment keeps its separate proof.
+    if (!request.change().path("email").equals(current.path("email"))) deny();
+    var realm = session.getContext().getRealm();
+    var user = session.users().getUserById(realm, request.accountId());
+    var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
+    if (cache != null && user != null) {
+      cache.evict(realm, user);
+      user = session.users().getUserById(realm, request.accountId());
+    }
+    if (user == null) conflict();
+    user.setFirstName(request.change().path("firstName").textValue());
+    user.setLastName(request.change().path("lastName").textValue());
+    var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
+    em.flush();
+    var fresh = lockedSnapshot(em, request.accountId());
+    for (String field : List.of("firstName", "lastName", "email"))
+      if (!request.change().path(field).equals(fresh.path(field))) conflict();
+  }
+
+  void password(MaintenanceRequest request, GeneralPolicy policy, String rawHumanBearer) {
+    var current = read(request, policy, rawHumanBearer);
+    if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText())) conflict();
+    // Temporary-password/reset workflows have separate causal authority; this is current SELF.
+    if (request.change().path("temporary").asBoolean()) deny();
+    var realm = session.getContext().getRealm();
+    var user = session.users().getUserById(realm, request.accountId());
+    var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
+    if (cache != null && user != null) {
+      cache.evict(realm, user);
+      user = session.users().getUserById(realm, request.accountId());
+    }
+    if (user == null) conflict();
+    String password = request.change().path("password").textValue();
+    try {
+      if (session.getProvider(org.keycloak.policy.PasswordPolicyManagerProvider.class)
+          .validate(realm, user, password) != null) bad();
+      if (!user.credentialManager().updateCredential(UserCredentialModel.password(password))) bad();
+      user.removeRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
+      session.getProvider(JpaConnectionProvider.class).getEntityManager().flush();
+    } catch (org.keycloak.models.ModelException invalid) {
+      throw new jakarta.ws.rs.BadRequestException("Password validation failed");
+    }
+  }
+
   private JsonNode lockedSnapshot(EntityManager em, String id) {
     // Current locking reads must supply the values we validate. A normal model read
     // can retain an older MariaDB REPEATABLE READ view after these locks are acquired.

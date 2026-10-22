@@ -31,12 +31,16 @@ class HumanMaintenanceFixture(LifecycleFixture):
     phase_receipts = []
 
     @classmethod
+    def install_unused_readiness_profile(cls):
+        return False
+
+    @classmethod
     def extra_launch_arguments(cls):
         return []
 
     @classmethod
     def reviewed_self_operations(cls):
-        return ["account.read", "account.locale"]
+        return ["account.read", "account.locale", "account.profile", "account.password"]
 
     @classmethod
     def reviewed_human_profile(cls):
@@ -240,6 +244,15 @@ class HumanMaintenanceFixture(LifecycleFixture):
                 }
             ],
         }
+        if cls.install_unused_readiness_profile():
+            parent = helper.group_id("/human-roles")
+            helper.admin("POST", "/groups/" + parent + "/children", {"name": "readiness-unused"})
+            cls.unused_readiness_group = helper.group_id("/human-roles/readiness-unused")
+            helper.admin("POST", "/groups/" + cls.unused_readiness_group + "/role-mappings/realm", roles)
+            unused = dict(config["ordinaryProfiles"][0])
+            unused.update(id="readiness-unused-v1", groupId=cls.unused_readiness_group,
+                          groupPath="/human-roles/readiness-unused")
+            config["ordinaryProfiles"].append(unused)
         helper.human()
         original(
             ["docker", "stop", "-t", "5", cls.name],
@@ -257,6 +270,7 @@ class HumanMaintenanceFixture(LifecycleFixture):
             "ORISO_ACCOUNT_MAINTENANCE_CONFIG="
             + json.dumps(config, separators=(",", ":")),
         ]
+        cls.configured_command = command.copy()
         original(command, check=True, capture_output=True, timeout=30)
         cls.refresh_endpoint("human-policy-restart")
         cls.ready()
@@ -424,8 +438,10 @@ class HumanMaintenanceFixture(LifecycleFixture):
         try:
             with urlopen(request, timeout=30) as response:
                 status, raw = response.status, response.read()
+                self.last_response_no_store = "no-store" in response.headers.get("Cache-Control", "")
         except HTTPError as error:
             status, raw = error.code, error.read()
+            self.last_response_no_store = "no-store" in error.headers.get("Cache-Control", "")
         value = json.loads(raw) if raw else None
         self.phase(
             "human-maintenance-http",
@@ -436,6 +452,97 @@ class HumanMaintenanceFixture(LifecycleFixture):
         return status, value
 
 class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
+    def test_real_human_self_profile_is_receipt_bound_and_does_not_replay_over_later_edits(self):
+        human = self.human()
+        self.phase("ordinary-committed", create_status=201, commit_status=200)
+        origin = {"kind": "SELF", "workflowId": str(uuid.uuid4()),
+                  "humanSubject": self.account_id, "humanIssuer": ISSUER,
+                  "humanClient": CLIENT, "humanAuthority": None}
+        target = {"accountId": self.account_id, "tenantId": "11", "origin": origin}
+        status, before = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        native = self.admin("GET", "/users/" + self.account_id)
+        body = {"target": target, "operationId": str(uuid.uuid4()),
+                "expectedState": before["state"],
+                "change": {"firstName": "Updated", "lastName": "Ordinary", "email": native["email"]}}
+        status, result = self.invoke("profile", body, human, 200)
+        self.assertEqual(200, status)
+        encoded = result["receipt"].split(".")[0]
+        self.assertEqual(hmac.new(CONTEXT_KEY, ("maintenance-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest(), result["receipt"].split(".")[1])
+        receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        self.assertEqual("profile", receipt["command"])
+        self.assertEqual(mac("maintenance-intent", body), receipt["intentDigest"])
+        self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], receipt["ownerSubject"])
+        updated = self.admin("GET", "/users/" + self.account_id)
+        self.assertEqual("Updated", updated["firstName"])
+        self.assertEqual("Ordinary", updated["lastName"])
+        self.assertEqual(native["email"], updated["email"])
+        updated["firstName"] = "Later installer edit"
+        self.admin("PUT", "/users/" + self.account_id, updated)
+        self.assertEqual((200, result), self.invoke("profile", body, human, 200))
+        self.assertEqual("Later installer edit", self.admin("GET", "/users/" + self.account_id)["firstName"])
+        changed = json.loads(json.dumps(body)); changed["change"]["firstName"] = "Conflicting"
+        self.assertEqual(409, self.invoke("profile", changed, human, 409)[0])
+        stale = json.loads(json.dumps(body)); stale["operationId"] = str(uuid.uuid4())
+        self.assertEqual(409, self.invoke("profile", stale, human, 409)[0])
+        # Same actual SELF boundary, now prove the credential effect and immutable retry.
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        password = "Synthetic-" + uuid.uuid4().hex
+        later_password = "Synthetic-later-" + uuid.uuid4().hex
+        command = {"target": target, "operationId": str(uuid.uuid4()),
+                   "expectedState": current["state"],
+                   "change": {"password": password, "temporary": False}}
+        def login(value):
+            status, reply = call(self.base, "POST", "/realms/" + REALM + "/protocol/openid-connect/token",
+                                 {"client_id": CLIENT, "grant_type": "password",
+                                  "username": self.creation_input["account"]["username"],
+                                  "password": value, "scope": "openid"}, form=True)
+            if status != 200:
+                self.assertEqual("invalid_grant", reply.get("error"))
+                self.assertEqual("Invalid user credentials", reply.get("error_description"))
+            return status
+        self.assertEqual(200, login(self.creation_input["account"]["password"]))
+        self.phase("human-password-proof-preconditions", original_password_verified=True,
+                   exact_self_read=True, current_native_session=True)
+        try:
+            status, changed_password = self.invoke("password", command, human, 200)
+            self.assertEqual(200, status)
+            self.assertNotIn(password, canonical(changed_password).decode())
+            encoded, signature = changed_password["receipt"].split(".")
+            receipt_mac = hmac.compare_digest(signature, hmac.new(CONTEXT_KEY,
+                ("maintenance-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest())
+            receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            self.phase("human-password-receipt-comparison", mac_valid=receipt_mac,
+                       command_matches=receipt.get("command") == "password",
+                       intent_matches=receipt.get("intentDigest") == mac("maintenance-intent", command),
+                       owner_matches=receipt.get("ownerSubject") == SUBJECTS["ACCOUNT_ADMIN"])
+            self.assertTrue(receipt_mac)
+            self.assertEqual("password", receipt["command"])
+            self.assertEqual(mac("maintenance-intent", command), receipt["intentDigest"])
+            self.assertEqual(SUBJECTS["ACCOUNT_ADMIN"], receipt["ownerSubject"])
+            self.phase("human-password-receipt-verified", actual_admin_owner=True,
+                       exact_original_intent=True, no_plaintext_password=True)
+            new_login = login(password)
+            original_login = login(self.creation_input["account"]["password"])
+            self.phase("human-password-native-login", new_status=new_login, original_status=original_login)
+            self.assertEqual(200, new_login)
+            self.assertEqual(400, original_login)
+            self.admin("PUT", "/users/" + self.account_id + "/reset-password",
+                       {"type": "password", "value": later_password, "temporary": False})
+            self.assertEqual((200, changed_password), self.invoke("password", command, human, 200))
+            later_login, replayed_login = login(later_password), login(password)
+            self.phase("human-password-native-retry-login", later_status=later_login, replayed_status=replayed_login)
+            self.assertEqual(200, later_login)
+            self.assertEqual(400, replayed_login)
+            conflicting = json.loads(json.dumps(command))
+            conflicting["change"]["password"] = "Synthetic-conflict-" + uuid.uuid4().hex
+            self.assertEqual(409, self.invoke("password", conflicting, human, 409)[0])
+        finally:
+            self.admin("PUT", "/users/" + self.account_id + "/reset-password",
+                       {"type": "password", "value": self.creation_input["account"]["password"],
+                        "temporary": False})
+
     def test_real_human_self_locale_keeps_admin_receipt_owner_and_rejects_origin_mix(
         self,
     ):

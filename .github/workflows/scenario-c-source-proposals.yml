@@ -4,14 +4,16 @@ on:
   pull_request:
     branches: [dev]
     paths:
+      - keycloak-image/account-lifecycle-spi/**
       - keycloak-image/otp-config-spi/**
       - keycloak-image/smtp-control-spi/**
       - keycloak-image/themes/oriso/email/**
       - scripts/test-smtp-control-permissions.py
       - .github/workflows/scenario-c-source-proposals.yml
   push:
-    branches-ignore: [main, dev, pre-dev]
+    branches-ignore: [main, pre-dev]
     paths:
+      - keycloak-image/account-lifecycle-spi/**
       - keycloak-image/otp-config-spi/**
       - keycloak-image/smtp-control-spi/**
       - keycloak-image/themes/oriso/email/**

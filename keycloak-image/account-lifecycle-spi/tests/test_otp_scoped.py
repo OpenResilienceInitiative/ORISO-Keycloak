@@ -113,8 +113,10 @@ class ScopedOtpRead(HumanMaintenanceFixture, unittest.TestCase):
         try:
             with urlopen(request, timeout=30) as response:
                 status, raw = response.status, response.read()
+                self.last_response_no_store = "no-store" in response.headers.get("Cache-Control", "")
         except HTTPError as error:
             status, raw = error.code, error.read()
+            self.last_response_no_store = "no-store" in error.headers.get("Cache-Control", "")
             error.close()
         self.phase("scoped-otp-http", operation="otp.read", actor=actor,
                    status=status, expected_status=expected)

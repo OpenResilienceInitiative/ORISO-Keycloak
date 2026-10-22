@@ -109,7 +109,7 @@ public final class ScopedOtpAccess {
   }
 
   static Response checkedSelfRead(KeycloakSession session, LifecycleAuthorization authorization,
-      Map<String, Set<String>> mappings, GeneralPolicy policy, String username,
+      Map<String, Set<String>> mappings, Function<KeycloakSession, GeneralPolicy> policies, String username,
       String targetHeader, String proofHeader, String humanHeader,
       Function<VerifiedOtpTarget, Response> read) {
     // Cache the canonical machine before native human authentication changes ambient context.
@@ -141,7 +141,7 @@ public final class ScopedOtpAccess {
     var request = MaintenanceRequest.parse("read", account, body);
     // Realm -> committed provenance -> current human -> native user/credential locks.
     var current = new MaintenanceTarget(session, authorization, mappings)
-        .readOtpSelf(request, policy, humanHeader);
+        .readOtpSelf(request, policies.apply(session), humanHeader);
     return invoke(session, authorization, username, account, current, null, read).response();
   }
 
@@ -167,7 +167,7 @@ public final class ScopedOtpAccess {
   }
 
   static Response checkedSelfMutation(KeycloakSession session, LifecycleAuthorization authorization,
-      Map<String, Set<String>> mappings, GeneralPolicy policy, String operation, String method, String username,
+      Map<String, Set<String>> mappings, Function<KeycloakSession, GeneralPolicy> policies, String operation, String method, String username,
       byte[] raw, String proofHeader, String humanHeader,
       Function<VerifiedOtpTarget, Response> setup) {
     var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
@@ -184,6 +184,7 @@ public final class ScopedOtpAccess {
     var read = JSON.createObjectNode();
     read.set("target", request.target());
     var target = MaintenanceRequest.parse("read", account, read);
+    var policy = policies.apply(session);
     if (policy == null) deny();
     var em = session.getProvider(org.keycloak.connections.jpa.JpaConnectionProvider.class).getEntityManager();
     var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class,
@@ -291,17 +292,17 @@ public final class ScopedOtpAccess {
   }
 
   static Response checkedSelfEmailStart(KeycloakSession session, LifecycleAuthorization authorization,
-      Map<String, Set<String>> mappings, GeneralPolicy policy, String username,
+      Map<String, Set<String>> mappings, Function<KeycloakSession, GeneralPolicy> policies, String username,
       byte[] raw, String proofHeader, String humanHeader,
       Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send) {
-    return checkedSelfEmailStart(session, authorization, mappings, policy, username, raw,
+    return checkedSelfEmailStart(session, authorization, mappings, policies, username, raw,
         proofHeader, humanHeader, prepare, send, EmailPhase.REQUEST);
   }
 
   private enum EmailPhase { REQUEST, CLAIM, SEND }
 
   private static Response checkedSelfEmailStart(KeycloakSession session, LifecycleAuthorization authorization,
-      Map<String, Set<String>> mappings, GeneralPolicy policy, String username,
+      Map<String, Set<String>> mappings, Function<KeycloakSession, GeneralPolicy> policies, String username,
       byte[] raw, String proofHeader, String humanHeader,
       Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send,
       EmailPhase phase) {
@@ -319,6 +320,7 @@ public final class ScopedOtpAccess {
     var read = JSON.createObjectNode();
     read.set("target", request.target());
     var target = MaintenanceRequest.parse("read", account, read);
+    var policy = policies.apply(session);
     if (policy == null) deny();
     var em = session.getProvider(org.keycloak.connections.jpa.JpaConnectionProvider.class).getEntityManager();
     var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class,
@@ -347,7 +349,7 @@ public final class ScopedOtpAccess {
           return Response.ok(parse(delivery.finalJson)).header("Cache-Control", "no-store").build();
         if (!"READY".equals(delivery.state) || delivery.expiresAt <= java.time.Instant.now().getEpochSecond())
           throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery outcome is unknown");
-        enlistForegroundEmail(session, authorization, mappings, policy, username, raw,
+        enlistForegroundEmail(session, authorization, mappings, policies, username, raw,
             proofHeader, humanHeader, send);
         return Response.status(202).entity(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
       }
@@ -477,13 +479,13 @@ public final class ScopedOtpAccess {
     // Native inactive credential, immutable READY receipt and delivery ownership commit together.
     // No old VerifiedOtpTarget or request-bound grant escapes this callback.
     em.flush();
-    enlistForegroundEmail(session, authorization, mappings, policy, username, raw,
+    enlistForegroundEmail(session, authorization, mappings, policies, username, raw,
         proofHeader, humanHeader, send);
     return Response.status(202).entity(result).header("Cache-Control", "no-store").build();
   }
 
   private static void enlistForegroundEmail(KeycloakSession owner, LifecycleAuthorization authorization,
-      Map<String, Set<String>> mappings, GeneralPolicy policy, String username, byte[] raw,
+      Map<String, Set<String>> mappings, Function<KeycloakSession, GeneralPolicy> policies, String username, byte[] raw,
       String proof, String human, Function<VerifiedOtpTarget, Response> send) {
     var factory = owner.getKeycloakSessionFactory();
     String realmId = owner.getContext().getRealm().getId();
@@ -499,7 +501,7 @@ public final class ScopedOtpAccess {
             fresh.getContext().setRealm(fresh.realms().getRealm(realmId));
             fresh.getContext().setHttpRequest(actualRequest);
             fresh.getContext().setConnection(actualConnection);
-            checkedSelfEmailStart(fresh, authorization, mappings, policy, username, frozenRaw,
+            checkedSelfEmailStart(fresh, authorization, mappings, policies, username, frozenRaw,
                 proof, human, null, send, EmailPhase.CLAIM);
             fresh.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
               protected void commitImpl() { claimed.set(true); }
@@ -511,7 +513,7 @@ public final class ScopedOtpAccess {
             fresh.getContext().setRealm(fresh.realms().getRealm(realmId));
             fresh.getContext().setHttpRequest(actualRequest);
             fresh.getContext().setConnection(actualConnection);
-            checkedSelfEmailStart(fresh, authorization, mappings, policy, username, frozenRaw,
+            checkedSelfEmailStart(fresh, authorization, mappings, policies, username, frozenRaw,
                 proof, human, null, send, EmailPhase.SEND);
           });
         } catch (RuntimeException refusedOrUnknown) {
