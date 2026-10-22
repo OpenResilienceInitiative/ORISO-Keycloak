@@ -23,7 +23,12 @@ OBSERVATIONS = {
 }
 
 
-def proof(body, realm_id):
+SESSION_CHECKS = dict.fromkeys(("nativeSubjectClientTenantExpiry","actualNativeSessionBound",
+    "sameWorkflowSameSession","changedTupleRefused","unboundBodyRefused","wrongActorRefused",
+    "wrongProofAudienceRefused","expiredCommandRefused","currentDisabledRefused"),False)
+
+
+def proof(body, realm_id, claim_changes=None):
     now = int(time.time())
     claims = {
         "iss": "userservice", "aud": "oriso-session-exchange", "purpose": "SESSION_EXCHANGE",
@@ -34,6 +39,7 @@ def proof(body, realm_id):
         "payloadDigest": native.mac("magic-link-command/v1", body),
         "jti": str(uuid.uuid4()), "nonce": uuid.uuid4().hex, "iat": now, "exp": now + 30,
     }
+    claims.update(claim_changes or {})
     encoded = base64.urlsafe_b64encode(native.canonical(claims)).decode().rstrip("=")
     signature = base64.urlsafe_b64encode(hmac.new(
         native.CONTEXT_KEY, ("magic-link-proof/v1\n" + encoded).encode(), hashlib.sha256
@@ -224,3 +230,54 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             isinstance(reply, dict) and reply.get("error_description") == "Claimed Magic Link session unavailable")
         self.assertEqual(200, status, "Checked native claimed-session path must issue a native session")
         self.assertTrue(reply.get("access_token"))
+        def claims(response):
+            encoded=response["access_token"].split(".")[1]
+            return json.loads(base64.urlsafe_b64decode(encoded+"="*(-len(encoded)%4)))
+        issued=claims(reply)
+        self.assertEqual(target["id"],issued.get("sub"))
+        self.assertEqual("app",issued.get("azp"))
+        self.assertEqual(creation["identity"]["scope"]["tenantId"],issued.get("tenantId"))
+        self.assertGreater(issued.get("exp",0),time.time())
+        SESSION_CHECKS["nativeSubjectClientTenantExpiry"]=True
+        sid=issued.get("sid")
+        self.assertTrue(isinstance(sid,str) and sid)
+        def session_ids():
+            return {row["id"] for row in self.admin("GET","/users/"+target["id"]+"/sessions")}
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["actualNativeSessionBound"]=True
+        def exchange(command,actor_name="ACCOUNT_ADMIN",signed_body=None,proof_changes=None):
+            bearer=self.token(actor_name)
+            return native.call(self.base,"POST",token_path,{
+                "client_id":"app","grant_type":"password","oriso_magic_command":native.canonical(command).decode()},
+                bearer,True,proof(signed_body or command,self.realm_id,proof_changes))
+        status,replayed=exchange(body)
+        self.assertEqual(200,status)
+        self.assertEqual(sid,claims(replayed).get("sid"))
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["sameWorkflowSameSession"]=True
+        changed={**body,"claimDigest":"b"*64}
+        self.assertEqual(401,exchange(changed)[0])
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["changedTupleRefused"]=True
+        self.assertEqual(401,exchange(changed,signed_body=body)[0])
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["unboundBodyRefused"]=True
+        self.assertEqual(401,exchange(body,actor_name="ACCOUNT_CREATE")[0])
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["wrongActorRefused"]=True
+        self.assertEqual(401,exchange(body,proof_changes={"aud":"oriso-account-lifecycle"})[0])
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["wrongProofAudienceRefused"]=True
+        self.assertEqual(401,exchange({**body,"expiresAt":int(time.time())-1})[0])
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["expiredCommandRefused"]=True
+        # Confirm all rejected packets preserved the original exact workflow before final disabled case.
+        status,still_owned=exchange(body)
+        self.assertEqual(200,status)
+        self.assertEqual(sid,claims(still_owned).get("sid"))
+        self.assertEqual({sid},session_ids())
+        self.admin("PUT","/users/"+target["id"],{**target,"enabled":False})
+        self.assertIs(False,self.admin("GET","/users/"+target["id"])["enabled"])
+        self.assertEqual(401,exchange(body)[0])
+        self.assertEqual({sid},session_ids())
+        SESSION_CHECKS["currentDisabledRefused"]=True

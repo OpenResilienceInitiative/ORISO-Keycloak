@@ -13,7 +13,7 @@ class SessionProofControls(unittest.TestCase):
     def row(self):
         observed = dict.fromkeys(p.OBSERVATION_FLAGS, True)
         observed["magicStatus"] = 401
-        return {"observed": observed, "counts": {"tests":1,"failures":1,"errors":0,"skipped":0},
+        return {"observed": observed,"sessionChecks":dict.fromkeys(p.SESSION_CHECK_FLAGS,True), "counts": {"tests":1,"failures":1,"errors":0,"skipped":0},
                 "cases":[{"name":"test_checked_claim_enters_native_session_path", "outcome":"failure"}]}
 
     def test_only_full_proved_precondition_inventory_earns_assertion_red(self):
@@ -128,6 +128,16 @@ class SessionProofControls(unittest.TestCase):
             raise RuntimeError("arbitrary-private-message")
         except RuntimeError:
             self.assertEqual({"type":"OTHER","sourceFrames":[]},p.safe_python_failure(sys.exc_info()))
+
+    def test_green_requires_all_fixed_session_checks_and_never_exports_arbitrary_values(self):
+        for flag in p.SESSION_CHECK_FLAGS:
+            for value in (False,None,1,"true"):
+                row=self.row();row["observed"].update(magicStatus=200,nativeRouterSelected=False)
+                row["counts"]["failures"]=0;row["cases"][0]["outcome"]="pass"
+                row["sessionChecks"][flag]=value
+                with self.subTest(flag=flag,value=value),self.assertRaises(RuntimeError):p.native_classification(row)
+        checks=dict.fromkeys(p.SESSION_CHECK_FLAGS,True);checks["private"]="never-export"
+        with self.assertRaises(RuntimeError):p.checked_session_checks(checks)
 
     def test_runtime_requires_one_known_false_oom_integer_zero_restart(self):
         good=[{"kind":"container","runtime":{"oomKilled":False,"restartCount":0}}]

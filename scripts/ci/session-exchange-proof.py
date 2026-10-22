@@ -78,8 +78,20 @@ def checked_observation(value):
     return value
 
 
+SESSION_CHECK_FLAGS = {"nativeSubjectClientTenantExpiry","actualNativeSessionBound","sameWorkflowSameSession",
+    "changedTupleRefused","unboundBodyRefused","wrongActorRefused","wrongProofAudienceRefused",
+    "expiredCommandRefused","currentDisabledRefused"}
+
+
+def checked_session_checks(value):
+    if not isinstance(value,dict) or set(value)!=SESSION_CHECK_FLAGS or any(type(v) is not bool for v in value.values()):
+        raise RuntimeError("Exact finite native session checks required")
+    return value
+
+
 def native_classification(receipt):
     observed = checked_observation(receipt["observed"])
+    session_checks = checked_session_checks(receipt["sessionChecks"])
     preconditions = OBSERVATION_FLAGS - {"nativeRouterSelected"}
     counts = receipt.get("counts")
     if (not isinstance(counts, dict) or set(counts) != {"tests", "failures", "errors", "skipped"}
@@ -90,7 +102,7 @@ def native_classification(receipt):
         raise RuntimeError("Complete actual native preconditions/inventory required")
     if counts == {"tests":1,"failures":1,"errors":0,"skipped":0} and observed["nativeRouterSelected"] is True and observed["magicStatus"] == 401 and receipt["cases"][0]["outcome"] == "failure":
         return "ACTUAL_NATIVE_SESSION_ASSERTION_RED"
-    if counts == {"tests":1,"failures":0,"errors":0,"skipped":0} and observed["magicStatus"] == 200 and receipt["cases"][0]["outcome"] == "pass":
+    if counts == {"tests":1,"failures":0,"errors":0,"skipped":0} and observed["magicStatus"] == 200 and receipt["cases"][0]["outcome"] == "pass" and all(session_checks.values()):
         return "NATIVE_TRACER_GREEN_INCOMPLETE"
     if counts == {"tests":1,"failures":1,"errors":0,"skipped":0} and observed["magicStatus"] > 0 and receipt["cases"][0]["outcome"] == "failure":
         return "ACTUAL_NATIVE_SESSION_ASSERTION_FAILURE"
@@ -307,7 +319,7 @@ def child():
     ET.ElementTree(tree).write(out / ("TEST-" + NATIVE_SUITE + ".xml"), encoding="utf-8", xml_declaration=True)
     (out / "native-observation.json").write_text(json.dumps({
         "counts": counts, "cases": result.rows, "observed": checked_observation(module.OBSERVATIONS),
-        "safePythonFailures":result.safe_failures}, sort_keys=True) + "\n")
+        "safePythonFailures":result.safe_failures,"sessionChecks":checked_session_checks(module.SESSION_CHECKS)}, sort_keys=True) + "\n")
     return 0 if result.wasSuccessful() else 1
 
 
