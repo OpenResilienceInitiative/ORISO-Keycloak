@@ -87,7 +87,7 @@ public final class ScopedOtpAccess {
       Function<VerifiedOtpTarget, Response> read) {
     // Cache the canonical machine before native human authentication changes ambient context.
     var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
-    if (targetHeader == null || targetHeader.length() > 8192 || username == null
+    if (targetHeader == null || targetHeader.length() > 24576 || username == null
         || username.isBlank() || username.length() > 255
         || username.chars().anyMatch(c -> c < 32 || c == 127)) bad();
     var target = parse(targetHeader);
@@ -97,6 +97,16 @@ public final class ScopedOtpAccess {
     materialized.put("username", username);
     materialized.putNull("otp");
     var realm = session.getContext().getRealm();
+    if (target.has("bootstrap")) {
+      authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.bootstrap-read", "GET",
+          "realm/" + realm.getId() + "/account/" + account, materialized);
+      if (humanHeader != null) deny();
+      return ProtectedOtpBootstrap.prepare(session, authorization, machine, username, target, user -> {
+        var projection = JSON.createObjectNode(); projection.put("username", user.getUsername());
+        return invoke(session, authorization, username, account, projection, null, read).response();
+      });
+    }
+    if (targetHeader.length() > 8192) bad();
     authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.read", "GET",
         "realm/" + realm.getId() + "/account/" + account, materialized);
     var body = JSON.createObjectNode();
