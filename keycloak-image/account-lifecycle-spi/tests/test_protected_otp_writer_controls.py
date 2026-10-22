@@ -74,6 +74,17 @@ class WriterControls(unittest.TestCase):
         with self.assertRaises(AssertionError):
             delegate_rows("ORISO_PROOF_OTP_DELEGATE_V1 " + json.dumps(dict(row, rawError="never-copy")))
 
+    def test_future_observation_retains_only_fixed_completion_and_http_status(self):
+        from concurrent.futures import Future
+        from otp_writer_fixture import future_observation
+        pending = Future()
+        self.assertEqual({"completed": False, "httpStatus": None}, future_observation(pending))
+        pending.set_result((202, {"recipient": "never-copy", "receipt": "never-copy"}))
+        self.assertEqual({"completed": True, "httpStatus": 202}, future_observation(pending))
+        failed = Future()
+        failed.set_exception(RuntimeError("never-copy"))
+        self.assertEqual({"completed": True, "httpStatus": None}, future_observation(failed))
+
     def test_companion_remains_outside_product_and_delegates_native_smtp(self):
         tests = Path(__file__).parent
         source = (tests / "native-otp-writer-fixture/src/org/oriso/keycloak/lifecycle/proof/OtpWriterFixtureFactory.java").read_text()

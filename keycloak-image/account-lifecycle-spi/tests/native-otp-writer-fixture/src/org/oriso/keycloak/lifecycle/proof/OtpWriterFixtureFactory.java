@@ -55,6 +55,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
     }
     public void send(Map<String, String> config, String address, String subject, String text, String html)
         throws EmailException {
+      if (Files.isRegularFile(CONTROL)) delegateObservation("SEND_ADDRESS_ENTERED", true, true);
       if (Files.isRegularFile(CONTROL)) throw new EmailException("Proof requires actual native user");
       delegate.send(config, address, subject, text, html);
     }
@@ -78,6 +79,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
       }
     }
     private Witness capture(UserModel user) {
+      delegateObservation("CAPTURE_ENTERED", true, true);
       try {
         var control = new ObjectMapper().readTree(Files.readString(CONTROL));
         var names = new java.util.HashSet<String>(); control.fieldNames().forEachRemaining(names::add);
@@ -94,10 +96,12 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
             || !realm.equals(session.getContext().getRealm().getId()) || !account.equals(user.getId())
             || !"2.4.240".equals(em.createNativeQuery("select H2VERSION()").getSingleResult().toString()))
           throw new IllegalStateException("Actual pinned writer transaction required");
+        delegateObservation("CAPTURE_TRANSACTION_VERIFIED", true, true);
         var rows = em.createNativeQuery("select STATE from ORISO_OTP_EMAIL_DELIVERY where ID=:id and REALM_ID=:realm and ACCOUNT_ID=:account")
             .setParameter("id", realm + ":" + control.path("operationId").textValue())
             .setParameter("realm", realm).setParameter("account", account).getResultList();
         if (rows.size() != 1 || !"SENDING".equals(rows.get(0))) throw new IllegalStateException("Actual SENDING owner required");
+        delegateObservation("CAPTURE_SENDING_VERIFIED", true, true);
         var bootstrap = em.createNativeQuery("select APPROVAL_ID, ATTEMPT_ID, EXECUTION_ID, STATE from ORISO_PROTECTED_OTP_BOOTSTRAP where REALM_ID=:realm and ACCOUNT_ID=:account")
             .setParameter("realm", realm).setParameter("account", account).getResultList();
         if (bootstrap.size() != 1) throw new IllegalStateException("Exact bootstrap owner required");
@@ -105,6 +109,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
         if (!control.path("approvalId").textValue().equals(b[0]) || !control.path("attemptId").textValue().equals(b[1])
             || !control.path("executionId").textValue().equals(b[2]) || !"EMAIL_READY".equals(b[3]))
           throw new IllegalStateException("Original bootstrap incarnation required");
+        delegateObservation("CAPTURE_BOOTSTRAP_VERIFIED", true, true);
         var attempts = em.createNativeQuery("select STATE, GENERATION, EXECUTION_ID from ORISO_ACCOUNT_LIFECYCLE_ATTEMPT where REALM_ID=:realm and ACCOUNT_ID=:account and ATTEMPT_ID=:attempt")
             .setParameter("realm", realm).setParameter("account", account)
             .setParameter("attempt", control.path("attemptId").textValue()).getResultList();
@@ -112,11 +117,13 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
         var a = (Object[]) attempts.get(0);
         if (!"OPEN".equals(a[0]) || !(a[1] instanceof Number n) || n.longValue() != 0
             || !control.path("executionId").textValue().equals(a[2])) throw new IllegalStateException("Original OPEN generation required");
+        delegateObservation("CAPTURE_ATTEMPT_VERIFIED", true, true);
         long connection = ((Number) em.createNativeQuery("select SESSION_ID()").getSingleResult()).longValue();
         if (connection < 1) throw new IllegalStateException("Actual writer session required");
         var witness = new Witness(session.getKeycloakSessionFactory(), realm, connection);
         emit("ENTERED", witness); return witness;
       } catch (java.io.IOException | RuntimeException failure) {
+        delegateObservation("CAPTURE_REJECTED", true, true);
         throw new IllegalStateException("Native writer witness unavailable");
       }
     }

@@ -24,7 +24,9 @@ def delegate_rows(output):
         row = json.loads(line.split(prefix, 1)[1])
         if (set(row) != {"schema", "phase", "nativeDefaultPresent", "nativeDefaultClassExact"}
                 or row["schema"] != 1
-                or row["phase"] not in {"CONSTRUCTION_ENTERED", "CONSTRUCTED", "VALIDATED", "VALIDATION_FAILED"}
+                or row["phase"] not in {"CONSTRUCTION_ENTERED", "CONSTRUCTED", "VALIDATED", "VALIDATION_FAILED", "SEND_ADDRESS_ENTERED", "CAPTURE_ENTERED",
+                    "CAPTURE_TRANSACTION_VERIFIED", "CAPTURE_SENDING_VERIFIED",
+                    "CAPTURE_BOOTSTRAP_VERIFIED", "CAPTURE_ATTEMPT_VERIFIED", "CAPTURE_REJECTED"}
                 or type(row["nativeDefaultPresent"]) is not bool
                 or type(row["nativeDefaultClassExact"]) is not bool):
             raise AssertionError("Closed native delegate observation required")
@@ -38,7 +40,8 @@ def delegate_observations(fixture):
     result = subprocess.run(["docker", "logs", fixture.name], check=True,
                             capture_output=True, text=True, timeout=10)
     rows = delegate_rows(result.stdout + result.stderr)
-    return {"totalEvents": len(rows), "sampleTruncated": len(rows) > 16, "firstEvents": rows[:16],
+    return {"phaseCounts": {phase: sum(row["phase"] == phase for row in rows) for phase in sorted({row["phase"] for row in rows})},
+            "totalEvents": len(rows), "sampleTruncated": len(rows) > 16, "firstEvents": rows[:16],
             "nativeDefaultPresent": any(row["nativeDefaultPresent"] for row in rows),
             "nativeDefaultClassExact": any(row["nativeDefaultClassExact"] for row in rows)}
 
@@ -124,6 +127,15 @@ def observations(fixture):
     return rows
 
 
+def future_observation(future):
+    result = {"completed": future.done(), "httpStatus": None}
+    if future.done() and not future.cancelled() and future.exception() is None:
+        value = future.result()
+        if isinstance(value, tuple) and len(value) == 2 and type(value[0]) is int and 100 <= value[0] <= 599:
+            result["httpStatus"] = value[0]
+    return result
+
+
 def concurrent_start(fixture, control, start_request, cancel_request, observed):
     if not fixture.writer_enabled or (fixture.writer_control / "control.json").exists():
         raise AssertionError("Exactly one armed real writer required")
@@ -137,6 +149,8 @@ def concurrent_start(fixture, control, start_request, cancel_request, observed):
     cancellation = None
     try:
         if not mail.writer_entered.wait(5):
+            observed["inflightFixedPhase"] = "SMTP_BARRIER_NOT_ENTERED"
+            observed["inflightWriterFuture"] = future_observation(writer)
             raise AssertionError("Real native SMTP writer did not reach owned barrier")
         cancellation = pool.submit(cancel_request)
         deadline = time.monotonic() + 2.0
@@ -157,6 +171,8 @@ def concurrent_start(fixture, control, start_request, cancel_request, observed):
         mail.writer_release.set()
         pool.shutdown(wait=True, cancel_futures=False)
         mail.writer_armed = False
+        observed["inflightWriterFutureAfterRelease"] = future_observation(writer)
+        observed["inflightNativeWriterEventsAfterRelease"] = observations(fixture)
     ready = writer.result(timeout=1)
     cancelled = cancellation.result(timeout=1) if cancellation is not None else None
     deadline = time.monotonic() + 2
