@@ -277,6 +277,7 @@ public final class ProtectedInvitationResource implements RealmResourceProvider 
                 || !current.recoveryId.equals(current.executionId)
                 || current.recoveryExpected == null || current.recoveryExpected == Long.MAX_VALUE
                 || current.recoveryExpected + 1 != current.generation)) conflict();
+        ProtectedOtpBootstrap.reconcilePendingEmailForCompensation(session, crypto, current, approval);
         return;
       }
       if ("recover".equals(command)) {
