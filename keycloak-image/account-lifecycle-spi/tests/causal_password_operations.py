@@ -3,6 +3,7 @@ import base64
 import copy
 import hashlib
 import hmac
+import json
 import time
 import uuid
 
@@ -57,6 +58,13 @@ def exercise(test, helper, observed):
             test.assertEqual(kind == 'EXISTING_SETUP', current['passwordChangeRequired'])
         if status != 200:
             continue
+        for selector, changed_value, expected in [('expectedUsername', 'foreign-username', 403),
+                ('expectedEmailDigest', 'a' * 64, 403), ('profileId', 'foreign-profile', 403),
+                ('authorityValidUntil', int(time.time()) - 1, 400)]:
+            wrong = copy.deepcopy(read); wrong['workflow'][selector] = changed_value
+            test.assertEqual(expected, invoke(helper, account, 'account.password-reset.read', wrong)[0])
+        extra = copy.deepcopy(read); extra['workflow']['humanAuthority'] = 'PLATFORM'
+        test.assertEqual(400, invoke(helper, account, 'account.password-reset.read', extra)[0])
         body = {**read, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
                 'change': {'password': 'Native-causal-fixture-' + uuid.uuid4().hex, 'temporary': False}}
         status, result = invoke(helper, account, 'account.password-reset', body)
@@ -74,4 +82,12 @@ def exercise(test, helper, observed):
             test.assertEqual(200, info_status); test.assertEqual(account, info['sub'])
             changed = copy.deepcopy(body); changed['change']['password'] = 'Changed-flight-payload-937451'
             test.assertEqual(409, invoke(helper, account, 'account.password-reset', changed)[0])
+            test.assertEqual((status, result), invoke(helper, account, 'account.password-reset.read', read))
+            another = copy.deepcopy(body); another['operationId'] = str(uuid.uuid4())
+            conflict_status, conflict = invoke(helper, account, 'account.password-reset', another)
+            test.assertEqual(409, conflict_status); test.assertNotIn('receipt', conflict)
+            changed_workflow = copy.deepcopy(read); changed_workflow['workflow']['expectedUsername'] += '-changed'
+            conflict_status, conflict = invoke(helper, account, 'account.password-reset.read', changed_workflow)
+            test.assertEqual(409, conflict_status); test.assertNotIn('receipt', conflict)
             records[label]['effectAndExactRetryVerified'] = True
+            records[label]['exactSavedReadAndClaimReservationVerified'] = True

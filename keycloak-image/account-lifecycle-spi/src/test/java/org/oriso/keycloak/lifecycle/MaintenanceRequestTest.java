@@ -98,6 +98,30 @@ public class MaintenanceRequestTest {
     }
   }
 
+  @Test
+  public void tenantReassignmentIsAnExactPositiveDesiredTenantAssertion() {
+    accepted("reassign-tenant", "{\"tenantId\":\"2\"}");
+    for (String change : java.util.List.of("{\"tenantId\":\"0\"}", "{\"tenantId\":2}", "{\"tenantId\":null}", "{\"tenantId\":\"2\",\"roles\":[]}")) rejected("reassign-tenant", change);
+  }
+
+  @Test
+  public void inactivityWorkflowRetainsOriginalSignedLongRevisionAndFiniteAction() {
+    var body = (com.fasterxml.jackson.databind.node.ObjectNode) parse(command("{}"));
+    var origin = (com.fasterxml.jackson.databind.node.ObjectNode)body.path("target").path("origin");
+    origin.put("kind", "INACTIVITY"); origin.put("workflowId", OPERATION);
+    for (String key : java.util.List.of("humanSubject", "humanIssuer", "humanClient", "humanAuthority")) origin.putNull(key);
+    var workflow=body.putObject("workflow"); workflow.put("v",1); workflow.put("kind","INACTIVITY"); workflow.put("workId",OPERATION);
+    workflow.put("action","SUSPEND"); workflow.put("rowDigest","b".repeat(64)); workflow.put("revision",0);
+    workflow.put("assignedMonths",24); workflow.put("lastActivity",1); workflow.put("dueAt",2); workflow.putNull("suspensionOperationId");
+    try { MaintenanceRequest.parse("deactivate", ID, body); }
+    catch (WebApplicationException refused) { fail("Reviewed bootstrap inactivity workflow rejected with status " + refused.getResponse().getStatus()); }
+    workflow.put("revision",Long.MAX_VALUE); MaintenanceRequest.parse("deactivate",ID,body);
+    for (var invalid : java.util.List.of(JSON.getNodeFactory().numberNode(-1), JSON.getNodeFactory().numberNode(new java.math.BigInteger("9223372036854775808")), JSON.getNodeFactory().textNode("0"))) {
+      var wrong=body.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("workflow")).set("revision",invalid);
+      try { MaintenanceRequest.parse("deactivate",ID,wrong); fail("Invalid revision accepted"); } catch (WebApplicationException expected) { assertEquals(400,expected.getResponse().getStatus()); }
+    }
+  }
+
   private static MaintenanceRequest accepted(String operation, String change) {
     try {
       return MaintenanceRequest.parse(operation, ID, parse(command(change)));

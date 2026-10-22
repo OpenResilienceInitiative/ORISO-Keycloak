@@ -63,6 +63,25 @@ public class GeneralPolicyTest {
     assertNotNull(new GeneralPolicy(absent));
   }
 
+  @Test
+  public void inactivityWorkflowGrantsAreExplicitClosedAndDefaultEmpty() {
+    var value = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    var grant = value.putArray("workflowOperations").addObject();
+    grant.put("kind", "INACTIVITY"); grant.putArray("targetProfiles").add("reviewed-consultant-v1");
+    grant.putArray("operations").add("account.reactivate").add("account.read").add("account.deactivate");
+    try { assertNotNull(new GeneralPolicy(value)); }
+    catch (WebApplicationException refused) { fail("Reviewed workflow grant rejected with status " + refused.getResponse().getStatus()); }
+    for (String extra : List.of("authority", "selfOnly", "subject")) {
+      var wrong = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) wrong.path("workflowOperations").path(0)).put(extra, "unreviewed"); rejectAdmin(wrong);
+    }
+    for (String op : List.of("*", "account.profile", "account.delete", "otp.read")) {
+      var wrong = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) wrong.path("workflowOperations").path(0)).putArray("operations").add(op); rejectAdmin(wrong);
+    }
+    var unknown = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) unknown.path("workflowOperations").path(0)).putArray("targetProfiles").add("protected-platform-v1"); rejectAdmin(unknown);
+    var duplicate = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ArrayNode) duplicate.path("workflowOperations")).add(grant.deepCopy()); rejectAdmin(duplicate);
+    var empty = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read"); empty.putArray("workflowOperations"); assertNotNull(new GeneralPolicy(empty));
+  }
+
   private static void rejectAdmin(JsonNode value) {
     try { new GeneralPolicy(value); fail("Unreviewed ordinary admin policy accepted"); }
     catch (WebApplicationException rejected) { assertEquals(400, rejected.getResponse().getStatus()); }

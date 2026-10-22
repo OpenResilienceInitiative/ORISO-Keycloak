@@ -122,6 +122,33 @@ public class ProtectedPeerPolicyTest {
     adopted.add(adopted.get(0).deepCopy()); assertRejected(duplicateAccount);
   }
 
+  @Test
+  public void protectedInactivityWorkflowGrantsAreSeparateFromHumanOperations() throws Exception {
+    var value = base(); var grant = value.putArray("workflowOperations").addObject();
+    grant.put("kind", "INACTIVITY"); grant.putArray("targetProfiles").add("platform-v1").add("tenant-v1");
+    grant.putArray("operations").add("account.reactivate").add("account.read").add("account.deactivate");
+    assertAccepted(value);
+    for (String extra : new String[]{"authority", "selfOnly", "subject"}) {
+      var wrong=value.deepCopy(); ((ObjectNode)wrong.path("workflowOperations").path(0)).put(extra,"unreviewed"); assertRejected(wrong);
+    }
+    for (String op : new String[]{"*", "account.profile", "account.delete", "otp.read"}) {
+      var wrong=value.deepCopy(); ((ObjectNode)wrong.path("workflowOperations").path(0)).putArray("operations").add(op); assertRejected(wrong);
+    }
+    var unknown=value.deepCopy(); ((ObjectNode)unknown.path("workflowOperations").path(0)).putArray("targetProfiles").add("missing"); assertRejected(unknown);
+    var duplicate=value.deepCopy(); ((ArrayNode)duplicate.path("workflowOperations")).add(grant.deepCopy()); assertRejected(duplicate);
+    var empty=base(); empty.putArray("workflowOperations"); assertAccepted(empty);
+  }
+
+  @Test
+  public void tenantReassignmentGrantIsPlatformOnlyForTenantProfile() throws Exception {
+    var value=base(); var grant=operationGrant("PLATFORM","tenant-v1");
+    grant.put("selfOnly",false); grant.putArray("operations").add("account.reassign-tenant");
+    ((ObjectNode)value.path("bindings").path(0)).putArray("accountOperations").add(grant); assertAccepted(value);
+    var self=value.deepCopy(); ((ObjectNode)self.path("bindings").path(0).path("accountOperations").path(0)).put("selfOnly",true); assertRejected(self);
+    var platform=value.deepCopy(); ((ObjectNode)platform.path("bindings").path(0).path("accountOperations").path(0)).putArray("targetProfiles").add("platform-v1"); assertRejected(platform);
+    var peer=configured(); grant=operationGrant("TENANT_PEER","tenant-v1"); grant.put("selfOnly",false); grant.putArray("operations").add("account.reassign-tenant"); policy(peer).putArray("accountOperations").add(grant); assertRejected(peer);
+  }
+
   private ObjectNode base() throws Exception {
     try(var input=getClass().getResourceAsStream("/protected-peer-policy-installation.json")) {
       assertNotNull(input); return (ObjectNode)LifecycleJson.JSON.readTree(input);
