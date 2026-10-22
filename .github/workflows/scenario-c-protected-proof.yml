@@ -107,6 +107,8 @@ jobs:
       max-parallel: 2
       matrix:
         case:
+          - committed-peer-policy-withdrawal
+          - committed-peer-policy-revision
           - committed-own-tenant-peer-cancel
           - committed-own-tenant-peer
           - binding-rollback-only-unavailable
@@ -177,6 +179,12 @@ jobs:
                 python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_ordering.py \
                   --report keycloak-image/account-lifecycle-spi/proof-output/commit-ordering-readiness.json ;;
             esac
+          elif [ "$PROTECTED_INSTALLATION_CASE" = committed-peer-policy-withdrawal ] ||
+               [ "$PROTECTED_INSTALLATION_CASE" = committed-peer-policy-revision ]; then
+            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
+              -p test_protected_peer_policy_controls.py -q
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_peer_policy.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/peer-policy-restart.json
           elif [ "$PROTECTED_INSTALLATION_CASE" = committed-own-tenant-peer-cancel ]; then
             python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
               -p test_protected_peer_cancel_controls.py -q
