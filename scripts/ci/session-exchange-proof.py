@@ -25,11 +25,49 @@ sys.dont_write_bytecode = True
 HELPER_SHA = "37d29adc5e8e31aac9467e1ca1c1587b2d84db6239ea79f016cd0442f7916fec"
 LEASE_MIB, CONTAINER_MIB = 3152, 1024
 USER_SUITE = "de.caritas.cob.userservice.api.config.auth.SessionExchangeTokenBoundaryTest"
+USER_SUITES = {
+    USER_SUITE: 3,
+    "de.caritas.cob.userservice.api.service.auth.MagicLinkLoginServiceTest": 41,
+    "de.caritas.cob.userservice.api.adapters.keycloak.KeycloakIdentitySessionExchangeTest": 16,
+}
 NATIVE_SUITE = "session_exchange_native.SessionExchangeNative"
 USER_FILES = (
     "src/main/java/de/caritas/cob/userservice/api/config/auth/TaskActorTokenBroker.java",
     "src/test/java/de/caritas/cob/userservice/api/config/auth/SessionExchangeTokenBoundaryTest.java",
+    "src/main/java/de/caritas/cob/userservice/api/adapters/keycloak/KeycloakIdentitySessionExchange.java",
+    "src/main/java/de/caritas/cob/userservice/api/adapters/keycloak/lifecycle/AccountLifecycleCodec.java",
+    "src/main/java/de/caritas/cob/userservice/api/port/out/IdentitySessionExchange.java",
+    "src/main/java/de/caritas/cob/userservice/api/service/auth/MagicLinkLoginService.java",
+    "src/main/java/de/caritas/cob/userservice/api/service/auth/OneTimeTokenStore.java",
+    "src/main/java/de/caritas/cob/userservice/api/service/auth/RedisOneTimeTokenStore.java",
+    "src/test/java/de/caritas/cob/userservice/api/service/auth/MagicLinkLoginServiceTest.java",
+    "src/test/java/de/caritas/cob/userservice/api/service/auth/RedisOneTimeTokenStoreIT.java",
+    "src/test/java/de/caritas/cob/userservice/api/adapters/keycloak/KeycloakIdentitySessionExchangeTest.java",
 )
+
+
+def user_inventory(suites):
+    if set(suites) != set(USER_SUITES):
+        raise RuntimeError("Exact selected user suites required")
+    failures = 0
+    for name, expected in USER_SUITES.items():
+        counts = suites[name]
+        if (set(counts) != {"tests","failures","errors","skipped"}
+                or any(type(value) is not int or value < 0 for value in counts.values())
+                or counts["tests"] != expected or counts["errors"] or counts["skipped"]
+                or counts["failures"] > expected):
+            raise RuntimeError("Complete scoped user inventory required")
+        failures += counts["failures"]
+    return failures
+
+
+def user_classification(suites, exit_code):
+    failures = user_inventory(suites)
+    if type(exit_code) is int and exit_code == 0 and failures == 0:
+        return "USER_FOCUSED_GREEN"
+    if type(exit_code) is int and exit_code == 1 and failures > 0:
+        return "USER_ASSERTION_RED"
+    return "USER_SETUP_OR_INCONCLUSIVE"
 
 
 def load(name, path):
@@ -399,24 +437,21 @@ def main():
                 return 1
             compiled = user / "target/test-classes" / Path(USER_SUITE.replace(".", "/") + ".class")
             report["compiledTestSHA256"] = hashlib.sha256(compiled.read_bytes()).hexdigest()
+            report["compiledTests"] = {name:hashlib.sha256((user/"target/test-classes"/
+                Path(name.replace(".","/")+".class")).read_bytes()).hexdigest() for name in USER_SUITES}
             reports = user / "target/surefire-reports"
             if reports.exists():
                 raise RuntimeError("Fresh user XML directory required")
             report["executedGroupNames"].append("user-tests")
-            report["testExit"] = support.bounded([*common, "-DspotlessFiles=" + scoped, "-Dtest=" + USER_SUITE,
+            report["testExit"] = support.bounded([*common, "-DspotlessFiles=" + scoped, "-Dtest=" + ",".join(USER_SUITES),
                 "-DfailIfNoTests=true", "-DforkCount=1", "-DreuseForks=false",
                 "-DargLine=-Xmx384m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2", "surefire:test"],
                 user, env, private / "user-tests.log", 240, overall)
             if report["testExit"]:
                 report["testDiagnostics"] = compile_diagnostics(private/"user-tests.log")
             report["suites"] = safe_xml(reports, out)
-            if set(report["suites"]) != {USER_SUITE}:
-                raise RuntimeError("Exact selected user suite required")
-            counts = report["suites"][USER_SUITE]
-            if counts["tests"] != 3 or counts["errors"] or counts["skipped"]:
-                raise RuntimeError("Complete three-case user inventory required")
-            report["classification"] = "USER_ASSERTION_RED" if counts["failures"] else "USER_FOCUSED_GREEN"
-            status = int(bool(counts["failures"]))
+            report["classification"] = user_classification(report["suites"],report["testExit"])
+            status = int(report["classification"] != "USER_FOCUSED_GREEN")
         else:
             module = root / "keycloak-image/account-lifecycle-spi"
             otp = root / "keycloak-image/otp-config-spi"

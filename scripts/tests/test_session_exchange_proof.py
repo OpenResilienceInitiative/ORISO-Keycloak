@@ -158,4 +158,24 @@ class SessionProofControls(unittest.TestCase):
             self.assertFalse(p.runtime_known(bad))
 
 
+    def test_user_inventory_preserves_three_original_and_all_adjacent_cases(self):
+        good={name:{"tests":count,"failures":0,"errors":0,"skipped":0} for name,count in p.USER_SUITES.items()}
+        self.assertEqual(60,sum(x["tests"] for x in good.values()))
+        self.assertEqual(0,p.user_inventory(good))
+        red=copy.deepcopy(good);red[p.USER_SUITE]["failures"]=1
+        self.assertEqual(1,p.user_inventory(red))
+        for mutate in (lambda x:x.pop(p.USER_SUITE),lambda x:x.update(unknown=x[p.USER_SUITE]),
+                       lambda x:x[p.USER_SUITE].update(tests=2),lambda x:x[p.USER_SUITE].update(tests=True),
+                       lambda x:x[p.USER_SUITE].update(errors=1),lambda x:x[p.USER_SUITE].update(skipped=1)):
+            bad=copy.deepcopy(good);mutate(bad)
+            with self.assertRaises(RuntimeError):p.user_inventory(bad)
+
+    def test_user_exit_must_agree_with_xml_before_any_green_or_red_credit(self):
+        green={name:{"tests":count,"failures":0,"errors":0,"skipped":0} for name,count in p.USER_SUITES.items()}
+        red=copy.deepcopy(green);red[p.USER_SUITE]["failures"]=1
+        self.assertEqual("USER_FOCUSED_GREEN",p.user_classification(green,0))
+        self.assertEqual("USER_ASSERTION_RED",p.user_classification(red,1))
+        for counts,status in ((green,1),(red,0),(green,124),(red,124),(green,-9),(red,-9),(green,True),(red,True),(green,None)):
+            self.assertEqual("USER_SETUP_OR_INCONCLUSIVE",p.user_classification(counts,status))
+
 if __name__ == "__main__": unittest.main()
