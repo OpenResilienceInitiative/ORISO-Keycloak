@@ -7,7 +7,6 @@ from pathlib import Path
 from protected_otp_bootstrap import BootstrapFixture, BootstrapRead, classify
 from run_protected import source_manifest
 from run_protected_readiness import main
-from otp_writer_fixture import delegate_observations
 
 WRITER_FACTS = ("inflightCancelBlockedByActualWriter", "inflightWriterCommittedAfterDefaultSmtp",
                 "inflightBarrierDidNotExpire", "inflightCompanionJarStable", "inflightOneActualSmtp")
@@ -59,7 +58,7 @@ if __name__ == "__main__":
                 "otpJarSHA256": jar_before, "bothProvidersStable": jar_before == digest(jar) and before == source_manifest(otp),
                 "bootstrapWorkflowSHA256": workflow_before, "bootstrapWorkflowStable": workflow_before == digest(workflow),
                 "writerCompanionSourceManifest": companion_sources, "writerCompanionJarSHA256": companion_before,
-                "nativeDelegateObservation": delegate_observations(BootstrapFixture),
+                "nativeDelegateObservation": BootstrapRead.observation.get("nativeDelegateObservation"),
                 "writerCompanionJarStable": companion_before == digest(companion), "expectedNativeBoots": 2,
                 "boundary": "Fixture-only SMTP observer delegates actual pinned default provider; native product authority/JARs unchanged. No final product-image or User cleanup release credit."}
     raise SystemExit(main(fixture=BootstrapFixture, test_class=BootstrapRead,

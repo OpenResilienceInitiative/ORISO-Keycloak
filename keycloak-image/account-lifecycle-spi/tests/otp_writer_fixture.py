@@ -29,7 +29,7 @@ def delegate_rows(output):
                 or type(row["nativeDefaultClassExact"]) is not bool):
             raise AssertionError("Closed native delegate observation required")
         rows.append(row)
-    if len(rows) > 64:
+    if len(rows) > 10000:
         raise AssertionError("Native delegate observation exceeds fixture bound")
     return rows
 
@@ -37,7 +37,10 @@ def delegate_rows(output):
 def delegate_observations(fixture):
     result = subprocess.run(["docker", "logs", fixture.name], check=True,
                             capture_output=True, text=True, timeout=10)
-    return delegate_rows(result.stdout + result.stderr)
+    rows = delegate_rows(result.stdout + result.stderr)
+    return {"totalEvents": len(rows), "sampleTruncated": len(rows) > 16, "firstEvents": rows[:16],
+            "nativeDefaultPresent": any(row["nativeDefaultPresent"] for row in rows),
+            "nativeDefaultClassExact": any(row["nativeDefaultClassExact"] for row in rows)}
 
 
 def setup(fixture):

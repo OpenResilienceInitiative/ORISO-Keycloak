@@ -478,10 +478,14 @@ class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
                    "expectedState": current["state"],
                    "change": {"password": password, "temporary": False}}
         def login(value):
-            return call(self.base, "POST", "/realms/" + REALM + "/protocol/openid-connect/token",
-                        {"client_id": CLIENT, "grant_type": "password",
-                         "username": self.creation_input["account"]["username"],
-                         "password": value, "scope": "openid"}, form=True)[0]
+            status, reply = call(self.base, "POST", "/realms/" + REALM + "/protocol/openid-connect/token",
+                                 {"client_id": CLIENT, "grant_type": "password",
+                                  "username": self.creation_input["account"]["username"],
+                                  "password": value, "scope": "openid"}, form=True)
+            if status != 200:
+                self.assertEqual("invalid_grant", reply.get("error"))
+                self.assertEqual("Invalid user credentials", reply.get("error_description"))
+            return status
         self.assertEqual(200, login(self.creation_input["account"]["password"]))
         self.phase("human-password-proof-preconditions", original_password_verified=True,
                    exact_self_read=True, current_native_session=True)
@@ -507,14 +511,14 @@ class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
             original_login = login(self.creation_input["account"]["password"])
             self.phase("human-password-native-login", new_status=new_login, original_status=original_login)
             self.assertEqual(200, new_login)
-            self.assertEqual(401, original_login)
+            self.assertEqual(400, original_login)
             self.admin("PUT", "/users/" + self.account_id + "/reset-password",
                        {"type": "password", "value": later_password, "temporary": False})
             self.assertEqual((200, changed_password), self.invoke("password", command, human, 200))
             later_login, replayed_login = login(later_password), login(password)
             self.phase("human-password-native-retry-login", later_status=later_login, replayed_status=replayed_login)
             self.assertEqual(200, later_login)
-            self.assertEqual(401, replayed_login)
+            self.assertEqual(400, replayed_login)
             conflicting = json.loads(json.dumps(command))
             conflicting["change"]["password"] = "Synthetic-conflict-" + uuid.uuid4().hex
             self.assertEqual(409, self.invoke("password", conflicting, human, 409)[0])

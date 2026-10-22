@@ -77,7 +77,10 @@ class WriterControls(unittest.TestCase):
     def test_companion_remains_outside_product_and_delegates_native_smtp(self):
         tests = Path(__file__).parent
         source = (tests / "native-otp-writer-fixture/src/org/oriso/keycloak/lifecycle/proof/OtpWriterFixtureFactory.java").read_text()
-        self.assertIn('session.getProvider(EmailSenderProvider.class, "default")', source)
+        self.assertIn('new DefaultEmailSenderProviderFactory()', source)
+        self.assertIn('nativeFactory.init(scope)', source)
+        self.assertIn('nativeFactory.create(session)', source)
+        self.assertIn('public void close() { delegate.close(); }', source)
         self.assertIn('org.keycloak.email.DefaultEmailSenderProvider', source)
         self.assertIn('select SESSION_ID()', source)
         self.assertIn('where BLOCKER_ID=:writer', source)

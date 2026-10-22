@@ -159,7 +159,11 @@ class BootstrapRead(unittest.TestCase):
     observation = {}
 
     def clean_native(self):
-        BootstrapFixture.doClassCleanups()
+        try:
+            if getattr(BootstrapFixture, "writer_enabled", False):
+                self.observation["nativeDelegateObservation"] = otp_writer_fixture.delegate_observations(BootstrapFixture)
+        finally:
+            BootstrapFixture.doClassCleanups()
         self.assertEqual([], BootstrapFixture.tearDown_exceptions)
 
     def test_actual_pending_protected_claim_prepares_original_otp_route(self):

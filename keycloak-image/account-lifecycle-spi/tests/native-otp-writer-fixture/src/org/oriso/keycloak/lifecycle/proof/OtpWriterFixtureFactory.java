@@ -13,6 +13,7 @@ import org.keycloak.connections.jpa.JpaConnectionProvider;
 import org.keycloak.email.EmailException;
 import org.keycloak.email.EmailSenderProvider;
 import org.keycloak.email.EmailSenderProviderFactory;
+import org.keycloak.email.DefaultEmailSenderProviderFactory;
 import org.keycloak.models.AbstractKeycloakTransaction;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
@@ -22,19 +23,22 @@ import org.keycloak.models.UserModel;
 public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory {
   private static final Path CONTROL = Path.of("/opt/keycloak/proof-otp-writer/control.json");
   private static final String PREFIX = "ORISO_PROOF_OTP_WRITER_V1 ";
-  public EmailSenderProvider create(KeycloakSession session) { return new Sender(session); }
-  public void init(Config.Scope ignored) {}
-  public void postInit(KeycloakSessionFactory ignored) {}
+  private final DefaultEmailSenderProviderFactory nativeFactory = new DefaultEmailSenderProviderFactory();
+  public EmailSenderProvider create(KeycloakSession session) {
+    delegateObservation("CONSTRUCTION_ENTERED", false, false);
+    return new Sender(session, nativeFactory.create(session));
+  }
+  public void init(Config.Scope scope) { nativeFactory.init(scope); }
+  public void postInit(KeycloakSessionFactory factory) { nativeFactory.postInit(factory); }
   public String getId() { return "oriso-proof-otp-writer"; }
-  public void close() {}
+  public void close() { nativeFactory.close(); }
 
   private static final class Sender implements EmailSenderProvider {
     private final KeycloakSession session;
     private final EmailSenderProvider delegate;
-    Sender(KeycloakSession session) {
+    Sender(KeycloakSession session, EmailSenderProvider nativeDelegate) {
       this.session = session;
-      delegateObservation("CONSTRUCTION_ENTERED", false, false);
-      delegate = session.getProvider(EmailSenderProvider.class, "default");
+      delegate = nativeDelegate;
       delegateObservation("CONSTRUCTED", delegate != null, delegate != null
           && "org.keycloak.email.DefaultEmailSenderProvider".equals(delegate.getClass().getName()));
       if (delegate == null || !"org.keycloak.email.DefaultEmailSenderProvider".equals(delegate.getClass().getName()))
@@ -116,7 +120,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
         throw new IllegalStateException("Native writer witness unavailable");
       }
     }
-    public void close() {} // Session independently owns and closes the cached native delegate.
+    public void close() { delegate.close(); }
   }
 
   private static void delegateObservation(String phase, boolean present, boolean exact) {
