@@ -7,7 +7,7 @@ import time
 import unittest
 import uuid
 
-from lifecycle_fixture import ACTORS, SUBJECTS, REALM, call
+from lifecycle_fixture import ACTORS, SUBJECTS, REALM, call, mac
 from protected_binding_readiness import NativeFixture, config_values, inspect_owned
 from protected_resources import require_active
 
@@ -79,6 +79,7 @@ REQUIRED = (
     "actualPeerUserinfoAndCurrentSessionVerified",
     "sameRuntimeWithoutPerPersonBindingOrRestartVerified",
     "peerApprovalAccountCountUnchanged",
+    "currentTenantGrantAndDirectGroupDriftDenied",
 )
 
 
@@ -254,6 +255,55 @@ class PeerReadiness(unittest.TestCase):
         self.assertEqual(child, receipt["approvalId"])
         self.assertEqual(result["scopeDigest"], receipt["scopeDigest"])
         observed["exactPeerIssuedReceiptVerified"] = True
+        # A previously valid native bearer cannot outlive current own-tenant,
+        # direct-group or inherited-grant drift. Restore the exact original
+        # native values after each isolated denial; no new policy/account/grant.
+        drift_rows = []
+        original_native = helper.admin("GET", "/users/" + account)
+        original_groups = helper.admin("GET", "/users/" + account + "/groups")
+        role = helper.admin("GET", "/roles/tenant-admin")
+
+        def denied_after_current_mutation(name):
+            denied_id, denied_scope = str(uuid.uuid4()), helper.scope()
+            request = {"scope": denied_scope}
+            status, _ = call(helper.base, "PUT", helper.endpoint(denied_id), request, bearer)
+            query = {"scopeDigest": None, "workflowId": denied_scope["workflowId"],
+                "inviteId": denied_scope["inviteId"], "authorizationRevision": 1, "attemptId": None,
+                "approvalRequestDigest": mac("protected-approval-request/v1", {
+                    "request": request, "issuerRealm": PeerFixture.realm_id, "issuerSubject": account})}
+            absent, _ = helper.protected_machine_request("status", denied_id, query)
+            drift_rows.append({"mutation": name, "status": status, "approvalStatus": absent})
+            self.assertEqual(403, status)
+            self.assertEqual(404, absent)
+            self.assertEqual(count, helper.admin("GET", "/users/count"))
+
+        changed = copy.deepcopy(original_native)
+        changed["attributes"]["tenantId"] = [str(TENANT + 1)]
+        try:
+            helper.admin("PUT", "/users/" + account, changed)
+            self.assertEqual([str(TENANT + 1)], helper.admin("GET", "/users/" + account)["attributes"]["tenantId"])
+            denied_after_current_mutation("actual-native-tenant")
+        finally:
+            helper.admin("PUT", "/users/" + account, original_native)
+        try:
+            helper.admin("DELETE", "/users/" + account + "/groups/" + PeerFixture.peer_group_id)
+            self.assertEqual([], helper.admin("GET", "/users/" + account + "/groups"))
+            denied_after_current_mutation("actual-native-direct-group")
+        finally:
+            helper.admin("PUT", "/users/" + account + "/groups/" + PeerFixture.peer_group_id)
+        try:
+            helper.admin("DELETE", "/groups/" + PeerFixture.peer_group_id + "/role-mappings/realm", [role])
+            self.assertEqual([], helper.admin("GET", "/users/" + account + "/role-mappings/realm/composite"))
+            denied_after_current_mutation("actual-native-inherited-grant")
+        finally:
+            helper.admin("POST", "/groups/" + PeerFixture.peer_group_id + "/role-mappings/realm", [role])
+        self.assertEqual(original_native, helper.admin("GET", "/users/" + account))
+        self.assertEqual(original_groups, helper.admin("GET", "/users/" + account + "/groups"))
+        fresh_bearer = self.peer_human(helper, original_native, create["account"]["password"])
+        restored_status, _ = call(helper.base, "PUT", helper.endpoint(str(uuid.uuid4())), {"scope": helper.scope()}, fresh_bearer)
+        self.assertEqual(201, restored_status)
+        observed["currentNativeDriftDenials"] = drift_rows
+        observed["currentTenantGrantAndDirectGroupDriftDenied"] = True
         # Transient test-only context for a distinct public cancellation tracer.
         self.peer_case = (helper, account, bearer, child, child_scope, result)
         self.peer_origin = (approval, attempt, create, commit, terminal)
