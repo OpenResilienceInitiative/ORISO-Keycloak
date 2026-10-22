@@ -22,6 +22,53 @@ public class GeneralPolicyTest {
   }
 
   @Test
+  public void explicitOrdinaryAdministrationNeedsClosedReviewedProfilesAndOperations() {
+    var value = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    var grant = value.putArray("adminOperations").addObject();
+    grant.put("authority", "TENANT_PEER");
+    grant.putArray("targetProfiles").add("reviewed-consultant-v1");
+    grant.putArray("operations").add("account.read").add("account.profile").add("account.email")
+        .add("account.ordinary-profile").add("account.deactivate").add("account.reactivate");
+    grant.put("selfOnly", false);
+    try { assertNotNull(new GeneralPolicy(value)); }
+    catch (WebApplicationException rejected) {
+      fail("Exact independently reviewed ordinary administration rejected with status "
+          + rejected.getResponse().getStatus());
+    }
+    var platform = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)platform.path("adminOperations").path(0)).put("authority", "PLATFORM");
+    assertNotNull(new GeneralPolicy(platform));
+    for (String field : java.util.List.of("authority", "targetProfiles", "operations", "selfOnly")) {
+      var missing = value.deepCopy();
+      ((com.fasterxml.jackson.databind.node.ObjectNode)missing.path("adminOperations").path(0)).remove(field);
+      rejectAdmin(missing);
+    }
+    for (String op : java.util.List.of("*", "account.*", "otp.read", "account.password", "protected.approve")) {
+      var foreign = value.deepCopy();
+      ((com.fasterxml.jackson.databind.node.ObjectNode)foreign.path("adminOperations").path(0)).putArray("operations").add(op);
+      rejectAdmin(foreign);
+    }
+    var foreignProfile = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)foreignProfile.path("adminOperations").path(0)).putArray("targetProfiles").add("protected-platform-v1");
+    rejectAdmin(foreignProfile);
+    var self = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)self.path("adminOperations").path(0)).put("selfOnly", true);
+    rejectAdmin(self);
+    var duplicate = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ArrayNode)duplicate.path("adminOperations")).add(grant.deepCopy());
+    rejectAdmin(duplicate);
+    var absent = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    assertNotNull(new GeneralPolicy(absent));
+    absent.putArray("adminOperations");
+    assertNotNull(new GeneralPolicy(absent));
+  }
+
+  private static void rejectAdmin(JsonNode value) {
+    try { new GeneralPolicy(value); fail("Unreviewed ordinary admin policy accepted"); }
+    catch (WebApplicationException rejected) { assertEquals(400, rejected.getResponse().getStatus()); }
+  }
+
+  @Test
   public void unknownAndWildcardSelectorsAreRejected() {
     rejected("unknown");
     rejected("*");

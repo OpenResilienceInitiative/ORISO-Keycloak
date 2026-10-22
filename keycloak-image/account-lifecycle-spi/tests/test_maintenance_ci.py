@@ -37,11 +37,11 @@ class MaintenanceEvidenceGate(unittest.TestCase):
                     ET.SubElement(case, "error", message="private-do-not-copy").text = "private-do-not-copy"
             ET.ElementTree(suite).write(self.reports / ("TEST-" + name + ".xml"))
 
-    def test_exact_composed_forty_six_successes_are_required(self):
+    def test_exact_composed_forty_seven_successes_are_required(self):
         self.units()
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertTrue(result["accepted"])
-        self.assertEqual(46, result["tests"])
+        self.assertEqual(47, result["tests"])
 
     def test_missing_reports_cannot_pass(self):
         self.assertFalse(sanitize_units(self.reports, self.root / "safe.xml")["accepted"])
@@ -57,7 +57,7 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertFalse(result["accepted"])
         self.assertNotIn("private-do-not-copy", (self.root / "safe.xml").read_text())
-        self.assertEqual(46, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
+        self.assertEqual(47, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
 
     def test_suite_counters_cannot_hide_a_failure_without_a_method_node(self):
         self.units()
