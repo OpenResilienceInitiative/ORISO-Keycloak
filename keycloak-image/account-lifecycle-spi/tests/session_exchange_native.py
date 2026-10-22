@@ -12,6 +12,7 @@ import unittest
 from urllib.parse import quote
 import uuid
 import lifecycle_fixture as native
+from maintenance_human_fixture import HumanMaintenanceFixture
 
 OBSERVATIONS = {
     "fixtureClaimOnly": True, "fiveActorsExact": False, "adminNoDirectGrant": False,
@@ -48,6 +49,10 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
 
     def setUp(self):
         source = json.loads((Path(__file__).resolve().parents[3] / "realm.json").read_text())
+        self.source_app = next(client for client in source["clients"] if client["clientId"] == "app")
+        source_scope_names = set(self.source_app["defaultClientScopes"]+self.source_app["optionalClientScopes"])
+        source_scopes = [scope for scope in source["clientScopes"] if scope["name"] in source_scope_names]
+        self.assertEqual(source_scope_names,{scope["name"] for scope in source_scopes})
         aliases = {"direct-grant-2fa"}
         flows = source["authenticationFlows"]
         changed = True
@@ -72,7 +77,7 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             if method == "POST" and path == "/admin/realms":
                 self.assertFalse(imported)
                 imported.append(True)
-                body = {**body, "authenticationFlows": selected,
+                body = {**body, "clientScopes": source_scopes, "authenticationFlows": selected,
                         "authenticatorConfig": source.get("authenticatorConfig", []),
                         "directGrantFlow": "direct-grant-2fa"}
             return original(base, method, path, body, token, form, proof)
@@ -104,21 +109,64 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
         status, _ = native.call(self.base, "GET", "/admin/realms/" + native.REALM + "/users", token=actor)
         self.assertEqual(403, status)
         OBSERVATIONS["adminCannotQueryUsers"] = True
-        self.admin("POST", "/clients", {
-            "clientId": "app", "enabled": True, "publicClient": True,
-            "standardFlowEnabled": True, "directAccessGrantsEnabled": True,
-            "serviceAccountsEnabled": False, "fullScopeAllowed": False,
-            "defaultClientScopes": [], "optionalClientScopes": [], "protocol": "openid-connect",
-        })
-        username = "s1-native-" + uuid.uuid4().hex
-        password = "synthetic-s1-password-" + uuid.uuid4().hex
-        self.admin("POST", "/users", {
-            "username": username, "enabled": True,
-            "attributes": {"tenantId": ["7"]}, "groups": ["/human-roles/user"],
-            "credentials": [{"type": "password", "temporary": False, "value": password}],
-        })
-        target = self.admin("GET", "/users?username=" + quote(username) + "&exact=true")[0]
-        self.assertEqual(["7"], target["attributes"]["tenantId"])
+        # Authentication-relevant app configuration comes from the exact current realm source.
+        app_fields = ("clientId","enabled","publicClient","standardFlowEnabled",
+                      "directAccessGrantsEnabled","serviceAccountsEnabled","fullScopeAllowed",
+                      "defaultClientScopes","optionalClientScopes","protocol","consentRequired",
+                      "authenticationFlowBindingOverrides","attributes")
+        app = {key:self.source_app[key] for key in app_fields}
+        self.admin("POST", "/clients", app)
+        current_app = self.admin("GET", "/clients?clientId=app")[0]
+        for field in app_fields:
+            expected,actual = app[field],current_app[field]
+            if field == "attributes":
+                # Native derived metadata is not an app authentication setting.
+                actual = {key:actual.get(key) for key in expected}
+            if field in {"defaultClientScopes","optionalClientScopes"}:
+                expected,actual = set(expected),set(actual)
+            self.assertEqual(expected,actual)
+        # This setup matches HumanMaintenanceFixture's proven managed-profile preparation.
+        profile = self.admin("GET", "/users/profile")
+        tenant_attribute = {
+            "name": "tenantId", "multivalued": False,
+            "permissions": {"view": ["admin", "user"], "edit": ["admin"]},
+            "validations": {"pattern": {"pattern": "0|[1-9][0-9]{0,18}"}},
+        }
+        self.assertFalse(any(item["name"] == "tenantId" for item in profile["attributes"]))
+        profile["attributes"].append(tenant_attribute)
+        if not any(item["name"] == "locale" for item in profile["attributes"]):
+            profile["attributes"].append({
+                "name": "locale", "multivalued": False,
+                "permissions": {"view": ["admin", "user"], "edit": ["admin", "user"]},
+                "validations": {"pattern": {"pattern": "de|fr|it"}},
+            })
+        self.admin("PUT", "/users/profile", profile)
+        current_profile = self.admin("GET", "/users/profile")
+        current_tenant = [item for item in current_profile["attributes"] if item["name"] == "tenantId"]
+        self.assertEqual(1,len(current_tenant))
+        for field,value in tenant_attribute.items():
+            self.assertEqual(value,current_tenant[0][field])
+        # Reuse the already-GREEN native create/commit helpers, not an ad hoc admin-created user.
+        human_profile = HumanMaintenanceFixture.reviewed_human_profile()
+        attempt,creation = str(uuid.uuid4()),self.creation(kind=human_profile["kind"],group=human_profile["group"])
+        status,opened = self.request("create",attempt,creation)
+        self.assertEqual(201,status)
+        status,committed = self.request("commit",attempt,self.finish(creation,opened))
+        self.assertEqual(200,status)
+        self.assertEqual("COMMITTED",committed["state"])
+        target = self.admin("GET", "/users/"+opened["accountId"])
+        account = creation["account"]
+        for field in ("username","email","firstName","lastName"):
+            self.assertEqual(account[field],target[field])
+        self.assertTrue(target["enabled"])
+        self.assertIsNone(target.get("serviceAccountClientLink"))
+        self.assertFalse(target.get("requiredActions"))
+        self.assertEqual([creation["identity"]["scope"]["tenantId"]],target["attributes"]["tenantId"])
+        current_roles = self.admin("GET", "/users/"+target["id"]+"/role-mappings/realm/composite")
+        self.assertEqual(set(human_profile["roles"]),{role["name"] for role in current_roles})
+        groups = self.admin("GET", "/users/"+target["id"]+"/groups")
+        self.assertEqual({self.group_id("/human-roles/"+human_profile["group"])},{group["id"] for group in groups})
+        username,password = account["username"],account["password"]
         token_path = "/realms/" + native.REALM + "/protocol/openid-connect/token"
         status, ordinary = native.call(self.base, "POST", token_path, {
             "client_id": "app", "grant_type": "password", "username": username,
@@ -145,7 +193,7 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
             and step["providerId"] != "oriso-claimed-magic-link"))
         workflow = str(uuid.uuid4())
         body = {"version": 1, "workflowId": workflow, "targetUserId": target["id"],
-                "tenantId": 7, "clientId": "app", "expiresAt": int(time.time()) + 900,
+                "tenantId": int(creation["identity"]["scope"]["tenantId"]), "clientId": "app", "expiresAt": int(time.time()) + 900,
                 "claimDigest": native.mac("magic-link-capability/v1", {
                     "workflowId": workflow, "token": uuid.uuid4().hex + uuid.uuid4().hex})}
         signed = proof(body, self.realm_id)

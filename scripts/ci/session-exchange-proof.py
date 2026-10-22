@@ -368,10 +368,12 @@ def main():
             if reports.exists():
                 raise RuntimeError("Fresh user XML directory required")
             report["executedGroupNames"].append("user-tests")
-            report["testExit"] = support.bounded([*common, "-Dtest=" + USER_SUITE,
+            report["testExit"] = support.bounded([*common, "-DspotlessFiles=" + scoped, "-Dtest=" + USER_SUITE,
                 "-DfailIfNoTests=true", "-DforkCount=1", "-DreuseForks=false",
-                "-DargLine=-Xmx384m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2", "test"],
+                "-DargLine=-Xmx384m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2", "surefire:test"],
                 user, env, private / "user-tests.log", 240, overall)
+            if report["testExit"]:
+                report["testDiagnostics"] = compile_diagnostics(private/"user-tests.log")
             report["suites"] = safe_xml(reports, out)
             if set(report["suites"]) != {USER_SUITE}:
                 raise RuntimeError("Exact selected user suite required")
