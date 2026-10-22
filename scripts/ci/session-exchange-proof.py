@@ -42,6 +42,7 @@ USER_FILES = (
     "src/main/java/de/caritas/cob/userservice/api/adapters/keycloak/KeycloakIdentitySessionExchange.java",
     "src/main/java/de/caritas/cob/userservice/api/adapters/keycloak/lifecycle/AccountLifecycleCodec.java",
     "src/main/java/de/caritas/cob/userservice/api/port/out/IdentitySessionExchange.java",
+    "src/main/java/de/caritas/cob/userservice/api/port/out/MagicLinkCapabilityDigest.java",
     "src/main/java/de/caritas/cob/userservice/api/service/auth/MagicLinkLoginService.java",
     "src/main/java/de/caritas/cob/userservice/api/service/auth/OneTimeTokenStore.java",
     "src/main/java/de/caritas/cob/userservice/api/service/auth/RedisOneTimeTokenStore.java",
@@ -516,7 +517,8 @@ def main():
                 "de.caritas.cob.userservice.api.service.auth.RedisOneTimeTokenStore",
                 "de.caritas.cob.userservice.api.adapters.keycloak.KeycloakIdentitySessionExchange",
                 "de.caritas.cob.userservice.api.config.auth.TaskActorTokenBroker",
-                "de.caritas.cob.userservice.api.adapters.keycloak.lifecycle.AccountLifecycleCodec")}
+                "de.caritas.cob.userservice.api.adapters.keycloak.lifecycle.AccountLifecycleCodec",
+                "de.caritas.cob.userservice.api.port.out.MagicLinkCapabilityDigest")}
         if args.role == "user":
             reports = user / "target/surefire-reports"
             if reports.exists():

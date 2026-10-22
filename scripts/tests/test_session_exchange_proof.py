@@ -241,5 +241,10 @@ class SessionProofControls(unittest.TestCase):
         self.assertTrue(p.format_allowed([fixture],""))
         self.assertFalse(p.format_allowed([fixture.replace("Fixture.java","FixtureAdjacent.java")],""))
         self.assertFalse(p.format_allowed([fixture],"untracked.java"))
+        port="src/main/java/de/caritas/cob/userservice/api/port/out/MagicLinkCapabilityDigest.java"
+        self.assertIn(port,p.USER_FILES)
+        self.assertTrue(p.format_allowed([port],""))
+        self.assertFalse(p.format_allowed([port.replace("Digest.java","DigestAdjacent.java")],""))
+        self.assertFalse(p.format_allowed([port],"untracked.java"))
 
 if __name__ == "__main__": unittest.main()
