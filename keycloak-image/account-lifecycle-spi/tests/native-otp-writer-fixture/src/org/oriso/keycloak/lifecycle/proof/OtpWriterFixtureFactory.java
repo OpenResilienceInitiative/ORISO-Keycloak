@@ -167,6 +167,7 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
                 + java.util.regex.Pattern.quote(witness.realm) + "'\\}");
             var selector = realmSelector(sql, witness.realm);
             if (!sampled) {
+              sqlTemplate(sql);
               waitObservation(rows.size(), "BLOCKED".equals(row[1]),
                   row[2] instanceof Number blocker && blocker.longValue() == witness.connection,
                   ((Number) row[0]).longValue() != witness.connection,
@@ -199,6 +200,19 @@ public final class OtpWriterFixtureFactory implements EmailSenderProviderFactory
         "onlyRealmTable", table.matches("(public\\.)?realm(?: [a-z0-9_]+)?"),
         "singlePrimaryKeyPredicate", predicate.matches("(?:[a-z0-9_]+\\.)?id\\s*=\\s*\\?"),
         "onlyForUpdateAndExactRealmBind", tail.equals("{1: '" + realm + "'}"));
+  }
+
+  private static void sqlTemplate(String sql) {
+    // One fixture-only template, never the bound realm or any quoted/numeric literal.
+    String sanitized = sql.replaceAll("'(?:''|[^'])*'", "'<BOUND_REALM>'")
+        .replaceAll("(?<![a-z0-9_])[0-9]+(?![a-z0-9_])", "<BOUND_REALM>");
+    if (sanitized.length() > 16384 || !sanitized.startsWith("select ")
+        || !sanitized.contains(" from realm ") || sanitized.contains(";")
+        || sanitized.contains("--") || sanitized.contains("/*"))
+      throw new IllegalStateException("Sanitized SQL template unavailable");
+    try { System.out.println("ORISO_PROOF_OTP_SQL_TEMPLATE_V1 " + new ObjectMapper()
+        .writeValueAsString(Map.of("schema", 1, "template", sanitized))); }
+    catch (java.io.IOException failure) { throw new IllegalStateException("Sanitized SQL template unavailable"); }
   }
 
   private static void waitObservation(int count, boolean blocked, boolean blocker, boolean other,

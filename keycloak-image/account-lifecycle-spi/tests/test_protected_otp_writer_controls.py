@@ -102,7 +102,7 @@ class WriterControls(unittest.TestCase):
         self.assertEqual({"completed": True, "httpStatus": None}, future_observation(failed))
 
     def test_wait_observation_cannot_copy_sql_or_subject_and_has_closed_bounds(self):
-        from otp_writer_fixture import wait_rows
+        from otp_writer_fixture import wait_rows, sql_template
         import json
         row = dict(schema=1, rowCount=1, nativeBlockedState=True, capturedBlockerMatches=True,
                    otherSession=True, realmTable=True, forUpdate=True, realmParameterSuffix=True,
@@ -113,6 +113,14 @@ class WriterControls(unittest.TestCase):
             wait_rows("ORISO_PROOF_OTP_WAIT_V1 " + json.dumps(dict(row, statement="never-copy")))
         with self.assertRaises(AssertionError):
             wait_rows("ORISO_PROOF_OTP_WAIT_V1 " + json.dumps(dict(row, rowCount=1001)))
+        template = "select r.id from realm r where (r.id=?) for update {<BOUND_REALM>: '<BOUND_REALM>'}"
+        prefix = "ORISO_PROOF_OTP_SQL_TEMPLATE_V1 "
+        self.assertEqual(template, sql_template(prefix + json.dumps({"schema": 1, "template": template})))
+        for bad in (template.replace("'<BOUND_REALM>'", "'private-value'"), template + ";drop table realm", "x" * 16385):
+            with self.assertRaises(AssertionError):
+                sql_template(prefix + json.dumps({"schema": 1, "template": bad}))
+        with self.assertRaises(AssertionError):
+            sql_template((prefix + json.dumps({"schema": 1, "template": template}) + "\n") * 2)
 
     def test_companion_remains_outside_product_and_delegates_native_smtp(self):
         tests = Path(__file__).parent

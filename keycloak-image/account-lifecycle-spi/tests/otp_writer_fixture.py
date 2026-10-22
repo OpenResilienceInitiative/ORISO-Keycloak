@@ -3,6 +3,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -135,6 +136,21 @@ def wait_observations(fixture):
     return wait_rows(output.stdout + output.stderr)
 
 
+def sql_template(output):
+    prefix = "ORISO_PROOF_OTP_SQL_TEMPLATE_V1 "
+    rows = [json.loads(line.split(prefix, 1)[1]) for line in output.splitlines() if prefix in line]
+    if len(rows) != 1 or set(rows[0]) != {"schema", "template"} or rows[0]["schema"] != 1:
+        raise AssertionError("Exactly one sanitized native SQL template required")
+    value = rows[0]["template"]
+    if (not isinstance(value, str) or not 1 <= len(value) <= 16384
+            or not value.startswith("select ") or " from realm " not in value
+            or not re.fullmatch(r"[a-z0-9_ .,*()=?{}:<>'+\-/]+", value.replace("<BOUND_REALM>", "bound"))
+            or re.search(r"'(?!<BOUND_REALM>')[^']*'", value)
+            or "--" in value or "/*" in value):
+        raise AssertionError("Closed sanitized native SQL template required")
+    return value
+
+
 def observations(fixture):
     output = subprocess.run(["docker", "logs", fixture.name], check=True, capture_output=True, text=True, timeout=10)
     rows = []
@@ -202,6 +218,9 @@ def concurrent_start(fixture, control, start_request, cancel_request, observed):
         observed["inflightCancellationFutureAfterRelease"] = None if cancellation is None else future_observation(cancellation)
         observed["inflightNativeWriterEventsAfterRelease"] = observations(fixture)
         observed["inflightNativeWaitSample"] = wait_observations(fixture)
+        output = subprocess.run(["docker", "logs", fixture.name], check=True,
+                                capture_output=True, text=True, timeout=10)
+        observed["inflightSanitizedSqlTemplate"] = sql_template(output.stdout + output.stderr)
     ready = writer.result(timeout=1)
     cancelled = cancellation.result(timeout=1) if cancellation is not None else None
     deadline = time.monotonic() + 2

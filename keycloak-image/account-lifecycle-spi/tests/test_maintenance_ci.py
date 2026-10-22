@@ -107,10 +107,17 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         green = dict(base, nativeExitedNonzeroWithoutOom=False, bindingValidationSourceWitness=False,
                      driftHumanLoginStatus=200, selfStatus=503, otpStatus=503,
                      bothUnavailableNoStore=True, ordinaryMachineCreationReadDeleteVerified=True,
-                     wrongActorAndProofDeniedBeforeReadiness=True)
+                     wrongActorAndProofDeniedBeforeReadiness=True, exactNativeBindingCorrectionVerified=True,
+                     correctedBeforeRestartSelfStatus=503, correctedBeforeRestartOtpStatus=503,
+                     correctedRestartHumanLoginStatus=200, correctedRestartSelfStatus=200,
+                     correctedRestartOtpStatus=200, fourthBootSameImageJarConfigVolumeAndCaps=True)
         self.assertEqual("GREEN", classify(green))
         self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, bothUnavailableNoStore=False)))
         self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, ordinaryMachineCreationReadDeleteVerified=False)))
+        for key in ("exactNativeBindingCorrectionVerified", "fourthBootSameImageJarConfigVolumeAndCaps"):
+            self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, **{key: False})))
+        self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, correctedBeforeRestartSelfStatus=200)))
+        self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, correctedRestartSelfStatus=503)))
 
     def test_native_mount_identity_ignores_docker_listing_order_but_preserves_ownership(self):
         from maintenance_readiness import mounts
