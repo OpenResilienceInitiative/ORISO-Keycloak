@@ -146,6 +146,7 @@ class CommitReadiness(RollbackReadiness):
         helper = RollbackFixture("runTest")
         self.assertTrue(RollbackFixture.configuration_checked)
         self.assertEqual(2, len(RollbackFixture.native_image_ids))
+        bearer = helper.human()
         self.assertEqual(
             ["seed", "configured"], [p["stage"] for p in RollbackFixture.preconditions]
         )
@@ -155,7 +156,6 @@ class CommitReadiness(RollbackReadiness):
                 for p in RollbackFixture.preconditions
             )
         )
-        bearer = helper.human()
         for actor, (client, _) in ACTORS.items():
             clients = helper.admin("GET", "/clients?clientId=" + client)
             self.assertEqual(1, len(clients))

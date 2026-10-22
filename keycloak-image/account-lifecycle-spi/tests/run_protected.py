@@ -62,6 +62,7 @@ class SanitizedResult(unittest.TestResult):
             "protected_rollback_readiness.py",
             "protected_corrected_readiness.py",
             "protected_commit_readiness.py",
+            "protected_approval_replay_cases.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }
@@ -330,9 +331,9 @@ def main():
         suite = unittest.defaultTestLoader.loadTestsFromModule(tests)
         discovered = suite.countTestCases()
         summary["discovered"] = discovered
-        if discovered != 17:
+        if discovered != 18:
             raise AssertionError(
-                "Exactly seventeen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence/reconciliation cases required"
+                "Exactly eighteen protected HTTP approval/authority/cancel/status/proof/tombstone/expiry/create/read/commit/recover/abandon/compensate/fence/reconciliation/workflow cases required"
             )
 
         def deadline(signum, frame):
@@ -407,6 +408,9 @@ def main():
                 "creationReconciliationObservation": getattr(
                     fixture, "creation_reconciliation_observation", None
                 ),
+                "duplicateWorkflowObservation": getattr(
+                    fixture, "duplicate_workflow_observation", None
+                ),
             }
         )
         native = summary["nativeHumanPreconditions"]
@@ -455,6 +459,19 @@ def main():
             and len({v["control"] for v in summary["protectedProofControls"]}) == 14
             and all(v["status"] == 403 for v in summary["protectedProofControls"])
         )
+        duplicate = summary["duplicateWorkflowObservation"] or {}
+        valid_duplicate = duplicate.get("expectedDuplicateStatus") == 409 and all(
+            duplicate.get(k) is True
+            for k in (
+                "sameExactNativeHumanAndOriginalRequest",
+                "firstApprovalAndRequestMacVerified",
+                "differentCanonicalApprovalIds",
+                "originalApprovalUnchangedAfterCollision",
+                "duplicateApprovalAbsentAfterRollback",
+                "originalExactRetryStillImmutable",
+                "noAccountCreated",
+            )
+        )
         if (
             result.wasSuccessful()
             and result.testsRun == discovered
@@ -463,6 +480,8 @@ def main():
             and observation.get("actualStatus") == 201
             and observation.get("noAccountCreated") is True
             and valid_controls
+            and valid_duplicate
+            and duplicate.get("actualDuplicateStatus") == 409
             and valid_proof_controls
             and (summary["absentCancelObservation"] or {}).get("actualStatus") == 200
             and (summary["expiryObservation"] or {}).get("actualState") == "EXPIRED"
@@ -493,6 +512,22 @@ def main():
             is True
         ):
             summary["classification"] = "GREEN"
+        elif (
+            valid_preconditions
+            and valid_controls
+            and valid_proof_controls
+            and valid_duplicate
+            and duplicate.get("actualDuplicateStatus") == 503
+            and result.testsRun == discovered == 18
+            and len(result.failures) == 1
+            and not result.errors
+            and not result.skipped
+            and result.failures[0][0].id()
+            == "test_protected_invitations.ProtectedInvitations.test_duplicate_workflow_revision_conflicts_without_second_approval"
+        ):
+            summary["classification"] = (
+                "GENUINE_DUPLICATE_APPROVAL_WORKFLOW503_COUNTERFACTUAL_RED"
+            )
         elif (
             valid_preconditions
             and valid_controls
