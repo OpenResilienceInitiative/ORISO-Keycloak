@@ -119,7 +119,10 @@ final class ProtectedOtpBootstrap {
           || !"PREPARED".equals(prior.state)) conflict();
       deadline = Math.min(deadline, prior.authorityValidUntil);
     }
-    if (deadline <= now) deny();
+    // Exact PREPARED replay keeps its historical receipt bound; current machine and invitation
+    // provenance still authorize this read. A new preparation must have a live asserted deadline.
+    if (!Instant.parse(approvalRow.validUntil).isAfter(Instant.now())
+        || prior == null && deadline <= now) deny();
     if (realm.getComponentsStream(realm.getId(), "org.keycloak.storage.UserStorageProvider")
         .findAny().isPresent()) deny();
     var snapshot = AccountLifecycleResource.lockedSnapshot(em, account);
