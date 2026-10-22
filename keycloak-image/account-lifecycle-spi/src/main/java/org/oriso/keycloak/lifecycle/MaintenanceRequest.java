@@ -57,10 +57,7 @@ record MaintenanceRequest(
     if ("SELF".equals(kind) && !actualId.equals(subject)
         || "HUMAN_ADMIN".equals(kind) && authority == null) deny();
     String include = null;
-    boolean inactivity = body.has("workflow");
-    if (inactivity && read) fields(body, "target", "workflow");
-    else if (inactivity) fields(body, "target", "workflow", "operationId", "expectedState", "change");
-    else if (read && body.has("include")) {
+    if (read && body.has("include")) {
       include = text(body, "include", 40, false);
       if (!"TWO_FACTOR_STATUS_V1".equals(include) || !"HUMAN_ADMIN".equals(kind)
           || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority)) bad();
