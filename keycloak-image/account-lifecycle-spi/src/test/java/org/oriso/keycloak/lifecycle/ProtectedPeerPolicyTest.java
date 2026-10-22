@@ -12,16 +12,30 @@ public class ProtectedPeerPolicyTest {
   @Test
   public void existingExplicitPrimaryInstallationRemainsAcceptedWithoutPeerPolicies() throws Exception {
     assertAccepted(base());
+    var operations = base();
+    ((ObjectNode)operations.path("bindings").get(0)).putArray("accountOperations")
+        .add(operationGrant("PLATFORM", "platform-v1"));
+    operations.putArray("adoptedAccounts").addObject()
+        .put("accountId", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        .put("protectedProfileId", "platform-v1").put("profileVersion", 1);
+    assertAccepted(operations);
   }
 
   @Test
   public void anExplicitEmptyPolicySetRemainsNonDelegating() throws Exception {
     var value = base(); value.putArray("peerDelegationPolicies"); assertAccepted(value);
+    value.putArray("adoptedAccounts");
+    ((ObjectNode)value.path("bindings").get(0)).putArray("accountOperations"); assertAccepted(value);
   }
 
   @Test
   public void oneReviewedSourceProfileCanDeclareItsFiniteOwnTenantPeerPolicy() throws Exception {
     assertAccepted(configured());
+    var operations = configured();
+    policy(operations).putArray("accountOperations").add(operationGrant("TENANT_PEER", "tenant-v1"));
+    assertAccepted(operations);
+    assertEquals(LifecycleJson.canonical(new ProtectedInvitationConfiguration(configured()).peerPolicies.get("own-tenant-admin-v1").snapshot()),
+        LifecycleJson.canonical(new ProtectedInvitationConfiguration(operations).peerPolicies.get("own-tenant-admin-v1").snapshot()));
   }
 
   @Test
@@ -72,6 +86,34 @@ public class ProtectedPeerPolicyTest {
     var wrongType = configured(); wrongType.put("peerDelegationPolicies", "[]"); assertRejected(wrongType);
     for(long version : new long[]{0,-1}){var value=configured();policy(value).put("version",version);assertRejected(value);}
     var duplicateAudience = configured(); var sets=(ArrayNode)policy(duplicateAudience).path("audienceSets"); sets.add(sets.get(0).deepCopy()); assertRejected(duplicateAudience);
+    for(String operation : new String[]{"*", "otp.*", "account.create", "grant-role", "foreign.read"}) {
+      var value=configured(); var grant=operationGrant("TENANT_PEER", "tenant-v1");
+      grant.putArray("operations").add(operation); policy(value).putArray("accountOperations").add(grant); assertRejected(value);
+    }
+    for(String target : new String[]{"missing", "platform-v1"}) {
+      var value=configured(); policy(value).putArray("accountOperations").add(operationGrant("TENANT_PEER", target)); assertRejected(value);
+    }
+    var platformPeer=configured(); policy(platformPeer).putArray("accountOperations").add(operationGrant("PLATFORM", "tenant-v1")); assertRejected(platformPeer);
+    var unknown=configured(); var extra=operationGrant("TENANT_PEER", "tenant-v1"); extra.put("authorityFromApproval", true); policy(unknown).putArray("accountOperations").add(extra); assertRejected(unknown);
+    for(String profile : new String[]{"missing", "tenant-v1"}) {
+      var adoption=configured(); adoption.putArray("adoptedAccounts").addObject()
+          .put("accountId","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+          .put("protectedProfileId",profile).put("profileVersion",2); assertRejected(adoption);
+    }
+    var duplicate=configured(); var grant=operationGrant("TENANT_PEER","tenant-v1");
+    policy(duplicate).putArray("accountOperations").add(grant).add(grant.deepCopy()); assertRejected(duplicate);
+    var wrongBoolean=configured(); grant=operationGrant("TENANT_PEER","tenant-v1"); grant.put("selfOnly","true");
+    policy(wrongBoolean).putArray("accountOperations").add(grant); assertRejected(wrongBoolean);
+    var duplicateOperation=configured(); grant=operationGrant("TENANT_PEER","tenant-v1");
+    grant.putArray("operations").add("otp.read").add("otp.read");
+    policy(duplicateOperation).putArray("accountOperations").add(grant); assertRejected(duplicateOperation);
+    var wrongSubject=configured(); grant=operationGrant("TENANT_PEER","tenant-v1");
+    grant.putArray("targetSubjects").add("not-a-native-uuid");
+    policy(wrongSubject).putArray("accountOperations").add(grant); assertRejected(wrongSubject);
+    var duplicateAccount=base(); var adopted=duplicateAccount.putArray("adoptedAccounts");
+    adopted.addObject().put("accountId","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        .put("protectedProfileId","platform-v1").put("profileVersion",1);
+    adopted.add(adopted.get(0).deepCopy()); assertRejected(duplicateAccount);
   }
 
   private ObjectNode base() throws Exception {
@@ -86,6 +128,12 @@ public class ProtectedPeerPolicyTest {
          "humanClientIds":["protected-human-web"],"audienceSets":[["userservice"]],
          "protectedProfileIds":["tenant-v1"],"realmRoles":["tenant-admin"],"clientRoles":{}}
         """)); return value;
+  }
+  private ObjectNode operationGrant(String authority, String target) {
+    var grant=LifecycleJson.JSON.createObjectNode();grant.put("authority",authority);
+    grant.putArray("targetProfiles").add(target); grant.put("selfOnly",true);grant.putArray("targetSubjects");
+    grant.putArray("operations").add("otp.app-setup").add("otp.delete").add("otp.email-finish").add("otp.email-start").add("otp.read");
+    return grant;
   }
   private ArrayNode policies(ObjectNode value) {
     if(!value.has("peerDelegationPolicies"))return value.putArray("peerDelegationPolicies");
