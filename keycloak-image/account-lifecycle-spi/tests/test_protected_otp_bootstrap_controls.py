@@ -22,6 +22,14 @@ class BootstrapClassifier(unittest.TestCase):
     def test_actual_preconditioned_single_route_denial_is_red(self):
         self.assertEqual("GENUINE_PROTECTED_PENDING_OTP_PREPARE_RED", classify(self.valid()))
 
+    def test_expired_original_prepare_retry_requires_verified_causal_result(self):
+        value = self.valid()
+        value["readinessObservation"].update(otpPrepareStatus=200,
+            preparedReceiptMacVerified=True, expiredOriginalPrepareRetryStatus=403)
+        self.assertEqual("GENUINE_PROTECTED_PENDING_OTP_EXPIRED_PREPARE_RETRY_RED", classify(value))
+        value["readinessObservation"].pop("preparedReceiptMacVerified")
+        self.assertEqual("BEHAVIOR_FAILURE", classify(value))
+
     def test_missing_any_native_precondition_is_setup(self):
         for key in REQUIRED:
             with self.subTest(key=key):
@@ -56,7 +64,8 @@ class BootstrapClassifier(unittest.TestCase):
         self.assertNotEqual("GREEN", classify(value))
         value["readinessObservation"].update(appMutationStatus=201,
             preparedReceiptMacVerified=True, appNativeCredentialAndDisabledStateVerified=True,
-            exactAppRetryPreservesOneCredential=True, completedPhaseRefusesNewEnrollment=True)
+            exactAppRetryPreservesOneCredential=True, completedPhaseRefusesNewEnrollment=True,
+            expiredOriginalPrepareRetryPreservesExactCausalReceipt=True)
         self.assertEqual("GREEN", classify(value))
         value["readinessObservation"]["otpPrepareStatus"] = 404
         self.assertNotEqual("GREEN", classify(value))

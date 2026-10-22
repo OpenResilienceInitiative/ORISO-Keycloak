@@ -89,11 +89,16 @@ def classify(summary):
         and observed.get("appMutationStatus") == 403
         and observed.get("noAppCredentialBeforeMutation") is True):
         return "GENUINE_PROTECTED_PENDING_OTP_APP_RED"
+    if (summary.get("failures") == 1 and observed.get("otpPrepareStatus") == 200
+        and observed.get("preparedReceiptMacVerified") is True
+        and observed.get("expiredOriginalPrepareRetryStatus") == 403):
+        return "GENUINE_PROTECTED_PENDING_OTP_EXPIRED_PREPARE_RETRY_RED"
     if (summary.get("failures") == 0 and observed.get("otpPrepareStatus") == 200
         and observed.get("appMutationStatus") == 201
         and all(observed.get(key) is True for key in (
             "preparedReceiptMacVerified", "appNativeCredentialAndDisabledStateVerified",
-            "exactAppRetryPreservesOneCredential", "completedPhaseRefusesNewEnrollment"))):
+            "exactAppRetryPreservesOneCredential", "completedPhaseRefusesNewEnrollment",
+            "expiredOriginalPrepareRetryPreservesExactCausalReceipt"))):
         return "GREEN"
     return "BEHAVIOR_FAILURE"
 
@@ -277,6 +282,36 @@ class BootstrapRead(unittest.TestCase):
         self.assertGreater(int(fresh_claims["exp"]), int(time.time()))
         self.assertGreater(int(fresh_claims["iat"]), int(claims["iat"]))
         observed["freshCanonicalAdminVerifiedForApp"] = True
+        # A lost preparation reply must remain recoverable with the exact old body,
+        # current recipient provenance and a fresh native ADMIN; no deadline/body refresh.
+        now = int(time.time())
+        retry_proof = {**proof, "jti": str(uuid.uuid4()), "nonce": uuid.uuid4().hex,
+            "iat": now, "exp": min(now + 60, int(fresh_claims["exp"]))}
+        encoded_retry = base64.urlsafe_b64encode(canonical(retry_proof)).decode().rstrip("=")
+        retry_mac = base64.urlsafe_b64encode(hmac.new(CONTEXT_KEY,
+            ("proof\n" + encoded_retry).encode(), hashlib.sha256).digest()).decode().rstrip("=")
+        retry_request = Request(request.full_url, method="GET", headers={
+            "Authorization": "Bearer " + bearer,
+            "X-ORISO-Task-Context": encoded_retry + "." + retry_mac,
+            "X-ORISO-Account-Target": canonical(target).decode(),
+        })
+        try:
+            reply = urlopen(retry_request, timeout=30)
+        except HTTPError as error:
+            reply = error
+        with reply:
+            retry_status, retry_raw = reply.code, reply.read()
+        observed["expiredOriginalPrepareRetryStatus"] = retry_status
+        self.assertEqual(200, retry_status)
+        recovered = json.loads(retry_raw)
+        self.assertEqual({"otpInfo", "bootstrapReceipt", "authorityValidUntil"}, set(recovered))
+        self.assertEqual(receipt, recovered["bootstrapReceipt"])
+        self.assertEqual(result["authorityValidUntil"], recovered["authorityValidUntil"])
+        self.assertFalse(recovered["otpInfo"]["otpSetup"])
+        self.assertTrue(recovered["otpInfo"]["otpSecret"])
+        self.assertTrue(recovered["otpInfo"]["otpSecretQrCode"])
+        self.assertEqual(credentials, helper.admin("GET", "/users/" + account + "/credentials"))
+        observed["expiredOriginalPrepareRetryPreservesExactCausalReceipt"] = True
         secret = result["otpInfo"]["otpSecret"]
         digest = hmac.new(secret.encode(), struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
         offset = digest[-1] & 15
