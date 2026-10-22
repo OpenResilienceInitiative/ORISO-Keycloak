@@ -174,18 +174,12 @@ class SessionExchangeNative(native.LifecycleFixture, unittest.TestCase):
         self.assertEqual(200, status)
         self.assertTrue(ordinary.get("access_token"))
         OBSERVATIONS["ordinaryPasswordLogin"] = True
-        self.admin("DELETE", "/users/" + target["id"] + "/sessions")
+        status,_ = native.call(self.base,"POST","/admin/realms/"+native.REALM+
+                               "/users/"+target["id"]+"/logout",token=self.installer)
+        self.assertEqual(204,status)
+        self.assertEqual([],self.admin("GET","/users/"+target["id"]+"/sessions"))
         self.admin("POST", "/authentication/flows/direct-grant-2fa/executions/execution",
-                   {"provider": "oriso-claimed-magic-link"})
-        steps = self.admin("GET", "/authentication/flows/direct-grant-2fa/executions")
-        router = next(step for step in steps if step.get("providerId") == "oriso-claimed-magic-link")
-        self.admin("PUT", "/authentication/flows/direct-grant-2fa/executions",
-                   {**router, "requirement": "REQUIRED", "priority": -1})
-        for _ in range(len(steps)):
-            steps = self.admin("GET", "/authentication/flows/direct-grant-2fa/executions")
-            if steps[0].get("providerId") == "oriso-claimed-magic-link":
-                break
-            self.admin("POST", "/authentication/executions/" + router["id"] + "/raise-priority")
+                   {"provider": "oriso-claimed-magic-link", "priority": -1})
         steps = self.admin("GET", "/authentication/flows/direct-grant-2fa/executions")
         self.assertEqual("oriso-claimed-magic-link", steps[0]["providerId"])
         self.assertEqual(self.expected_executions, Counter((step["providerId"],step["requirement"])
