@@ -36,6 +36,15 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, setup));
   }
 
+  public static Response requireSelfAppSetup(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> setup) {
+    if (bootstrapReceipt == null) return requireSelfAppSetup(session, exactPathUsername, raw,
+        taskContextHeader, fullImmediateHumanHeader, setup);
+    return guarded(session, () -> configuration(session).appSetupOtpProtected(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, bootstrapReceipt, setup));
+  }
+
   public static Response requireSelfDelete(KeycloakSession session, String exactPathUsername,
       byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
       Function<VerifiedOtpTarget, Response> delete) {
@@ -50,11 +59,29 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, finish));
   }
 
+  public static Response requireSelfEmailFinish(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> finish) {
+    if (bootstrapReceipt == null) return requireSelfEmailFinish(session, exactPathUsername, raw,
+        taskContextHeader, fullImmediateHumanHeader, finish);
+    return guarded(session, () -> configuration(session).finishEmailOtpProtected(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, bootstrapReceipt, finish));
+  }
+
   public static Response requireSelfEmailStart(KeycloakSession session, String exactPathUsername,
       byte[] raw, String taskContextHeader, String fullImmediateHumanHeader,
       Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send) {
     return guarded(session, () -> configuration(session).startEmailOtpSelf(session, exactPathUsername,
         raw, taskContextHeader, fullImmediateHumanHeader, prepare, send));
+  }
+
+  public static Response requireSelfEmailStart(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send) {
+    if (bootstrapReceipt == null) return requireSelfEmailStart(session, exactPathUsername, raw,
+        taskContextHeader, fullImmediateHumanHeader, prepare, send);
+    return guarded(session, () -> configuration(session).startEmailOtpProtected(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, bootstrapReceipt, prepare, send));
   }
 
   private static AccountLifecycleFactory configuration(KeycloakSession session) {
@@ -87,7 +114,7 @@ public final class ScopedOtpAccess {
       Function<VerifiedOtpTarget, Response> read) {
     // Cache the canonical machine before native human authentication changes ambient context.
     var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
-    if (targetHeader == null || targetHeader.length() > 8192 || username == null
+    if (targetHeader == null || targetHeader.length() > 24576 || username == null
         || username.isBlank() || username.length() > 255
         || username.chars().anyMatch(c -> c < 32 || c == 127)) bad();
     var target = parse(targetHeader);
@@ -97,6 +124,16 @@ public final class ScopedOtpAccess {
     materialized.put("username", username);
     materialized.putNull("otp");
     var realm = session.getContext().getRealm();
+    if (target.has("bootstrap")) {
+      authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.bootstrap-read", "GET",
+          "realm/" + realm.getId() + "/account/" + account, materialized);
+      if (humanHeader != null) deny();
+      return ProtectedOtpBootstrap.prepare(session, authorization, machine, username, target, user -> {
+        var projection = JSON.createObjectNode(); projection.put("username", user.getUsername());
+        return invoke(session, authorization, username, account, projection, null, read).response();
+      });
+    }
+    if (targetHeader.length() > 8192) bad();
     authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.read", "GET",
         "realm/" + realm.getId() + "/account/" + account, materialized);
     var body = JSON.createObjectNode();
@@ -106,6 +143,27 @@ public final class ScopedOtpAccess {
     var current = new MaintenanceTarget(session, authorization, mappings)
         .readOtpSelf(request, policy, humanHeader);
     return invoke(session, authorization, username, account, current, null, read).response();
+  }
+
+  static Response checkedProtectedApp(KeycloakSession session, LifecycleAuthorization authorization,
+      String username, byte[] raw, String proofHeader, String humanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> setup) {
+    var machine = authorization.requireMachine(session, "ACCOUNT_ADMIN");
+    if (humanHeader != null || username == null || username.isBlank() || username.length() > 255
+        || username.chars().anyMatch(c -> c < 32 || c == 127)) deny();
+    var body = parse(raw);
+    String account = uuid(text(body.path("target"), "accountId", 36, false));
+    var request = ScopedOtpRequest.parse("otp.app-setup", account, body);
+    var materialized = body.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("username", username);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("bootstrapReceipt", bootstrapReceipt);
+    authorization.verifyCommand(proofHeader, machine, "oriso-otp", "OTP", "otp.bootstrap-app-setup", "PUT",
+        "realm/" + session.getContext().getRealm().getId() + "/account/" + account, materialized);
+    return ProtectedOtpBootstrap.app(session, authorization, machine, username, request, materialized,
+        bootstrapReceipt, user -> {
+          var projection = JSON.createObjectNode(); projection.put("username", user.getUsername());
+          return invoke(session, authorization, username, account, projection, request, setup).response();
+        });
   }
 
   static Response checkedSelfMutation(KeycloakSession session, LifecycleAuthorization authorization,
@@ -464,7 +522,7 @@ public final class ScopedOtpAccess {
     });
   }
 
-  private record LinkedEmailStart(String operationId, JsonNode binding, String incarnationDigest) {}
+  record LinkedEmailStart(String operationId, JsonNode binding, String incarnationDigest) {}
 
   private static LinkedEmailStart requireLinkedEmailStart(
       jakarta.persistence.EntityManager em, RealmModel realm, LifecycleAuthorization authorization,
@@ -516,22 +574,22 @@ public final class ScopedOtpAccess {
     return new jakarta.ws.rs.ClientErrorException("Linked OTP workflow conflicts", 409);
   }
 
-  private record Invocation(Response response, JsonNode emailCredential, String emailIncarnation) {}
+  record Invocation(Response response, JsonNode emailCredential, String emailIncarnation) {}
 
-  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+  static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
       String username, String account,
       com.fasterxml.jackson.databind.JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action) {
     return invoke(session, authorization, username, account, current, request, action, null, 0, null);
   }
 
-  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+  static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
       String username, String account, JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action, LinkedEmailStart linked) {
     return invoke(session, authorization, username, account, current, request, action, null, 0, linked);
   }
 
-  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+  static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
       String username, String account, JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action, JsonNode deliveryBinding, long deliveryExpiry) {
     return invoke(session, authorization, username, account, current, request, action, deliveryBinding, deliveryExpiry, null);

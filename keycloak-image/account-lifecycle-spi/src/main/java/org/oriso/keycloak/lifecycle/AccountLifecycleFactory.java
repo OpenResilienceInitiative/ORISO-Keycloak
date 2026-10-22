@@ -107,6 +107,14 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
         username, targetHeader, proofHeader, humanHeader, read);
   }
 
+  jakarta.ws.rs.core.Response appSetupOtpProtected(KeycloakSession session, String username,
+      byte[] raw, String proofHeader, String humanHeader, String bootstrapReceipt,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> setup) {
+    if (authorization == null) LifecycleJson.deny();
+    return ScopedOtpAccess.checkedProtectedApp(session, authorization, username, raw, proofHeader,
+        humanHeader, bootstrapReceipt, setup);
+  }
+
   jakarta.ws.rs.core.Response appSetupOtpSelf(KeycloakSession session, String username,
       byte[] raw, String proofHeader, String humanHeader,
       java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> setup) {
@@ -138,6 +146,23 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
     if (authorization == null) LifecycleJson.deny();
     return ScopedOtpAccess.checkedSelfEmailStart(session, authorization, groups, humanPolicy,
         username, raw, proofHeader, humanHeader, prepare, send);
+  }
+
+  jakarta.ws.rs.core.Response startEmailOtpProtected(KeycloakSession session, String username,
+      byte[] raw, String proofHeader, String humanHeader, String bootstrapReceipt,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> prepare,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> send) {
+    if (authorization == null) LifecycleJson.deny();
+    return ProtectedOtpBootstrap.emailStart(session, authorization, username, raw, proofHeader,
+        humanHeader, bootstrapReceipt, prepare, send);
+  }
+
+  jakarta.ws.rs.core.Response finishEmailOtpProtected(KeycloakSession session, String username,
+      byte[] raw, String proofHeader, String humanHeader, String bootstrapReceipt,
+      java.util.function.Function<ScopedOtpAccess.VerifiedOtpTarget, jakarta.ws.rs.core.Response> finish) {
+    if (authorization == null) LifecycleJson.deny();
+    return ProtectedOtpBootstrap.emailFinish(session, authorization, username, raw, proofHeader,
+        humanHeader, bootstrapReceipt, finish);
   }
 
   public void close() {}

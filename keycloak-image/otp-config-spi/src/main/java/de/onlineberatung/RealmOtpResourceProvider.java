@@ -123,7 +123,8 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
       return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfAppSetup(
           session, username, raw,
           headers.getHeaderString("X-ORISO-Task-Context"),
-          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          headers.getHeaderString("X-ORISO-OTP-Bootstrap"), target -> {
             var dto = new OtpSetupDTO();
             dto.setInitialCode(target.initialCode());
             dto.setSecret(target.secret());
@@ -221,7 +222,8 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
       var headers = session.getContext().getRequestHeaders();
       return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfEmailStart(
           session, username, raw, headers.getHeaderString("X-ORISO-Task-Context"),
-          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          headers.getHeaderString("X-ORISO-OTP-Bootstrap"), target -> {
             var context = new CredentialContext(target.session(), target.realm(), target.user());
             var emailOwner = target.session().users().getUserByEmail(target.realm(), target.email());
             if (emailOwner != null && !target.user().getId().equals(emailOwner.getId()))
@@ -287,7 +289,8 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
       return org.oriso.keycloak.lifecycle.ScopedOtpAccess.requireSelfEmailFinish(
           session, username, raw,
           headers.getHeaderString("X-ORISO-Task-Context"),
-          headers.getHeaderString("X-ORISO-Human-Authorization"), target -> {
+          headers.getHeaderString("X-ORISO-Human-Authorization"),
+          headers.getHeaderString("X-ORISO-OTP-Bootstrap"), target -> {
             return finishScopedMailSetup(target);
           });
     }

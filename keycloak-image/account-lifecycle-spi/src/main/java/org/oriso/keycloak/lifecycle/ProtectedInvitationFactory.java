@@ -73,6 +73,18 @@ public final class ProtectedInvitationFactory implements RealmResourceProviderFa
     }
     return new ProtectedInvitationResource(session, configuration, authorization);
   }
+
+  static ProtectedInvitationConfiguration checkedBootstrapConfiguration(KeycloakSession session) {
+    var provider = session.getKeycloakSessionFactory().getProviderFactory(
+        RealmResourceProvider.class, "oriso-protected-invitations");
+    if (!(provider instanceof ProtectedInvitationFactory factory) || factory.configuration == null)
+      throw new jakarta.ws.rs.ForbiddenException();
+    if (!factory.installationReady) {
+      session.getContext().getHttpResponse().setHeader("Cache-Control", "no-store");
+      throw new ServiceUnavailableException(Response.status(503).header("Cache-Control", "no-store").build());
+    }
+    return factory.configuration;
+  }
   public String getId() { return "oriso-protected-invitations"; }
   public void close() {}
 }
