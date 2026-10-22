@@ -71,7 +71,7 @@ def incarnation(test, helper, primary, observed):
         replacement = {'id': account, 'username': 'new-incarnation-' + uuid.uuid4().hex, 'enabled': True,
             'firstName': 'New', 'lastName': 'Incarnation', 'email': 'new-' + uuid.uuid4().hex + '@oriso.org',
             'attributes': {'tenantId': [target['tenantId']]}}
-        helper.admin('POST', '/users', replacement)
+        helper.admin('POST', '/partialImport', {'ifResourceExists': 'FAIL', 'users': [replacement]})
         defaults = helper.admin('GET', '/users/' + account + '/role-mappings/realm')
         if defaults: helper.admin('DELETE', '/users/' + account + '/role-mappings/realm', defaults)
         for group in groups: helper.admin('PUT', '/users/' + account + '/groups/' + group['id'])
