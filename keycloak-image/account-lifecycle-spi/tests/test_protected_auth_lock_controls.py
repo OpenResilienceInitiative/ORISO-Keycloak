@@ -25,13 +25,13 @@ class AuthLockControls(unittest.TestCase):
             "selectorObservation": {key: False for key in lock.SELECTOR_FIELDS}}
         with patch.object(lock, "inspect_owned", return_value={"Config": {"Labels": {"oriso-protected-receiver-test": "true"}}}):
             with patch.object(lock.subprocess, "run", return_value=SimpleNamespace(stdout=lock.PREFIX + json.dumps(value), stderr="")):
-                self.assertEqual([value], lock.records(object()))
+                self.assertEqual([value], lock.records(SimpleNamespace(name="owned-fixture")))
             for selector in ({**value["selectorObservation"], "extra": False},
                              {**value["selectorObservation"], "realmTableObserved": "untrusted-value"}):
                 changed = {**value, "selectorObservation": selector}
                 with patch.object(lock.subprocess, "run", return_value=SimpleNamespace(stdout=lock.PREFIX + json.dumps(changed), stderr="")):
                     with self.assertRaises(AssertionError):
-                        lock.records(object())
+                        lock.records(SimpleNamespace(name="owned-fixture"))
 
     def test_exact_owned_block_and_post_release_denial_is_counterfactual_red(self):
         self.assertEqual("GENUINE_UNAUTHENTICATED_PROTECTED_REQUEST_WAITS_FOR_REALM_ROW_RED", lock.classify(complete()))
