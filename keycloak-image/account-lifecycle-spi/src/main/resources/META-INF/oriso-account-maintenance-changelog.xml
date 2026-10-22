@@ -58,4 +58,9 @@
     </createTable>
     <addForeignKeyConstraint baseTableName="ORISO_PROTECTED_OTP_BOOTSTRAP" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_PROTECTED_OTP_REALM" onDelete="CASCADE"/>
   </changeSet>
+  <changeSet id="oriso-protected-otp-email-pending-fingerprint-v1" author="oriso">
+    <addColumn tableName="ORISO_PROTECTED_OTP_BOOTSTRAP">
+      <column name="EMAIL_PENDING_FINGERPRINT" type="VARCHAR(64)"/>
+    </addColumn>
+  </changeSet>
 </databaseChangeLog>

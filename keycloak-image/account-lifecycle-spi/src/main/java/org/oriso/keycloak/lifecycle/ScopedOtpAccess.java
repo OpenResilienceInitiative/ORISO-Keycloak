@@ -66,6 +66,15 @@ public final class ScopedOtpAccess {
         raw, taskContextHeader, fullImmediateHumanHeader, prepare, send));
   }
 
+  public static Response requireSelfEmailStart(KeycloakSession session, String exactPathUsername,
+      byte[] raw, String taskContextHeader, String fullImmediateHumanHeader, String bootstrapReceipt,
+      Function<VerifiedOtpTarget, Response> prepare, Function<VerifiedOtpTarget, Response> send) {
+    if (bootstrapReceipt == null) return requireSelfEmailStart(session, exactPathUsername, raw,
+        taskContextHeader, fullImmediateHumanHeader, prepare, send);
+    return guarded(session, () -> configuration(session).startEmailOtpProtected(session, exactPathUsername,
+        raw, taskContextHeader, fullImmediateHumanHeader, bootstrapReceipt, prepare, send));
+  }
+
   private static AccountLifecycleFactory configuration(KeycloakSession session) {
     var factory = session.getKeycloakSessionFactory().getProviderFactory(
         RealmResourceProvider.class, "oriso-account-lifecycle");
@@ -556,9 +565,9 @@ public final class ScopedOtpAccess {
     return new jakarta.ws.rs.ClientErrorException("Linked OTP workflow conflicts", 409);
   }
 
-  private record Invocation(Response response, JsonNode emailCredential, String emailIncarnation) {}
+  record Invocation(Response response, JsonNode emailCredential, String emailIncarnation) {}
 
-  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+  static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
       String username, String account,
       com.fasterxml.jackson.databind.JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action) {
@@ -571,7 +580,7 @@ public final class ScopedOtpAccess {
     return invoke(session, authorization, username, account, current, request, action, null, 0, linked);
   }
 
-  private static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
+  static Invocation invoke(KeycloakSession session, LifecycleAuthorization authorization,
       String username, String account, JsonNode current, ScopedOtpRequest request,
       Function<VerifiedOtpTarget, Response> action, JsonNode deliveryBinding, long deliveryExpiry) {
     return invoke(session, authorization, username, account, current, request, action, deliveryBinding, deliveryExpiry, null);

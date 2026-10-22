@@ -280,5 +280,240 @@ final class ProtectedOtpBootstrap {
     return Response.status(status).entity(result).header("Cache-Control", "no-store").build();
   }
 
+  private enum EmailPhase { REQUEST, CLAIM, SEND }
+
+  static Response emailStart(KeycloakSession session, LifecycleAuthorization crypto,
+      String username, byte[] raw, String proof, String human, String prepareReceipt,
+      Function<ScopedOtpAccess.VerifiedOtpTarget, Response> prepare,
+      Function<ScopedOtpAccess.VerifiedOtpTarget, Response> send) {
+    return emailStart(session, crypto, username, raw, proof, human, prepareReceipt, prepare, send, EmailPhase.REQUEST);
+  }
+
+  private static Response emailStart(KeycloakSession session, LifecycleAuthorization crypto,
+      String username, byte[] raw, String proof, String human, String prepareReceipt,
+      Function<ScopedOtpAccess.VerifiedOtpTarget, Response> prepare,
+      Function<ScopedOtpAccess.VerifiedOtpTarget, Response> send, EmailPhase phase) {
+    var machine = crypto.requireMachine(session, "ACCOUNT_ADMIN");
+    if (human != null || username == null || username.isBlank() || username.length() > 255
+        || username.chars().anyMatch(c -> c < 32 || c == 127)) deny();
+    var body = parse(raw);
+    String account = uuid(text(body.path("target"), "accountId", 36, false));
+    var request = ScopedOtpRequest.parse("otp.email-start", account, body);
+    var materialized = body.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("username", username);
+    ((com.fasterxml.jackson.databind.node.ObjectNode) materialized).put("bootstrapReceipt", prepareReceipt);
+    crypto.verifyCommand(proof, machine, "oriso-otp", "OTP", "otp.bootstrap-email-start", "PUT",
+        "realm/" + session.getContext().getRealm().getId() + "/account/" + account, materialized);
+    var owner = emailOwner(session, crypto, machine, request, prepareReceipt);
+    String id = owner.realm().getId() + ":" + request.operationId();
+    String digest = crypto.mac("otp-bootstrap-intent/v1", materialized);
+    var prior = owner.em().find(AccountMaintenanceOperation.class, id, LockModeType.PESSIMISTIC_WRITE);
+    var delivery = owner.em().find(OtpEmailDelivery.class, id, LockModeType.PESSIMISTIC_WRITE);
+    if (prior != null) {
+      owner.em().refresh(prior);
+      if (!account.equals(prior.accountId) || !owner.realm().getId().equals(prior.realmId)
+          || !"otp.bootstrap-email-start".equals(prior.command)
+          || !machine.clientId().equals(prior.ownerClient) || !machine.subject().equals(prior.ownerSubject)
+          || !LifecycleAuthorization.equal(digest, prior.intentDigest)
+          || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState)
+          || delivery == null) conflict();
+      owner.em().refresh(delivery);
+      if (!owner.realm().getId().equals(delivery.realmId) || !account.equals(delivery.accountId)
+          || !LifecycleAuthorization.equal(digest, delivery.intentDigest)) deny();
+      if (phase == EmailPhase.REQUEST && "SENT".equals(delivery.state) && delivery.finalJson != null)
+        return Response.ok(parse(delivery.finalJson)).header("Cache-Control", "no-store").build();
+      if (delivery.expiresAt <= Instant.now().getEpochSecond())
+        throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery outcome is unavailable");
+      var user = currentEmailUser(session, crypto, owner, username, true);
+      var binding = parse(delivery.bindingJson);
+      var projection = JSON.createObjectNode().put("username", username);
+      if (phase == EmailPhase.REQUEST) {
+        if (!"READY".equals(delivery.state))
+          throw new jakarta.ws.rs.ServiceUnavailableException("OTP delivery outcome is unknown");
+        enlistEmail(session, crypto, username, raw, proof, prepareReceipt, send);
+        return Response.status(202).entity(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
+      }
+      if (phase == EmailPhase.CLAIM) {
+        if (!"READY".equals(delivery.state)) deny();
+        ScopedOtpAccess.invoke(session, crypto, username, account, projection, request,
+            ignored -> Response.accepted().build(), binding, delivery.expiresAt);
+        delivery.state = "SENDING";
+        owner.em().flush();
+        return Response.accepted().build();
+      }
+      if (!"SENDING".equals(delivery.state)) deny();
+      try {
+        var sent = ScopedOtpAccess.invoke(session, crypto, username, account, projection, request,
+            send, binding, delivery.expiresAt);
+        if (sent.response().getStatus() != 200) throw new IllegalStateException("Unknown OTP delivery");
+        var result = emailResult(crypto, owner, request, digest, delivery.expiresAt, binding,
+            JSON.valueToTree(sent.response().getEntity()), 200, "SENT");
+        delivery.state = "SENT"; delivery.finalJson = canonical(result);
+        owner.em().flush();
+        return Response.ok(result).header("Cache-Control", "no-store").build();
+      } catch (RuntimeException unknown) {
+        delivery.state = "UNKNOWN"; delivery.finalJson = null;
+        owner.em().flush();
+        return Response.status(503).entity(java.util.Map.of("error", "OTP delivery outcome is unknown"))
+            .header("Cache-Control", "no-store").build();
+      }
+    }
+    if (delivery != null || phase != EmailPhase.REQUEST || !"PREPARED".equals(owner.bootstrap().state)) conflict();
+    var user = currentEmailUser(session, crypto, owner, username, false);
+    if (!request.otp().path("email").asText().equals(parse(owner.approval().scope).path("recipient").asText())) deny();
+    var token = machine.nativeAuth().getToken();
+    long now = Instant.now().getEpochSecond();
+    if (token.getIat() == null || token.getExp() == null || token.getIat() <= 0
+        || token.getExp() <= token.getIat() || token.getExp() <= now) deny();
+    long expiry = Math.min(number(body, "authorityValidUntil", true),
+        Math.min(token.getExp(), Math.min(now + 600, Instant.parse(owner.approval().validUntil).getEpochSecond())));
+    if (expiry <= now) deny();
+    var projection = JSON.createObjectNode().put("username", username);
+    var invocation = ScopedOtpAccess.invoke(session, crypto, username, account, projection, request, prepare);
+    if (invocation.response().getStatus() != 202 || invocation.emailCredential() == null) deny();
+    var ready = emailResult(crypto, owner, request, digest, expiry, invocation.emailCredential(),
+        JSON.valueToTree(invocation.response().getEntity()), 202, "READY");
+    var saved = new AccountMaintenanceOperation(); saved.id = id; saved.realmId = owner.realm().getId();
+    saved.operationId = request.operationId(); saved.accountId = account; saved.command = "otp.bootstrap-email-start";
+    saved.ownerClient = machine.clientId(); saved.ownerSubject = machine.subject(); saved.intentDigest = digest;
+    saved.expectedState = request.expectedState(); saved.resultJson = canonical(ready); owner.em().persist(saved);
+    delivery = new OtpEmailDelivery(); delivery.id = id; delivery.realmId = owner.realm().getId();
+    delivery.accountId = account; delivery.intentDigest = digest;
+    delivery.bindingJson = canonical(invocation.emailCredential()); delivery.incarnationDigest = invocation.emailIncarnation();
+    delivery.originWorkflowId = owner.approval().workflowId; delivery.expiresAt = expiry; delivery.state = "READY";
+    owner.em().persist(delivery);
+    owner.bootstrap().state = "EMAIL_READY";
+    owner.em().flush();
+    owner.bootstrap().emailPendingFingerprint = crypto.mac("pending-profile", AccountLifecycleResource.lockedSnapshot(owner.em(), account));
+    owner.em().flush();
+    enlistEmail(session, crypto, username, raw, proof, prepareReceipt, send);
+    return Response.status(202).entity(ready).header("Cache-Control", "no-store").build();
+  }
+
+  private static JsonNode emailResult(LifecycleAuthorization crypto, EmailOwner owner,
+      ScopedOtpRequest request, String digest, long expiry, JsonNode binding, JsonNode nativeResult,
+      int status, String state) {
+    fields(nativeResult, "info"); text(nativeResult, "info", 512, false);
+    var facts = owner.receipt().deepCopy();
+    var outcome = (com.fasterxml.jackson.databind.node.ObjectNode) facts;
+    outcome.put("state", state); outcome.put("operationId", request.operationId());
+    outcome.put("intentDigest", digest); outcome.put("status", status);
+    outcome.put("resultDigest", crypto.mac("otp-result", nativeResult));
+    outcome.put("deliveryValidUntil", expiry); outcome.set("emailCredential", binding);
+    var result = JSON.createObjectNode(); result.put("status", status); result.put("deliveryState", state);
+    result.set("result", nativeResult); result.put("receipt", crypto.receipt("otp-bootstrap-email-start/v1", outcome));
+    return result;
+  }
+
+  private static void enlistEmail(KeycloakSession owner, LifecycleAuthorization crypto,
+      String username, byte[] raw, String proof, String receipt,
+      Function<ScopedOtpAccess.VerifiedOtpTarget, Response> send) {
+    var factory = owner.getKeycloakSessionFactory(); var realmId = owner.getContext().getRealm().getId();
+    var actualRequest = owner.getContext().getHttpRequest(); var connection = owner.getContext().getConnection();
+    byte[] frozen = raw.clone();
+    owner.getTransactionManager().enlistAfterCompletion(new org.keycloak.models.AbstractKeycloakTransaction() {
+      protected void rollbackImpl() {}
+      protected void commitImpl() {
+        var claimed = new java.util.concurrent.atomic.AtomicBoolean(false);
+        try {
+          org.keycloak.models.utils.KeycloakModelUtils.runJobInTransaction(factory, fresh -> {
+            fresh.getContext().setRealm(fresh.realms().getRealm(realmId));
+            fresh.getContext().setHttpRequest(actualRequest); fresh.getContext().setConnection(connection);
+            emailStart(fresh, crypto, username, frozen, proof, null, receipt, null, send, EmailPhase.CLAIM);
+            fresh.getTransactionManager().enlistAfterCompletion(new org.keycloak.models.AbstractKeycloakTransaction() {
+              protected void rollbackImpl() { claimed.set(false); }
+              protected void commitImpl() { claimed.set(true); }
+            });
+          });
+          if (!claimed.get()) return;
+          org.keycloak.models.utils.KeycloakModelUtils.runJobInTransaction(factory, fresh -> {
+            fresh.getContext().setRealm(fresh.realms().getRealm(realmId));
+            fresh.getContext().setHttpRequest(actualRequest); fresh.getContext().setConnection(connection);
+            emailStart(fresh, crypto, username, frozen, proof, null, receipt, null, send, EmailPhase.SEND);
+          });
+        } catch (RuntimeException refusedOrUnknown) {
+          // The committed READY/SENDING owner survives. No credentials or provider detail is logged.
+        }
+      }
+    });
+  }
+
+  private record EmailOwner(jakarta.persistence.EntityManager em, org.keycloak.models.RealmModel realm,
+      ProtectedInvitationConfiguration config, ProtectedInvitationApproval approval,
+      AccountLifecycleAttempt attempt, ProtectedOtpBootstrapState bootstrap, JsonNode receipt) {}
+
+  private static EmailOwner emailOwner(KeycloakSession session, LifecycleAuthorization crypto,
+      LifecycleAuthorization.CheckedMachine authenticated, ScopedOtpRequest request, String prepareReceipt) {
+    if (prepareReceipt == null || prepareReceipt.length() > 8192) deny();
+    var parts = prepareReceipt.split("\\.", -1);
+    if (parts.length != 2 || !parts[0].matches("[A-Za-z0-9_-]+") || !parts[1].matches("[0-9a-f]{64}")) deny();
+    JsonNode receipt;
+    try { receipt = parse(java.util.Base64.getUrlDecoder().decode(parts[0])); }
+    catch (IllegalArgumentException invalid) { deny(); return null; }
+    fields(receipt, "v", "realmId", "approvalId", "attemptId", "accountId", "claimId", "executionId",
+        "bootstrapIncarnation", "ownerClient", "ownerSubject", "originDigest", "authorityValidUntil", "state");
+    if (number(receipt, "v", true) != 1 || !"PREPARED".equals(receipt.path("state").asText())
+        || !LifecycleAuthorization.equal(prepareReceipt, crypto.receipt("otp-bootstrap-prepare/v1", receipt))
+        || !LifecycleAuthorization.equal(request.expectedState(), crypto.mac("otp-bootstrap-state/v1", JSON.valueToTree(prepareReceipt)))) deny();
+    var realm = session.getContext().getRealm();
+    var config = ProtectedInvitationFactory.checkedBootstrapConfiguration(session);
+    if (!realm.getId().equals(receipt.path("realmId").asText()) || !request.accountId().equals(receipt.path("accountId").asText())) deny();
+    var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
+    var realmRow = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
+    if (realmRow == null) deny(); em.refresh(realmRow);
+    var approval = em.find(ProtectedInvitationApproval.class,
+        ProtectedInvitationResource.key(realm.getId(), uuid(text(receipt, "approvalId", 36, false))), LockModeType.PESSIMISTIC_WRITE);
+    if (approval == null) deny(); em.refresh(approval);
+    var attempt = em.find(AccountLifecycleAttempt.class, ProtectedInvitationResource.protectedAttemptKey(
+        realm.getId(), approval.approvalId, uuid(text(receipt, "attemptId", 36, false))), LockModeType.PESSIMISTIC_WRITE);
+    if (attempt == null) deny(); em.refresh(attempt);
+    var machine = new ProtectedInvitationAuthorization(config, crypto).requireMachine(session, Set.of("ACCOUNT_ADMIN"));
+    String id = "bootstrap:" + crypto.mac("otp-bootstrap-row/v1", JSON.valueToTree(attempt.id));
+    var bootstrap = em.find(ProtectedOtpBootstrapState.class, id, LockModeType.PESSIMISTIC_WRITE);
+    if (bootstrap == null) deny(); em.refresh(bootstrap);
+    if (!authenticated.clientId().equals(machine.clientId()) || !authenticated.subject().equals(machine.subject())
+        || !LifecycleAuthorization.equal(prepareReceipt, bootstrap.prepareReceipt)
+        || !realm.getId().equals(bootstrap.realmId) || !approval.approvalId.equals(bootstrap.approvalId)
+        || !attempt.attemptId.equals(bootstrap.attemptId) || !request.accountId().equals(bootstrap.accountId)
+        || !machine.clientId().equals(bootstrap.ownerClient) || !machine.subject().equals(bootstrap.ownerSubject)
+        || !"BOUND".equals(approval.state) || !attempt.attemptId.equals(approval.boundAttemptId)
+        || !"OPEN".equals(attempt.state) || attempt.generation != 0 || attempt.terminalOperation != null
+        || !request.accountId().equals(attempt.accountId) || !bootstrap.executionId.equals(attempt.executionId)
+        || !bootstrap.executionId.equals(attempt.createExecution)
+        || !"backend-account-create".equals(attempt.ownerClient)
+        || !config.actors.get("ACCOUNT_CREATE").equals(attempt.ownerSubject)) conflict();
+    var scope = parse(attempt.scope);
+    if (!"INVITATION".equals(request.target().path("origin").path("kind").asText())
+        || !approval.workflowId.equals(request.target().path("origin").path("workflowId").asText())
+        || !scope.path("tenantId").asText().equals(request.target().path("tenantId").asText())
+        || !bootstrap.claimId.equals(scope.path("approvalBinding").path("acceptanceClaim").path("claimId").asText())
+        || !approval.approvalId.equals(scope.path("approvalBinding").path("approvalId").asText())
+        || !LifecycleAuthorization.equal(approval.scopeDigest, scope.path("approvalBinding").path("scopeDigest").asText())
+        || approval.authorizationRevision != scope.path("approvalBinding").path("authorizationRevision").asLong(-1)) deny();
+    return new EmailOwner(em, realm, config, approval, attempt, bootstrap, receipt);
+  }
+
+  private static UserModel currentEmailUser(KeycloakSession session, LifecycleAuthorization crypto,
+      EmailOwner owner, String username, boolean emailPrepared) {
+    if (!Instant.parse(owner.approval().validUntil).isAfter(Instant.now())) deny();
+    var frozen = parse(owner.approval().scope).path("profile");
+    var profile = owner.config().profiles.get(text(frozen, "id", 255, false));
+    if (profile == null || !canonical(frozen).equals(canonical(profile.snapshot()))
+        || !owner.attempt().groupId.equals(profile.groupId())
+        || !owner.attempt().roleFingerprint.equals(crypto.mac("protected-initial-profile/v1", frozen))) deny();
+    owner.config().validateProfile(session, profile);
+    if (owner.realm().getComponentsStream(owner.realm().getId(), "org.keycloak.storage.UserStorageProvider").findAny().isPresent()) deny();
+    var snapshot = AccountLifecycleResource.lockedSnapshot(owner.em(), owner.attempt().accountId);
+    String expected = emailPrepared ? owner.bootstrap().emailPendingFingerprint : owner.attempt().profileFingerprint;
+    if (expected == null || !owner.realm().getId().equals(snapshot.path("realmId").asText())
+        || !username.equals(snapshot.path("username").asText()) || snapshot.path("enabled").asBoolean()
+        || !LifecycleAuthorization.equal(expected, crypto.mac("pending-profile", snapshot))) conflict();
+    var user = session.users().getUserById(owner.realm(), owner.attempt().accountId);
+    var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
+    if (cache != null && user != null) { cache.evict(owner.realm(), user); user = session.users().getUserById(owner.realm(), owner.attempt().accountId); }
+    if (user == null || user.isEnabled()) conflict();
+    return user;
+  }
+
   private static void conflict() { throw new ClientErrorException("Pending OTP workflow conflicts", 409); }
 }

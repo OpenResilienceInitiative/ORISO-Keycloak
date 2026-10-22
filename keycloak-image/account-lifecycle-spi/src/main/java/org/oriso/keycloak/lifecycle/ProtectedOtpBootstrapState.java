@@ -19,6 +19,7 @@ public class ProtectedOtpBootstrapState {
   @Column(name = "AUTHORITY_VALID_UNTIL", nullable = false, updatable = false) long authorityValidUntil;
   @Column(name = "STATE", length = 20, nullable = false) String state;
   @Column(name = "PREPARE_RECEIPT", length = 8192, nullable = false, updatable = false) String prepareReceipt;
+  @Column(name = "EMAIL_PENDING_FINGERPRINT", length = 64) String emailPendingFingerprint;
   @Version @Column(name = "VERSION", nullable = false) long version;
   protected ProtectedOtpBootstrapState() {}
 }
