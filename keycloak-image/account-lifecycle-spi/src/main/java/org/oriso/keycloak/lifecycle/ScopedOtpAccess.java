@@ -186,8 +186,10 @@ public final class ScopedOtpAccess {
     var read = JSON.createObjectNode();
     read.set("target", request.target());
     var target = MaintenanceRequest.parse("read", account, read);
-    var policy = policies.apply(session);
-    if (policy == null) deny();
+    boolean protectedSelf = ProtectedAccountOperations.selected(request.target());
+    if (protectedSelf && !"otp.app-setup".equals(operation)) deny();
+    var policy = protectedSelf ? null : policies.apply(session);
+    if (!protectedSelf && policy == null) deny();
     var em = session.getProvider(org.keycloak.connections.jpa.JpaConnectionProvider.class).getEntityManager();
     var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class,
         realm.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
@@ -206,7 +208,8 @@ public final class ScopedOtpAccess {
         throw new jakarta.ws.rs.ClientErrorException("OTP operation conflicts", 409);
       // The immutable operation is retry provenance. Reauthorize the actual current human,
       // then return before mutable credential/CAS lookup or a second enrollment effect.
-      if ("otp.delete".equals(operation)) policy.requireSelfOtpDelete(session, target, humanHeader);
+      if (protectedSelf) ProtectedAccountOperations.readSelfAppSetup(session, authorization, target, humanHeader);
+      else if ("otp.delete".equals(operation)) policy.requireSelfOtpDelete(session, target, humanHeader);
       else if ("otp.email-finish".equals(operation)) policy.requireSelfOtpEmailFinish(session, target, humanHeader);
       else policy.requireSelfOtpAppSetup(session, target, humanHeader);
       var saved = parse(prior.resultJson);
@@ -217,8 +220,9 @@ public final class ScopedOtpAccess {
     var linked = "otp.email-finish".equals(operation) && body.has("emailStartOperationId")
         ? requireLinkedEmailStart(em, realm, authorization, machine, request) : null;
     var targets = new MaintenanceTarget(session, authorization, mappings);
-    var current = "otp.delete".equals(operation)
-        ? targets.readOtpSelfDelete(target, policy, humanHeader)
+    var current = protectedSelf
+        ? ProtectedAccountOperations.readSelfAppSetup(session, authorization, target, humanHeader)
+        : "otp.delete".equals(operation) ? targets.readOtpSelfDelete(target, policy, humanHeader)
         : "otp.email-finish".equals(operation) ? targets.readOtpSelfEmailFinish(target, policy, humanHeader)
         : targets.readOtpSelfAppSetup(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))

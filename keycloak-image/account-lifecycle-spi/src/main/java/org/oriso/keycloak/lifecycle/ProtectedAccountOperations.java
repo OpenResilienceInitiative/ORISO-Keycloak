@@ -23,6 +23,11 @@ final class ProtectedAccountOperations {
     return readCurrent(session, crypto, request, fullHumanHeader, "otp.read");
   }
 
+  static JsonNode readSelfAppSetup(KeycloakSession session, LifecycleAuthorization crypto,
+      MaintenanceRequest request, String fullHumanHeader) {
+    return readCurrent(session, crypto, request, fullHumanHeader, "otp.app-setup");
+  }
+
   static JsonNode readAccount(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String fullHumanHeader) {
     return readCurrent(session, crypto, request, fullHumanHeader, "account.read");
@@ -31,7 +36,7 @@ final class ProtectedAccountOperations {
   private static JsonNode readCurrent(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String fullHumanHeader, String operation) {
     if (!selected(request.target()) || !"read".equals(request.command())
-        || !Set.of("otp.read", "account.read").contains(operation)) deny();
+        || !Set.of("otp.read", "account.read", "otp.app-setup").contains(operation)) deny();
     if (fullHumanHeader == null || fullHumanHeader.length() > 32775
         || !fullHumanHeader.regionMatches(true, 0, "Bearer ", 0, 7))
       throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
