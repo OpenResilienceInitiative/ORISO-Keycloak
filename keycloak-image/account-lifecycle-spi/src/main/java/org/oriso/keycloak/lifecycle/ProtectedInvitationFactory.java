@@ -42,8 +42,13 @@ public final class ProtectedInvitationFactory implements RealmResourceProviderFa
     factory.register(event -> {
       if (!(event instanceof PostMigrationEvent)) return;
       installationReady = false;
+      var validationCommitted = new java.util.concurrent.atomic.AtomicBoolean();
       try {
         KeycloakModelUtils.runJobInTransaction(factory, session -> {
+          session.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
+            protected void commitImpl() { validationCommitted.set(true); }
+            protected void rollbackImpl() { validationCommitted.set(false); }
+          });
           var realm = session.realms().getRealm(configuration.realmId);
           if (realm == null) throw new IllegalStateException("Protected native realm is missing");
           session.getContext().setRealm(realm);
@@ -54,6 +59,7 @@ public final class ProtectedInvitationFactory implements RealmResourceProviderFa
         return;
       }
       // Publish only after the validation transaction has committed successfully.
+      if (!validationCommitted.get()) return;
       installationReady = true;
     });
   }
