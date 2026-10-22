@@ -78,7 +78,9 @@ jobs:
           jar --create --file target/scoped-otp-ready-fixture.jar \
             -C target/test-classes org/oriso/keycloak/lifecycle/ScopedOtpReadyCompletionFixture.class \
             -C tests/ready-fixture-resources META-INF/beans.xml
-      - name: Run prior thirteen plus exact expired-email terminal-refusal native case
+      - name: Run retained scoped cases and actual committed protected self OTP
+        env:
+          PROTECTED_PROOF_RESOURCE_PROFILE: github-ubuntu-24-amd64-v1
         shell: bash
         run: |
           set -euo pipefail
@@ -97,17 +99,18 @@ jobs:
         run: |
           python - <<'PYCODE'
           import subprocess
-          for label in ["oriso-c-lifecycle-test=true", "oriso-c-otp-test=true"]:
+          for label in ["oriso-c-lifecycle-test=true", "oriso-c-otp-test=true", "oriso-protected-receiver-test=true"]:
               names = subprocess.run(
                   ["docker", "ps", "-aq", "--filter", "label=" + label],
                   capture_output=True, text=True, check=True).stdout.split()
               if names:
                   subprocess.run(["docker", "rm", "-fv", *names], check=True, capture_output=True)
-          volumes = subprocess.run(
-              ["docker", "volume", "ls", "-q", "--filter", "label=oriso-c-maintenance-human-test=true"],
-              capture_output=True, text=True, check=True).stdout.split()
-          if volumes:
-              subprocess.run(["docker", "volume", "rm", *volumes], check=True, capture_output=True)
+          for label in ["oriso-c-maintenance-human-test=true", "oriso-protected-receiver-test=true"]:
+              volumes = subprocess.run(
+                  ["docker", "volume", "ls", "-q", "--filter", "label=" + label],
+                  capture_output=True, text=True, check=True).stdout.split()
+              if volumes:
+                  subprocess.run(["docker", "volume", "rm", *volumes], check=True, capture_output=True)
           PYCODE
       - name: Upload only nonsecret diagnostic XML, JSON and source hashes
         if: always()

@@ -103,3 +103,17 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
 
     def test_foreign_class_cannot_supply_the_expected_method(self):
         self.assertEqual(1, self.gate(foreign_class=True)[0])
+
+    def test_protected_read_red_requires_real_committed_peer_and_separate_operation_grant(self):
+        from protected_account_operations import classify
+        required = ('actualNativeCommitAndConsumedApprovalVerified', 'actualPeerTokenIssuerClientAudienceAndGrantsVerified',
+                    'actualPeerUserinfoAndCurrentSessionVerified', 'sameRuntimeWithoutPerPersonBindingOrRestartVerified',
+                    'canonicalAdminThreeAudiencesAndNative403', 'explicitSeparateSelfOperationGrantInstalled')
+        value = dict.fromkeys(required, True)
+        value['protectedSelfOtpReadStatus'] = 403
+        self.assertEqual('GENUINE_PROTECTED_SELF_OTP_READ403_RED', classify(value))
+        for key in required:
+            self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(value, **{key: False})))
+        value['protectedSelfOtpReadStatus'] = 200
+        self.assertEqual('BEHAVIOR_FAILURE', classify(value))
+        self.assertEqual('GREEN', classify(dict(value, closedOriginalOtpSetupResultVerified=True)))
