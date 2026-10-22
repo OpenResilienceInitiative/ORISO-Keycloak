@@ -573,7 +573,9 @@ class LegacySessionExchangeNative(SessionExchangeNative):
         def login(**changes):
             return native.call(self.base,"POST",token_path,{"client_id":"app","grant_type":"password",
                 "username":username,"password":password,**changes},form=True)
-        self.assertEqual(401,login(password="wrong-native-password")[0])
+        wrong_status,wrong_reply=login(password="wrong-native-password")
+        self.assertEqual(400,wrong_status)
+        self.assertEqual("invalid_grant",wrong_reply.get("error"))
         LEGACY_CHECKS["wrongPasswordRefused"]=True
         status,reply=login();self.assertEqual(200,status)
         encoded=reply["access_token"].split(".")[1]
