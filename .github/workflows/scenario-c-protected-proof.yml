@@ -108,6 +108,7 @@ jobs:
       matrix:
         case:
           - binding-rollback-only-unavailable
+          - binding-corrected-restart-available
           - extra-denies-prepared-five
           - missing-required-client
           - missing-required-service-account
@@ -161,6 +162,9 @@ jobs:
               --jar "$LIFECYCLE_PROOF_COMPANION_JAR"
             python keycloak-image/account-lifecycle-spi/tests/run_protected_rollback.py \
               --report keycloak-image/account-lifecycle-spi/proof-output/rollback.json
+          elif [ "$PROTECTED_INSTALLATION_CASE" = binding-corrected-restart-available ]; then
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_corrected_readiness.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/corrected-readiness.json
           elif [ "$PROTECTED_INSTALLATION_CASE" = binding-drift-login-available ]; then
             python keycloak-image/account-lifecycle-spi/tests/run_protected_readiness.py \
               --report keycloak-image/account-lifecycle-spi/proof-output/readiness.json
