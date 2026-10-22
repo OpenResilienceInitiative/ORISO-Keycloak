@@ -196,6 +196,15 @@ def native(report):
             if issubclass(error[0], AssertionError):
                 self.assertion_cases.add(case.id())
             super().addFailure(case, error)
+        def addSubTest(self, case, subtest, error):
+            if error is not None:
+                self.location(case, error)
+                operation = subtest.params.get("operation")
+                if operation in {"otp.delete", "otp.email-finish", "otp.email-start", "account.read", "account.profile"}:
+                    self.failure_locations[-1]["operation"] = operation
+                if issubclass(error[0], AssertionError):
+                    self.assertion_cases.add(case.id())
+            super().addSubTest(case, subtest, error)
         def addError(self, case, error):
             self.location(case, error)
             super().addError(case, error)
@@ -209,7 +218,7 @@ def native(report):
         subprocess.run = original
     report.parent.mkdir(parents=True, exist_ok=True)
     result.write_xml(report.with_suffix(".xml"), "scoped-otp")
-    failures = {case.id() for case, _ in result.failures}
+    failures = {getattr(case, "test_case", case).id() for case, _ in result.failures}
     outcome_counts = method_outcomes(result)
     phases = test_otp_scoped.ScopedOtpRead.phase_receipts
     preconditions = any(x.get("case") == POSITIVE and x.get("phase") == "scoped-otp-preconditions" and all(x.get(k) is True for k in ("canonical_admin", "exact_three_audiences", "stock_native_denied", "actual_self_human", "committed_ordinary_target")) for x in phases)
@@ -235,8 +244,14 @@ def native(report):
     operation_red = bool(stable and result.testsRun == 25 and not result.errors and not result.skipped
         and failures == {operation_id} and operation_id in result.assertion_cases
         and operation_classification in {"GENUINE_PROTECTED_SELF_OTP_READ403_RED", "GENUINE_PROTECTED_SELF_MAINTENANCE_READ403_RED", "GENUINE_PROTECTED_SELF_OTP_APP403_RED", "GENUINE_NEW_PLATFORM_SELF_OTP_READ403_RED"})
+    operation_batch_red = bool(stable and result.testsRun == 25 and not result.errors and not result.skipped
+        and failures == {operation_id} and operation_id in result.assertion_cases
+        and len(result.failures) == 5 and outcome_counts["failures"] == 1
+        and {row.get("operation") for row in result.failure_locations} == {
+            "otp.delete", "otp.email-finish", "otp.email-start", "account.read", "account.profile"}
+        and operation_classification == "GENUINE_PROTECTED_REMAINING_OPERATIONS403_BATCH_RED")
     accepted = bool(stable and result.wasSuccessful() and result.testsRun == 25 and not result.skipped)
-    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 25, **outcome_counts, "failure_locations": result.failure_locations, "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "genuine_scoped_app_setup_red": app_red and stable, "genuine_scoped_delete_red": delete_red and stable, "genuine_scoped_email_finish_red": email_finish_red and stable, "genuine_scoped_email_start_red": email_start_red and stable, "protected_operation_observation": operation_observation, "protected_operation_classification": operation_classification, "genuine_protected_self_otp_read_red": operation_red and operation_classification == "GENUINE_PROTECTED_SELF_OTP_READ403_RED", "genuine_new_platform_self_otp_read_red": operation_red and operation_classification == "GENUINE_NEW_PLATFORM_SELF_OTP_READ403_RED", "genuine_protected_self_app_red": operation_red and operation_classification == "GENUINE_PROTECTED_SELF_OTP_APP403_RED", "genuine_protected_self_maintenance_read_red": operation_red and operation_classification == "GENUINE_PROTECTED_SELF_MAINTENANCE_READ403_RED", "human_readiness_observation": readiness, "human_readiness_classification": readiness_classification, "genuine_human_binding_drift_red": readiness_red, "accepted": accepted, "status": "GREEN" if accepted else operation_classification if operation_red else "HUMAN_BINDING_ABORTS_LOGIN_RED" if readiness_red else "SCOPED_READ403_RED" if red and stable else "SCOPED_APP_SETUP403_RED" if app_red and stable else "SCOPED_DELETE403_RED" if delete_red and stable else "SCOPED_EMAIL_FINISH403_RED" if email_finish_red and stable else "SCOPED_EMAIL_START403_RED" if email_start_red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Original scopedGET5+app3+firstdelete1+emailfinish1+defaultofflegacy1+canonicalextra1+emailinvalid1+emailexpired1+foregroundemailstart1+foreignemail1+unknownSMTP1+linkedEmailFinish1+linkedControls3+expiredSentOutcome1+expiredReady1separateTestJar; other origins/failure fences/User/image/fullC remain open"})
+    save(report, {"github_sha": os.environ.get("GITHUB_SHA"), "source_manifest": before, "source_and_jars_stable": stable, "jar_sha256": hashes, "executed": result.testsRun, "floor": 25, **outcome_counts, "failure_locations": result.failure_locations, "failed_cases": sorted(failures), "phase_receipts": phases, "genuine_scoped_read_red": red and stable, "genuine_scoped_app_setup_red": app_red and stable, "genuine_scoped_delete_red": delete_red and stable, "genuine_scoped_email_finish_red": email_finish_red and stable, "genuine_scoped_email_start_red": email_start_red and stable, "protected_operation_observation": operation_observation, "protected_operation_classification": operation_classification, "genuine_protected_self_otp_read_red": operation_red and operation_classification == "GENUINE_PROTECTED_SELF_OTP_READ403_RED", "genuine_new_platform_self_otp_read_red": operation_red and operation_classification == "GENUINE_NEW_PLATFORM_SELF_OTP_READ403_RED", "genuine_protected_self_app_red": operation_red and operation_classification == "GENUINE_PROTECTED_SELF_OTP_APP403_RED", "genuine_protected_remaining_operations_batch_red": operation_batch_red, "genuine_protected_self_maintenance_read_red": operation_red and operation_classification == "GENUINE_PROTECTED_SELF_MAINTENANCE_READ403_RED", "human_readiness_observation": readiness, "human_readiness_classification": readiness_classification, "genuine_human_binding_drift_red": readiness_red, "accepted": accepted, "status": "GREEN" if accepted else operation_classification if operation_red or operation_batch_red else "HUMAN_BINDING_ABORTS_LOGIN_RED" if readiness_red else "SCOPED_READ403_RED" if red and stable else "SCOPED_APP_SETUP403_RED" if app_red and stable else "SCOPED_DELETE403_RED" if delete_red and stable else "SCOPED_EMAIL_FINISH403_RED" if email_finish_red and stable else "SCOPED_EMAIL_START403_RED" if email_start_red and stable else "UNVERIFIED_NOT_SCOPED_READ_RED", "boundary": "Original scopedGET5+app3+firstdelete1+emailfinish1+defaultofflegacy1+canonicalextra1+emailinvalid1+emailexpired1+foregroundemailstart1+foreignemail1+unknownSMTP1+linkedEmailFinish1+linkedControls3+expiredSentOutcome1+expiredReady1separateTestJar; other origins/failure fences/User/image/fullC remain open"})
     print(json.dumps({"executed": result.testsRun, "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped), "accepted": accepted, "genuine_scoped_read_red": red and stable}))
     return 0 if accepted else 1
 

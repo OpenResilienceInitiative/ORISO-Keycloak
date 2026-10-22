@@ -10,9 +10,15 @@ import org.keycloak.models.KeycloakSession;
 final class GeneralPolicy {
   final CurrentNativeHumanIdentity.NativePolicy nativePolicy;
   private final List<Profile> profiles;
+  private final List<AdminGrant> adminOperations;
+
+  private record AdminGrant(String authority, Set<String> profiles, Set<String> operations) {}
 
   GeneralPolicy(JsonNode config) {
-    fields(config, "version", "native", "ordinaryProfiles");
+    if (config == null || !config.isObject()) bad();
+    var required = (com.fasterxml.jackson.databind.node.ObjectNode) config.deepCopy();
+    required.remove("adminOperations");
+    fields(required, "version", "native", "ordinaryProfiles");
     if (number(config, "version", true) != 1) bad();
     nativePolicy = CurrentNativeHumanIdentity.nativePolicy(config.path("native"));
     var supplied = config.path("ordinaryProfiles");
@@ -28,6 +34,30 @@ final class GeneralPolicy {
       found.add(profile);
     }
     profiles = List.copyOf(found);
+    adminOperations = parseAdminOperations(config, ids);
+  }
+
+  private static List<AdminGrant> parseAdminOperations(JsonNode config, Set<String> profileIds) {
+    if (!config.has("adminOperations")) return List.of();
+    var supplied = config.path("adminOperations");
+    if (!supplied.isArray() || supplied.size() > 20) bad();
+    var result = new ArrayList<AdminGrant>();
+    var unique = new HashSet<AdminGrant>();
+    var allowed = Set.of("account.read", "account.profile", "account.email",
+        "account.ordinary-profile", "account.deactivate", "account.reactivate");
+    for (var value : supplied) {
+      fields(value, "authority", "targetProfiles", "operations", "selfOnly");
+      String authority = text(value, "authority", 20, false);
+      if (!Set.of("PLATFORM", "TENANT_PEER").contains(authority)
+          || !value.path("selfOnly").isBoolean() || value.path("selfOnly").booleanValue()) bad();
+      var targets = HumanPolicyJson.strings(value.path("targetProfiles"), 1, 20, 100);
+      var operations = HumanPolicyJson.strings(value.path("operations"), 1, allowed.size(), 80);
+      if (!profileIds.containsAll(targets) || !allowed.containsAll(operations)) bad();
+      var grant = new AdminGrant(authority, targets, operations);
+      if (!unique.add(grant)) bad();
+      result.add(grant);
+    }
+    return List.copyOf(result);
   }
 
   void validateInstallation(KeycloakSession session) {

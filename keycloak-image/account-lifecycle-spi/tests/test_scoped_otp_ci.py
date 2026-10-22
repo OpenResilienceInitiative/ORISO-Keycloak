@@ -131,5 +131,24 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
         self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(app,
                          protectedAppCurrentStateAndOriginalSetupSecretVerified=False)))
         self.assertEqual('GENUINE_PROTECTED_SELF_OTP_APP403_RED', classify(dict(app, protectedSelfAppSetupStatus=403)))
-        self.assertEqual('GREEN', classify(dict(app, protectedSelfAppSetupStatus=201,
-                                               protectedSelfAppNativeEffectAndExactRetryVerified=True)))
+        complete = dict(app, protectedSelfAppSetupStatus=201,
+                        protectedSelfAppNativeEffectAndExactRetryVerified=True)
+        self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(complete))
+        operations = {'otp.delete': 200, 'otp.email-finish': 201, 'otp.email-start': 202,
+                      'account.read': 200, 'account.profile': 200}
+        red = {operation: {'status': 403, 'expected': status, 'preconditions': True,
+                           'unchangedOnDenial': True} for operation, status in operations.items()}
+        self.assertEqual('GENUINE_PROTECTED_REMAINING_OPERATIONS403_BATCH_RED',
+                         classify(dict(complete, remainingOperations=red)))
+        for operation in operations:
+            for field, value in [('status', 400), ('preconditions', False), ('unchangedOnDenial', False)]:
+                changed = {key: dict(row) for key, row in red.items()}
+                changed[operation][field] = value
+                self.assertNotEqual('GENUINE_PROTECTED_REMAINING_OPERATIONS403_BATCH_RED',
+                                    classify(dict(complete, remainingOperations=changed)))
+            missing = dict(red)
+            del missing[operation]
+            self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(complete, remainingOperations=missing)))
+        green = {operation: {'status': status, 'preconditions': True,
+                             'effectAndRetryVerified': True} for operation, status in operations.items()}
+        self.assertEqual('GREEN', classify(dict(complete, remainingOperations=green)))

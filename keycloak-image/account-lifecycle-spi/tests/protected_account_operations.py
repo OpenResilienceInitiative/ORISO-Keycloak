@@ -28,6 +28,9 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         value['bindings'][0]['accountOperations'] = [{
             'authority': 'PLATFORM', 'targetProfiles': ['platform-v1'], 'selfOnly': True,
             'operations': ['account.read', 'otp.app-setup', 'otp.delete', 'otp.email-finish', 'otp.email-start', 'otp.read'],
+        }, {
+            'authority': 'PLATFORM', 'targetProfiles': [PROFILE, 'platform-v1'], 'selfOnly': False,
+            'operations': ['account.read', 'account.profile', 'account.email'],
         }]
         cls.installed_configuration = copy.deepcopy(value)
         return value
@@ -111,6 +114,124 @@ class ProtectedOperationRead(PeerReadiness):
         self.assertEqual(apps, [c for c in helper.admin('GET', '/users/' + account + '/credentials')
                                if c['type'] == 'otp'])
         o['protectedSelfAppNativeEffectAndExactRetryVerified'] = True
+        self.remaining_operations(helper, account, human, target, o)
+
+    def remaining_operations(self, helper, account, human, target, observed):
+        """Five finite public receiver assertions; every setup error remains an error."""
+        observations = observed['remainingOperations'] = {}
+
+        def current_state():
+            status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, human, 200)
+            self.assertEqual(200, status)
+            self.assertEqual(account, current['id'])
+            self.assertRegex(current['state'], r'^[a-f0-9]{64}$')
+            return current['state']
+
+        def credentials():
+            return helper.admin('GET', '/users/' + account + '/credentials')
+
+        def mutation(operation, method, route, body, expected):
+            before = credentials()
+            status, result = ScopedOtpRead.scoped_mutation(helper, human, body, operation, method, route, expected)
+            unchanged = before == credentials()
+            observations[operation] = {'status': status, 'expected': expected,
+                                       'preconditions': True, 'unchangedOnDenial': unchanged}
+            if status == 403:
+                self.assertTrue(unchanged)
+            with self.subTest(operation=operation):
+                self.assertEqual(expected, status)
+                self.assertEqual(body['operationId'], result['operationId'])
+                self.assertEqual(expected, result['status'])
+                if operation != 'otp.email-start':
+                    self.assertEqual((status, result), ScopedOtpRead.scoped_mutation(
+                        helper, human, body, operation, method, route, expected))
+                observations[operation]['effectAndRetryVerified'] = operation != 'otp.email-start'
+            return status, result
+
+        apps = [row for row in credentials() if row['type'] == 'otp']
+        self.assertEqual(1, len(apps))
+        delete = {'target': target, 'operationId': str(uuid.uuid4()),
+                  'expectedState': current_state(), 'otp': None}
+        mutation('otp.delete', 'DELETE', 'delete-otp', delete, 200)
+        # Installer-only fixture isolation, never routine native power.
+        for row in credentials():
+            if row['type'] in {'otp', 'MAIL_OTP_CM'}:
+                helper.admin('DELETE', '/users/' + account + '/credentials/' + row['id'])
+        self.assertFalse(any(row['type'] in {'otp', 'MAIL_OTP_CM'} for row in credentials()))
+        with patch.object(helper, 'remove_exact_mail_seed',
+                          lambda credential: ScopedOtpRead.remove_exact_mail_seed(helper, credential), create=True), \
+             patch.object(helper, 'addCleanup', self.addCleanup):
+            credential = ScopedOtpRead.seed_pending_email_credential(helper, '937451')
+        finish = {'target': target, 'operationId': str(uuid.uuid4()),
+                  'expectedState': current_state(),
+                  'otp': {'initialCode': '937451', 'secret': None, 'email': None}}
+        finish_status, _ = mutation('otp.email-finish', 'POST', 'setup-otp-mail', finish, 201)
+        if finish_status == 201:
+            mail = [row for row in credentials() if row['type'] == 'MAIL_OTP_CM']
+            self.assertEqual([credential], [row['id'] for row in mail])
+            self.assertTrue(json.loads(mail[0]['credentialData'])['active'])
+        helper.admin('DELETE', '/users/' + account + '/credentials/' + credential)
+        realm = helper.admin('GET', '')
+        realm['emailTheme'] = 'oriso'
+        realm['smtpServer'] = {'host': 'host.docker.internal',
+                              'port': str(helper.mail.server_address[1]),
+                              'from': 'otp-fixture@oriso.org', 'auth': 'false',
+                              'ssl': 'false', 'starttls': 'false'}
+        helper.admin('PUT', '', realm)
+        self.assertEqual(realm['smtpServer'], helper.admin('GET', '')['smtpServer'])
+        before_mail = len(helper.mail.messages)
+        start = {'target': target, 'operationId': str(uuid.uuid4()),
+                 'expectedState': current_state(), 'authorityValidUntil': int(time.time()) + 180,
+                 'otp': {'initialCode': None, 'secret': None,
+                         'email': 'protected-' + uuid.uuid4().hex + '@oriso.org'}}
+        start_status, ready = mutation('otp.email-start', 'PUT', 'send-verification-mail', start, 202)
+        if start_status == 403:
+            self.assertEqual(before_mail, len(helper.mail.messages))
+        if start_status == 202:
+            status, sent = ScopedOtpRead.scoped_mutation(helper, human, start, 'otp.email-start',
+                                                        'PUT', 'send-verification-mail', 200)
+            self.assertEqual(200, status)
+            self.assertEqual('SENT', sent['deliveryState'])
+            self.assertEqual(ready['operationId'], sent['operationId'])
+            self.assertEqual(before_mail + 1, len(helper.mail.messages))
+            self.assertEqual((200, sent), ScopedOtpRead.scoped_mutation(
+                helper, human, start, 'otp.email-start', 'PUT', 'send-verification-mail', 200))
+            self.assertEqual(before_mail + 1, len(helper.mail.messages))
+            observations['otp.email-start']['effectAndRetryVerified'] = True
+
+        primary = helper.human(record=False)
+        admin_target = copy.deepcopy(target)
+        admin_target['origin'].update(kind='HUMAN_ADMIN', workflowId=str(uuid.uuid4()),
+                                      humanSubject=helper.human_subject)
+        self.assertNotEqual(account, helper.human_subject)
+        primary_grant = OperationFixture.installed_configuration['bindings'][0]['accountOperations'][1]
+        self.assertFalse(primary_grant['selfOnly'])
+        self.assertIn(PROFILE, primary_grant['targetProfiles'])
+        for operation, command in [('account.read', 'read'), ('account.profile', 'profile')]:
+            body = {'target': admin_target}
+            if command == 'profile':
+                body.update(operationId=str(uuid.uuid4()), expectedState=current_state(),
+                            change={'firstName': 'Reviewed', 'lastName': 'Recipient',
+                                    'email': 'managed-' + uuid.uuid4().hex + '@oriso.org'})
+            before = helper.admin('GET', '/users/' + account)
+            status, result = HumanMaintenanceFixture.invoke(helper, command, body, primary, 200)
+            unchanged = before == helper.admin('GET', '/users/' + account)
+            observations[operation] = {'status': status, 'expected': 200,
+                                       'preconditions': True, 'unchangedOnDenial': unchanged}
+            if status == 403:
+                self.assertTrue(unchanged)
+            with self.subTest(operation=operation):
+                self.assertEqual(200, status)
+                if command == 'read':
+                    self.assertEqual(account, result['id'])
+                else:
+                    self.assertEqual(body['operationId'], result['operationId'])
+                    self.assertEqual((status, result), HumanMaintenanceFixture.invoke(
+                        helper, command, body, primary, 200))
+                    after = helper.admin('GET', '/users/' + account)
+                    for field, expected in body['change'].items():
+                        self.assertEqual(expected, after[field])
+                observations[operation]['effectAndRetryVerified'] = True
 
 
     def new_committed_platform_self(self, helper, observed):
@@ -236,5 +357,19 @@ def classify(observed):
             if observed.get('protectedSelfAppSetupStatus') == 403:
                 return 'GENUINE_PROTECTED_SELF_OTP_APP403_RED'
             if observed.get('protectedSelfAppSetupStatus') == 201 and observed.get('protectedSelfAppNativeEffectAndExactRetryVerified') is True:
-                return 'GREEN'
+                remaining = observed.get('remainingOperations')
+                operations = {'otp.delete': 200, 'otp.email-finish': 201, 'otp.email-start': 202,
+                              'account.read': 200, 'account.profile': 200}
+                if not isinstance(remaining, dict) or set(remaining) != set(operations):
+                    return 'INPUT_OR_FIXTURE_ERROR'
+                if any(row.get('preconditions') is not True for row in remaining.values()):
+                    return 'INPUT_OR_FIXTURE_ERROR'
+                if all(row.get('status') == 403 and row.get('expected') == operations[operation]
+                       and row.get('unchangedOnDenial') is True
+                       for operation, row in remaining.items()):
+                    return 'GENUINE_PROTECTED_REMAINING_OPERATIONS403_BATCH_RED'
+                if all(row.get('status') == operations[operation]
+                       and row.get('effectAndRetryVerified') is True
+                       for operation, row in remaining.items()):
+                    return 'GREEN'
     return 'BEHAVIOR_FAILURE'
