@@ -12,7 +12,7 @@ import org.junit.Test;
 public class GeneralPolicyTest {
   @Test
   public void existingReviewedSelfOperationsStillParse() {
-    accepted("account.read", "account.locale");
+    accepted("account.read", "account.locale", "account.profile", "account.password");
   }
 
   @Test
