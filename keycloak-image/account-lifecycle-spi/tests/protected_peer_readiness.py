@@ -13,6 +13,7 @@ from protected_resources import require_active
 
 
 PROFILE = "tenant-peer-v1"
+OTHER_PROFILE = "tenant-other-v1"
 POLICY = "own-tenant-admin-v1"
 TENANT = 17
 
@@ -37,7 +38,10 @@ class PeerFixture(NativeFixture):
             realmRoles=["tenant-admin"],
         )
         configuration["profiles"].append(profile)
-        configuration["bindings"][0]["protectedProfileIds"].append(PROFILE)
+        other = copy.deepcopy(profile)
+        other["id"] = OTHER_PROFILE
+        configuration["profiles"].append(other)
+        configuration["bindings"][0]["protectedProfileIds"].extend([PROFILE, OTHER_PROFILE])
         configuration["peerDelegationPolicies"] = [
             {
                 "id": POLICY,
@@ -249,6 +253,8 @@ class PeerReadiness(unittest.TestCase):
         self.assertEqual(child, receipt["approvalId"])
         self.assertEqual(result["scopeDigest"], receipt["scopeDigest"])
         observed["exactPeerIssuedReceiptVerified"] = True
+        # Transient test-only context for a distinct public cancellation tracer.
+        self.peer_case = (helper, account, bearer, child, child_scope, result)
 
     def peer_human(self, helper, native, password):
         require_active("peer-human-preconditions")

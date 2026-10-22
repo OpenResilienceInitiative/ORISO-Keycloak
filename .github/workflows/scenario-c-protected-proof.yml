@@ -107,6 +107,7 @@ jobs:
       max-parallel: 2
       matrix:
         case:
+          - committed-own-tenant-peer-cancel
           - committed-own-tenant-peer
           - binding-rollback-only-unavailable
           - binding-corrected-restart-available
@@ -176,6 +177,11 @@ jobs:
                 python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_ordering.py \
                   --report keycloak-image/account-lifecycle-spi/proof-output/commit-ordering-readiness.json ;;
             esac
+          elif [ "$PROTECTED_INSTALLATION_CASE" = committed-own-tenant-peer-cancel ]; then
+            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
+              -p test_protected_peer_cancel_controls.py -q
+            python keycloak-image/account-lifecycle-spi/tests/run_protected_peer_cancel.py \
+              --report keycloak-image/account-lifecycle-spi/proof-output/peer-cancel.json
           elif [ "$PROTECTED_INSTALLATION_CASE" = committed-own-tenant-peer ]; then
             python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
               -p test_protected_peer_controls.py -q
