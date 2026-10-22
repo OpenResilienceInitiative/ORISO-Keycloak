@@ -68,7 +68,8 @@ final class MagicLinkAuthority {
     var command = parse(commands.get(0));
     fields(command,"version","workflowId","targetUserId","tenantId","clientId","expiresAt","claimDigest");
     String workflow = uuid(text(command,"workflowId",36,false)), target = uuid(text(command,"targetUserId",36,false));
-    long tenant = number(command,"tenantId",true), expiry = number(command,"expiresAt",true), now = Instant.now().getEpochSecond();
+    Long tenant = command.get("tenantId").isNull() ? null : number(command,"tenantId",false);
+    long expiry = number(command,"expiresAt",true), now = Instant.now().getEpochSecond();
     if (number(command,"version",true) != 1 || !"app".equals(text(command,"clientId",255,false))
         || expiry <= now || expiry-now > 900) deny();
     hex(text(command,"claimDigest",64,false));
@@ -90,8 +91,10 @@ final class MagicLinkAuthority {
     var current = AccountLifecycleResource.lockedSnapshot(em,target);
     if (!realm.getId().equals(current.path("realmId").asText()) || !current.path("enabled").asBoolean()
         || !current.path("serviceAccountClientLink").isNull() || !current.path("federationLink").isNull()) deny();
-    var tenants = current.path("attributes").path("tenantId");
-    if (!tenants.isArray() || tenants.size() != 1 || !tenants.get(0).isTextual()
+    var tenants = current.path("attributes").get("tenantId");
+    if (tenant == null) {
+      if (tenants != null) deny();
+    } else if (tenants == null || !tenants.isArray() || tenants.size() != 1 || !tenants.get(0).isTextual()
         || !Long.toString(tenant).equals(tenants.get(0).asText())) deny();
     var roleIds = new TreeSet<String>(); current.path("roles").forEach(value -> roleIds.add(value.asText()));
     var groupIds = new TreeSet<String>(); current.path("groups").forEach(value -> groupIds.add(value.asText()));
