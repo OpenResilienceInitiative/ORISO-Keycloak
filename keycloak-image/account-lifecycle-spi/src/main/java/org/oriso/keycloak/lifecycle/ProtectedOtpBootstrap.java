@@ -305,6 +305,8 @@ final class ProtectedOtpBootstrap {
     crypto.verifyCommand(proof, machine, "oriso-otp", "OTP", "otp.bootstrap-email-start", "PUT",
         "realm/" + session.getContext().getRealm().getId() + "/account/" + account, materialized);
     var owner = emailOwner(session, crypto, machine, request, prepareReceipt);
+    crypto.verifyCommand(proof, machine, "oriso-otp", "OTP", "otp.bootstrap-email-start", "PUT",
+        "realm/" + owner.realm().getId() + "/account/" + account, materialized);
     String id = owner.realm().getId() + ":" + request.operationId();
     String digest = crypto.mac("otp-bootstrap-intent/v1", materialized);
     var prior = owner.em().find(AccountMaintenanceOperation.class, id, LockModeType.PESSIMISTIC_WRITE);
@@ -360,7 +362,7 @@ final class ProtectedOtpBootstrap {
     }
     if (delivery != null || phase != EmailPhase.REQUEST || !"PREPARED".equals(owner.bootstrap().state)) conflict();
     var user = currentEmailUser(session, crypto, owner, username, false);
-    if (!request.otp().path("email").asText().equals(parse(owner.approval().scope).path("recipient").asText())) deny();
+    if (!request.otp().path("email").asText().equals(parse(owner.approval().scope).path("scope").path("recipient").asText())) deny();
     var token = machine.nativeAuth().getToken();
     long now = Instant.now().getEpochSecond();
     if (token.getIat() == null || token.getExp() == null || token.getIat() <= 0
