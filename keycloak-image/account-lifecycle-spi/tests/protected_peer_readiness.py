@@ -256,6 +256,7 @@ class PeerReadiness(unittest.TestCase):
         observed["exactPeerIssuedReceiptVerified"] = True
         # Transient test-only context for a distinct public cancellation tracer.
         self.peer_case = (helper, account, bearer, child, child_scope, result)
+        self.peer_origin = (approval, attempt, create, commit, terminal)
 
     def peer_human(self, helper, native, password):
         require_active("peer-human-preconditions")
