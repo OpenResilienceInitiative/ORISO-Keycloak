@@ -113,6 +113,8 @@ final class MaintenanceTarget {
           ||!lineage.tenant().equals(scope.path("tenantId")))deny();
       expectedRoles=desiredRoles;
     }
+    if ("DELETION".equals(origin.path("kind").asText())
+        && !Set.of("ASKER", "CONSULTANT").contains(LifecycleGroups.allowedKind(expectedRoles))) deny();
     if (humanSelf) {
       if ("otp.delete".equals(otpOperation)) policy.requireSelfOtpDelete(session, request, rawHumanBearer);
       else if ("otp.app-setup".equals(otpOperation)) policy.requireSelfOtpAppSetup(session, request, rawHumanBearer);
