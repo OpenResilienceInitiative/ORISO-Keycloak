@@ -34,10 +34,36 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             current = json.loads(base64.urlsafe_b64decode(refreshed + '=' * (-len(refreshed) % 4)))
             refreshed_expiry = current['exp']
             self.assertGreater(refreshed_expiry, now + 30)
-            for field in ['sub', 'azp', 'iss']:
-                self.assertEqual(previous[field], current[field])
+            for claims in [previous, current]:
+                self.assertEqual('admin-cli', claims['azp'])
+                self.assertEqual(self.base + '/realms/master', claims['iss'])
+            self.assertEqual('sub' in previous, 'sub' in current)
+            if 'sub' in previous:
+                self.assertEqual(previous['sub'], current['sub'])
+            # Keycloak 26.6.3 makes admin-cli lightweight; its Subject mapper may omit sub.
+            # Resolve BOTH native sessions to the same actual master user instead.
+            status, installers = call(self.base, 'GET',
+                '/admin/realms/master/users?username=synthetic-installer&exact=true', token=self.installer)
+            self.assertEqual(200, status)
+            self.assertEqual(1, len(installers))
+            installer = installers[0]
+            self.assertEqual('synthetic-installer', installer['username'])
+            self.assertTrue(installer['enabled'])
+            status, sessions = call(self.base, 'GET',
+                '/admin/realms/master/users/' + installer['id'] + '/sessions', token=self.installer)
+            self.assertEqual(200, status)
+            for claims in [previous, current]:
+                self.assertIs(type(claims['sid']), str)
+                matched = [session for session in sessions if session['id'] == claims['sid']]
+                self.assertEqual(1, len(matched))
+                self.assertEqual(installer['id'], matched[0]['userId'])
+                self.assertIn('admin-cli', matched[0]['clients'].values())
+                if 'sub' in claims:
+                    self.assertEqual(installer['id'], claims['sub'])
             ProtectedOperationRead.observation.setdefault('installerTokenRefreshes', []).append({
                 'checkedAt': now, 'previousExpiry': expiry, 'newExpiry': refreshed_expiry,
+                'subjectClaimPresent': 'sub' in previous,
+                'bothSessionsOwnedBySameActualMasterInstaller': True,
                 'sameExistingFixtureIdentityBeforeAction': True})
         try:
             return super().admin(method, path, body)
