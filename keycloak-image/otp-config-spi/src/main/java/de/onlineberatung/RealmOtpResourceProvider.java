@@ -70,6 +70,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
 
     final RealmModel realm = this.session.getContext().getRealm();
     final UserModel user = this.session.users().getUserByUsername(realm, username);
+    sessionAuthenticator.authorizeTarget(session, user);
 
     if (isNull(user)) {
       return Response.status(Status.BAD_REQUEST)
@@ -110,6 +111,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
 
     final RealmModel realm = this.session.getContext().getRealm();
     final UserModel user = this.session.users().getUserByUsername(realm, username);
+    sessionAuthenticator.authorizeTarget(session, user);
 
     if (isNull(user)) {
       return Response.status(Status.BAD_REQUEST)
@@ -146,6 +148,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
 
     final RealmModel realm = this.session.getContext().getRealm();
     final UserModel user = this.session.users().getUserByUsername(realm, username);
+    sessionAuthenticator.authorizeTarget(session, user);
 
     if (isNull(user)) {
       return Response.status(Status.BAD_REQUEST).entity(new Error().error(MISSING_PARAMETER_ERROR)
@@ -169,6 +172,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
 
     final var realm = this.session.getContext().getRealm();
     final var user = this.session.users().getUserByUsername(realm, username);
+    sessionAuthenticator.authorizeTarget(session, user);
 
     if (isNull(user)) {
       return Response.status(Status.BAD_REQUEST).entity(new Error().error(MISSING_PARAMETER_ERROR)
@@ -196,6 +200,7 @@ public class RealmOtpResourceProvider implements RealmResourceProvider {
 
     final var realm = this.session.getContext().getRealm();
     final var user = this.session.users().getUserByUsername(realm, username);
+    sessionAuthenticator.authorizeTarget(session, user);
 
     if (isNull(user)) {
       return Response.status(Status.BAD_REQUEST).entity(new Error().error(MISSING_PARAMETER_ERROR)
