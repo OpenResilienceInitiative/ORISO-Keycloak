@@ -43,6 +43,19 @@ def exercise(test, helper, primary, peer, observed):
             target = human_target(helper, account, native)
             status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, primary, 200)
             test.assertEqual(200, status)
+            historical = refused = None
+            if label.startswith('PROTECTED'):
+                historical = {'target': copy.deepcopy(target), 'operationId': str(uuid.uuid4()),
+                    'expectedState': current['state'], 'change': {'firstName': 'BeforeRoleAddition',
+                        'lastName': native['lastName'], 'email': native['email']}}
+                historical_status, historical_result = HumanMaintenanceFixture.invoke(helper, 'profile', historical, primary, 200)
+                test.assertEqual(200, historical_status)
+                test.assertEqual((200, historical_result), HumanMaintenanceFixture.invoke(helper, 'profile', historical, primary, 200))
+                refused = copy.deepcopy(historical); refused['operationId'] = str(uuid.uuid4()); refused['change']['firstName'] = 'StaleCAS'
+                refusal_status, refusal_result = HumanMaintenanceFixture.invoke(helper, 'profile', refused, primary, 409)
+                test.assertEqual(409, refusal_status); test.assertEqual('NO_EFFECT', refusal_result['result'])
+                status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, primary, 200)
+                test.assertEqual(200, status)
             body = {'target': target, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'], 'change': change}
             before = helper.admin('GET', '/users/' + account)
             status, result = HumanMaintenanceFixture.invoke(helper, 'profile-transition', body, primary, 200)
@@ -80,6 +93,17 @@ def exercise(test, helper, primary, peer, observed):
             with test.subTest(operation='profile-transition.' + label + '.fresh-self-lineage'):
                 test.assertEqual(200, self_status); test.assertEqual(required, set(current_self['effectiveRoles']))
                 records[label]['freshHumanCurrentProfileAndOriginalProvenanceVerified'] = True
+            if historical is not None:
+                # The installed dual profile has explicit read/transition rights but no profile
+                # write right. A saved UPDATED receipt cannot supply the missing current grant.
+                replay_status, replay = HumanMaintenanceFixture.invoke(helper, 'profile', historical, primary, 403)
+                records[label]['savedProfileAfterCurrentOperationGrantWithdrawal'] = replay_status
+                with test.subTest(operation='profile-transition.saved-updated-requires-current-target-operation-grant'):
+                    test.assertEqual(403, replay_status); test.assertNotIn('receipt', replay)
+                # Learning the exact permanent refusal needs current read reach, not a newly
+                # granted mutation right that the current target deliberately does not have.
+                test.assertEqual((409, refusal_result), HumanMaintenanceFixture.invoke(helper, 'profile', refused, primary, 409))
+                records[label]['savedNoEffectRequiresCurrentReadWithoutMutationGrant'] = True
     finally:
         helper.account_id, helper.creation_input = old_account, old_creation
 

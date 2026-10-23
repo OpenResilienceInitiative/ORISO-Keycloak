@@ -60,6 +60,7 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'targetProfiles': sorted([PROFILE, dual['id']]), 'selfOnly': False,
             'operations': ['account.profile-transition', 'account.read']})
         value['bindings'][0]['accountOperations'][2]['targetProfiles'].append(dual['id'])
+        value['bindings'][0]['accountOperations'][2]['targetProfiles'].sort()
         current_peer = copy.deepcopy(value['peerDelegationPolicies'][0])
         current_peer.update(id='own-tenant-consultant-v2', sourceProfileId=dual['id'],
             sourceProfileVersion=2, realmRoles=roles, protectedProfileIds=sorted([PROFILE, dual['id']]))
