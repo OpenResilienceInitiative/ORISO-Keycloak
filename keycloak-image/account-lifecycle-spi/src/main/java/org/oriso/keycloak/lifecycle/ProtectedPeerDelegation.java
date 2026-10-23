@@ -52,6 +52,16 @@ final class ProtectedPeerDelegation {
     long tenant = provenance(origin, attempt, profile);
     if (!subject.equals(attempt.accountId)
         || !origin.delegationSnapshot.equals(snapshot(origin, attempt, profile, policy, tenant))) deny();
+    // The original consumed snapshot above stays byte-exact. Only the approved append-only
+    // native lineage may supply a changed current tenant/profile for this same person.
+    var lineage=MaintenanceLineage.resolve(session,crypto,subject,attempt.id,"PROTECTED",profile.id(),profile.version(),
+        JSON.valueToTree(Long.toString(tenant)),profile.snapshot());
+    var currentProfile=config.profiles.get(lineage.profileId());
+    if(currentProfile==null||currentProfile.version()!=lineage.profileVersion()||!"TENANT_ADMIN".equals(currentProfile.kind())
+        ||!canonical(currentProfile.snapshot()).equals(canonical(lineage.nativeProfile())))deny();
+    var currentPolicy=policy(currentProfile);if(currentPolicy==null)deny();
+    try{tenant=Long.parseLong(lineage.tenant().asText());}catch(NumberFormatException malformed){deny();return null;}
+    if(tenant<=0)deny();profile=currentProfile;policy=currentPolicy;
     var value = JSON.createObjectNode();
     for (String name : List.of("realmId", "issuer", "technicalSubjects", "technicalGroupIds", "technicalRoles"))
       value.set(name, config.installation.path(name).deepCopy());
@@ -66,7 +76,21 @@ final class ProtectedPeerDelegation {
   }
 
   CurrentHumanAuthorization.VerifiedHuman require(Resolved resolved) {
+    if (resolved.sourceProfile() == null)
+      return CurrentHumanAuthorization.requirePrimary(session, config, resolved.binding(), null);
     var human = CurrentHumanAuthorization.require(session, resolved.binding().policy());
+    return checkedProfile(resolved, human);
+  }
+
+  CurrentHumanAuthorization.VerifiedHuman require(Resolved resolved, String rawHumanBearer) {
+    if (resolved.sourceProfile() == null)
+      return CurrentHumanAuthorization.requirePrimary(session, config, resolved.binding(), rawHumanBearer);
+    return checkedProfile(resolved,
+        CurrentHumanAuthorization.require(session, resolved.binding().policy(), rawHumanBearer));
+  }
+
+  private CurrentHumanAuthorization.VerifiedHuman checkedProfile(Resolved resolved,
+      CurrentHumanAuthorization.VerifiedHuman human) {
     var profile = resolved.sourceProfile();
     if (profile != null) {
       config.validateProfile(session, profile);
@@ -77,6 +101,18 @@ final class ProtectedPeerDelegation {
       if (!groups.equals(Set.of(profile.groupId()))) deny();
     }
     return human;
+  }
+
+  // Facts only. The original peer provenance verifier and its TENANT_ADMIN semantics are unchanged.
+  long committedTarget(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
+      ProtectedInvitationConfiguration.Profile profile) {
+    return provenance(origin, attempt, profile);
+  }
+
+  // Facts only for the operation resolver. This never constructs a peer/approval binding.
+  long committedOperationTarget(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
+      ProtectedInvitationConfiguration.Profile profile) {
+    return provenance(origin, attempt, profile, true);
   }
 
   void recordConsumed(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt) {
@@ -116,6 +152,13 @@ final class ProtectedPeerDelegation {
 
   private long provenance(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
       ProtectedInvitationConfiguration.Profile profile) {
+    return provenance(origin, attempt, profile, false);
+  }
+
+  private long provenance(ProtectedInvitationApproval origin, AccountLifecycleAttempt attempt,
+      ProtectedInvitationConfiguration.Profile profile, boolean operationTarget) {
+    boolean platform = operationTarget && "PLATFORM_ADMIN".equals(profile.kind());
+    if (!platform && !"TENANT_ADMIN".equals(profile.kind())) deny();
     if (!config.realmId.equals(origin.realmId) || !"CONSUMED".equals(origin.state)
         || origin.approvalReceipt == null || origin.transitionReceipt == null || origin.boundAttemptId == null
         || !config.realmId.equals(attempt.realmId) || !"COMMITTED".equals(attempt.state)
@@ -135,7 +178,7 @@ final class ProtectedPeerDelegation {
         || !origin.issuerSubject.equals(enriched.path("issuerSubject").asText())
         || !config.issuer.equals(enriched.path("issuer").asText())
         || !LifecycleAuthorization.equal(crypto.mac("protected-approval-scope/v1", enriched), origin.scopeDigest)
-        || !"TENANT_ADMIN".equals(scope.path("protectedKind").asText())
+        || !(platform ? "PLATFORM_ADMIN" : "TENANT_ADMIN").equals(scope.path("protectedKind").asText())
         || !profile.id().equals(scope.path("protectedProfileId").asText())
         || !origin.workflowId.equals(scope.path("workflowId").asText())
         || !origin.inviteId.equals(scope.path("inviteId").asText())
@@ -144,7 +187,7 @@ final class ProtectedPeerDelegation {
         || !scope.path("creatorClient").asText().equals(attempt.ownerClient)
         || !scope.path("creatorSubject").asText().equals(attempt.ownerSubject)) deny();
     var tenants = HumanPolicyJson.tenants(scope.path("targetTenantIds"));
-    if (tenants.size() != 1 || tenants.iterator().next() <= 0) deny();
+    if (tenants.size() != 1 || (platform ? tenants.iterator().next() != 0 : tenants.iterator().next() <= 0)) deny();
     long tenant = tenants.iterator().next();
     var requestBinding = JSON.createObjectNode(); requestBinding.set("request", request);
     requestBinding.put("issuerRealm", origin.realmId); requestBinding.put("issuerSubject", origin.issuerSubject);

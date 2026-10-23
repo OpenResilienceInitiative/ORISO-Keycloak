@@ -29,5 +29,8 @@ public class AccountMaintenanceOperation {
   @Column(name = "RESULT_JSON", length = 16000, nullable = false, updatable = false)
   String resultJson;
 
+  @Column(name = "REPLAY_REACH_JSON", length = 8192, updatable = false)
+  String replayReachJson;
+
   protected AccountMaintenanceOperation() {}
 }

@@ -7,7 +7,7 @@ on:
       - keycloak-image/**
       - .github/workflows/scenario-c-protected-proof.yml
   push:
-    branches: [dev, codex/367-c-protected-receiver-20261021, codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021]
+    branches: [codex/367-c-protected-receiver-20261021, codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021, dev]
     paths:
       - keycloak-image/**
       - .github/workflows/scenario-c-protected-proof.yml
@@ -107,10 +107,6 @@ jobs:
       max-parallel: 2
       matrix:
         case:
-          - independent-cleanup-status
-          - direct-authentication-before-realm-lock
-          - committed-peer-policy-withdrawal
-          - committed-peer-policy-revision
           - committed-own-tenant-peer-cancel
           - committed-own-tenant-peer
           - binding-rollback-only-unavailable
@@ -164,23 +160,7 @@ jobs:
           set -euo pipefail
           docker info > /dev/null
           export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
-          if [ "$PROTECTED_INSTALLATION_CASE" = independent-cleanup-status ]; then
-            export LIFECYCLE_AUTH_LOCK_COMPANION_JAR="$RUNNER_TEMP/oriso-proof-auth-lock-companion.jar"
-            python keycloak-image/account-lifecycle-spi/tests/build_auth_lock_companion.py \
-              --jar "$LIFECYCLE_AUTH_LOCK_COMPANION_JAR"
-            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
-              -p test_protected_cleanup_status_controls.py -q
-            python keycloak-image/account-lifecycle-spi/tests/run_protected_cleanup_status.py \
-              --report keycloak-image/account-lifecycle-spi/proof-output/cleanup-status.json
-          elif [ "$PROTECTED_INSTALLATION_CASE" = direct-authentication-before-realm-lock ]; then
-            export LIFECYCLE_AUTH_LOCK_COMPANION_JAR="$RUNNER_TEMP/oriso-proof-auth-lock-companion.jar"
-            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
-              -p 'test_protected_auth_lock*controls.py' -q
-            python keycloak-image/account-lifecycle-spi/tests/build_auth_lock_companion.py \
-              --jar "$LIFECYCLE_AUTH_LOCK_COMPANION_JAR"
-            python keycloak-image/account-lifecycle-spi/tests/run_protected_auth_lock_direct.py \
-              --report keycloak-image/account-lifecycle-spi/proof-output/auth-lock-direct.json
-          elif [ "$PROTECTED_INSTALLATION_CASE" = binding-rollback-only-unavailable ] ||
+          if [ "$PROTECTED_INSTALLATION_CASE" = binding-rollback-only-unavailable ] ||
              [ "$PROTECTED_INSTALLATION_CASE" = binding-commit-failure-unavailable ] ||
              [ "$PROTECTED_INSTALLATION_CASE" = binding-commit-ordering-available ]; then
             export LIFECYCLE_PROOF_COMPANION_JAR="$RUNNER_TEMP/oriso-proof-readiness-companion.jar"
@@ -197,12 +177,6 @@ jobs:
                 python keycloak-image/account-lifecycle-spi/tests/run_protected_commit_ordering.py \
                   --report keycloak-image/account-lifecycle-spi/proof-output/commit-ordering-readiness.json ;;
             esac
-          elif [ "$PROTECTED_INSTALLATION_CASE" = committed-peer-policy-withdrawal ] ||
-               [ "$PROTECTED_INSTALLATION_CASE" = committed-peer-policy-revision ]; then
-            python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
-              -p test_protected_peer_policy_controls.py -q
-            python keycloak-image/account-lifecycle-spi/tests/run_protected_peer_policy.py \
-              --report keycloak-image/account-lifecycle-spi/proof-output/peer-policy-restart.json
           elif [ "$PROTECTED_INSTALLATION_CASE" = committed-own-tenant-peer-cancel ]; then
             python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests \
               -p test_protected_peer_cancel_controls.py -q
@@ -262,6 +236,5 @@ jobs:
             keycloak-image/account-lifecycle-spi/proof-output/*.xml
             keycloak-image/account-lifecycle-spi/target/surefire-reports/TEST-*.xml
             ${{ runner.temp }}/oriso-proof-readiness-companion.jar
-            ${{ runner.temp }}/oriso-proof-auth-lock-companion.jar
           if-no-files-found: error
           retention-days: 14

@@ -1,0 +1,47 @@
+{
+  "warning": "PUBLIC SYNTHETIC PROTOCOL TEST KEY; NEVER A RUNTIME CREDENTIAL",
+  "testKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "domain": "maintenance-no-effect-receipt/v1",
+  "requestBody": {
+    "target": {
+      "accountId": "33333333-3333-4333-8333-333333333333",
+      "tenantId": "11",
+      "origin": {
+        "kind": "HUMAN_ADMIN",
+        "workflowId": "44444444-4444-4444-8444-444444444444",
+        "humanSubject": "55555555-5555-4555-8555-555555555555",
+        "humanIssuer": "https://auth.test/realms/synthetic",
+        "humanClient": "admin-web",
+        "humanAuthority": "PROTECTED_ACCOUNT_OPERATIONS_V1"
+      }
+    },
+    "operationId": "66666666-6666-4666-8666-666666666666",
+    "expectedState": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "change": {
+      "firstName": "Müller",
+      "lastName": "Native",
+      "email": "synthetic@example.invalid"
+    }
+  },
+  "payload": {
+    "realmId": "11111111-1111-4111-8111-111111111111",
+    "accountId": "33333333-3333-4333-8333-333333333333",
+    "operationId": "66666666-6666-4666-8666-666666666666",
+    "command": "profile",
+    "ownerClient": "backend-account-admin",
+    "ownerSubject": "22222222-2222-4222-8222-222222222222",
+    "intentDigest": "c4f3178a91d5b25656f12eb409d8bf42fec427730c8ceeb5add07bfc831dc859",
+    "previousState": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tenantId": "11",
+    "originDigest": "9628900f814f87f5ccecce93e5390c670128a795047d9f4769063da4137058dc",
+    "result": "NO_EFFECT",
+    "status": 409
+  },
+  "outer": {
+    "operationId": "66666666-6666-4666-8666-666666666666",
+    "accountId": "33333333-3333-4333-8333-333333333333",
+    "result": "NO_EFFECT",
+    "status": 409,
+    "receipt": "eyJhY2NvdW50SWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJjb21tYW5kIjoicHJvZmlsZSIsImludGVudERpZ2VzdCI6ImM0ZjMxNzhhOTFkNWIyNTY1NmYxMmViNDA5ZDhiZjQyZmVjNDI3NzMwYzhjZWViNWFkZDA3YmZjODMxZGM4NTkiLCJvcGVyYXRpb25JZCI6IjY2NjY2NjY2LTY2NjYtNDY2Ni04NjY2LTY2NjY2NjY2NjY2NiIsIm9yaWdpbkRpZ2VzdCI6Ijk2Mjg5MDBmODE0Zjg3ZjVjY2VjY2U5M2U1MzkwYzY3MDEyOGE3OTUwNDdkOWY0NzY5MDYzZGE0MTM3MDU4ZGMiLCJvd25lckNsaWVudCI6ImJhY2tlbmQtYWNjb3VudC1hZG1pbiIsIm93bmVyU3ViamVjdCI6IjIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiIsInByZXZpb3VzU3RhdGUiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwicmVhbG1JZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsInJlc3VsdCI6Ik5PX0VGRkVDVCIsInN0YXR1cyI6NDA5LCJ0ZW5hbnRJZCI6IjExIn0.d93a5d1e70db999e7617be114f03ce63ded1b789de54b7303ce0a904ed0c2b9e"
+  }
+}

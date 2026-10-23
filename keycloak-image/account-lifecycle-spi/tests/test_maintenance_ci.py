@@ -37,11 +37,11 @@ class MaintenanceEvidenceGate(unittest.TestCase):
                     ET.SubElement(case, "error", message="private-do-not-copy").text = "private-do-not-copy"
             ET.ElementTree(suite).write(self.reports / ("TEST-" + name + ".xml"))
 
-    def test_exact_composed_forty_six_successes_are_required(self):
+    def test_exact_composed_forty_seven_successes_are_required(self):
         self.units()
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertTrue(result["accepted"])
-        self.assertEqual(46, result["tests"])
+        self.assertEqual(57, result["tests"])
 
     def test_missing_reports_cannot_pass(self):
         self.assertFalse(sanitize_units(self.reports, self.root / "safe.xml")["accepted"])
@@ -57,7 +57,7 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertFalse(result["accepted"])
         self.assertNotIn("private-do-not-copy", (self.root / "safe.xml").read_text())
-        self.assertEqual(46, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
+        self.assertEqual(57, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
 
     def test_suite_counters_cannot_hide_a_failure_without_a_method_node(self):
         self.units()
@@ -107,10 +107,17 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         green = dict(base, nativeExitedNonzeroWithoutOom=False, bindingValidationSourceWitness=False,
                      driftHumanLoginStatus=200, selfStatus=503, otpStatus=503,
                      bothUnavailableNoStore=True, ordinaryMachineCreationReadDeleteVerified=True,
-                     wrongActorAndProofDeniedBeforeReadiness=True)
+                     wrongActorAndProofDeniedBeforeReadiness=True, exactNativeBindingCorrectionVerified=True,
+                     correctedBeforeRestartSelfStatus=503, correctedBeforeRestartOtpStatus=503,
+                     correctedRestartHumanLoginStatus=200, correctedRestartSelfStatus=200,
+                     correctedRestartOtpStatus=200, fourthBootSameImageJarConfigVolumeAndCaps=True)
         self.assertEqual("GREEN", classify(green))
         self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, bothUnavailableNoStore=False)))
         self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, ordinaryMachineCreationReadDeleteVerified=False)))
+        for key in ("exactNativeBindingCorrectionVerified", "fourthBootSameImageJarConfigVolumeAndCaps"):
+            self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, **{key: False})))
+        self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, correctedBeforeRestartSelfStatus=200)))
+        self.assertEqual("BEHAVIOR_FAILURE", classify(dict(green, correctedRestartSelfStatus=503)))
 
     def test_native_mount_identity_ignores_docker_listing_order_but_preserves_ownership(self):
         from maintenance_readiness import mounts

@@ -32,7 +32,14 @@ def classify(o):
     if (o.get("driftHumanLoginStatus") == 200 and o.get("selfStatus") == 503
             and o.get("otpStatus") == 503 and o.get("bothUnavailableNoStore") is True
             and o.get("ordinaryMachineCreationReadDeleteVerified") is True
-            and o.get("wrongActorAndProofDeniedBeforeReadiness") is True):
+            and o.get("wrongActorAndProofDeniedBeforeReadiness") is True
+            and o.get("exactNativeBindingCorrectionVerified") is True
+            and o.get("correctedBeforeRestartSelfStatus") == 503
+            and o.get("correctedBeforeRestartOtpStatus") == 503
+            and o.get("correctedRestartHumanLoginStatus") == 200
+            and o.get("correctedRestartSelfStatus") == 200
+            and o.get("correctedRestartOtpStatus") == 200
+            and o.get("fourthBootSameImageJarConfigVolumeAndCaps") is True):
         return "GREEN"
     return "BEHAVIOR_FAILURE"
 
@@ -172,4 +179,29 @@ class HumanBindingReadiness(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual((200, receipt), MaintenancePermissions.maintenance(h, "delete", account, command))
         o["ordinaryMachineCreationReadDeleteVerified"] = True
+        # Correcting native data alone cannot publish the staged policy.
+        drifted = h.admin("GET", "/groups/" + group["id"])
+        correction = copy.deepcopy(drifted); correction["name"] = group["name"]
+        h.admin("PUT", "/groups/" + group["id"], correction)
+        self.assertEqual(group, h.admin("GET", "/groups/" + group["id"]))
+        o["exactNativeBindingCorrectionVerified"] = True
+        o["correctedBeforeRestartSelfStatus"] = h.invoke("read", {"target": target}, human, 503)[0]
+        o["correctedBeforeRestartOtpStatus"] = ScopedOtpRead.scoped_read(h, human, target, 503)[0]
+        subprocess.run(["docker", "stop", "-t", "5", h.name], check=True, capture_output=True, timeout=30)
+        subprocess.run(["docker", "rm", h.name], check=True, capture_output=True, timeout=30)
+        subprocess.run([*h.configured_command, "--verbose"], check=True, capture_output=True, timeout=30)
+        ReadinessFixture.refresh_endpoint("human-binding-corrected-fourth-boot")
+        fourth = inspect()
+        self.assertEqual(before["Image"], fourth["Image"])
+        self.assertEqual(before["HostConfig"]["Memory"], fourth["HostConfig"]["Memory"])
+        self.assertEqual(before["HostConfig"]["NanoCpus"], fourth["HostConfig"]["NanoCpus"])
+        self.assertEqual(config, next(v for v in fourth["Config"]["Env"] if v.startswith("ORISO_ACCOUNT_MAINTENANCE_CONFIG=")))
+        self.assertEqual(mounts(before["Mounts"]), mounts(fourth["Mounts"]))
+        self.assertEqual(h.jar_sha256, hashlib.sha256(h.jar_path.read_bytes()).hexdigest())
+        o["fourthBootSameImageJarConfigVolumeAndCaps"] = True
+        ReadinessFixture.ready()
+        h.base, h.installer = ReadinessFixture.base, ReadinessFixture.installer
+        human = h.human(); o["correctedRestartHumanLoginStatus"] = 200
+        o["correctedRestartSelfStatus"] = h.invoke("read", {"target": target}, human, 200)[0]
+        o["correctedRestartOtpStatus"] = ScopedOtpRead.scoped_read(h, human, target, 200)[0]
         self.assertEqual("GREEN", classify(o))

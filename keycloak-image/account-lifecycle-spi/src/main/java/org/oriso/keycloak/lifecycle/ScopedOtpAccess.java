@@ -140,8 +140,10 @@ public final class ScopedOtpAccess {
     body.set("target", target);
     var request = MaintenanceRequest.parse("read", account, body);
     // Realm -> committed provenance -> current human -> native user/credential locks.
-    var current = new MaintenanceTarget(session, authorization, mappings)
-        .readOtpSelf(request, policies.apply(session), humanHeader);
+    var current = ProtectedAccountOperations.selected(target)
+        ? ProtectedAccountOperations.readSelfOtp(session, authorization, request, humanHeader)
+        : new MaintenanceTarget(session, authorization, mappings)
+            .readOtpSelf(request, policies.apply(session), humanHeader);
     return invoke(session, authorization, username, account, current, null, read).response();
   }
 
@@ -184,8 +186,9 @@ public final class ScopedOtpAccess {
     var read = JSON.createObjectNode();
     read.set("target", request.target());
     var target = MaintenanceRequest.parse("read", account, read);
-    var policy = policies.apply(session);
-    if (policy == null) deny();
+    boolean protectedSelf = ProtectedAccountOperations.selected(request.target());
+    var policy = protectedSelf ? null : policies.apply(session);
+    if (!protectedSelf && policy == null) deny();
     var em = session.getProvider(org.keycloak.connections.jpa.JpaConnectionProvider.class).getEntityManager();
     var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class,
         realm.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
@@ -204,7 +207,8 @@ public final class ScopedOtpAccess {
         throw new jakarta.ws.rs.ClientErrorException("OTP operation conflicts", 409);
       // The immutable operation is retry provenance. Reauthorize the actual current human,
       // then return before mutable credential/CAS lookup or a second enrollment effect.
-      if ("otp.delete".equals(operation)) policy.requireSelfOtpDelete(session, target, humanHeader);
+      if (protectedSelf) ProtectedAccountOperations.readSelfOperation(session, authorization, target, humanHeader, operation);
+      else if ("otp.delete".equals(operation)) policy.requireSelfOtpDelete(session, target, humanHeader);
       else if ("otp.email-finish".equals(operation)) policy.requireSelfOtpEmailFinish(session, target, humanHeader);
       else policy.requireSelfOtpAppSetup(session, target, humanHeader);
       var saved = parse(prior.resultJson);
@@ -215,8 +219,9 @@ public final class ScopedOtpAccess {
     var linked = "otp.email-finish".equals(operation) && body.has("emailStartOperationId")
         ? requireLinkedEmailStart(em, realm, authorization, machine, request) : null;
     var targets = new MaintenanceTarget(session, authorization, mappings);
-    var current = "otp.delete".equals(operation)
-        ? targets.readOtpSelfDelete(target, policy, humanHeader)
+    var current = protectedSelf
+        ? ProtectedAccountOperations.readSelfOperation(session, authorization, target, humanHeader, operation)
+        : "otp.delete".equals(operation) ? targets.readOtpSelfDelete(target, policy, humanHeader)
         : "otp.email-finish".equals(operation) ? targets.readOtpSelfEmailFinish(target, policy, humanHeader)
         : targets.readOtpSelfAppSetup(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
@@ -320,8 +325,9 @@ public final class ScopedOtpAccess {
     var read = JSON.createObjectNode();
     read.set("target", request.target());
     var target = MaintenanceRequest.parse("read", account, read);
-    var policy = policies.apply(session);
-    if (policy == null) deny();
+    boolean protectedSelf = ProtectedAccountOperations.selected(request.target());
+    var policy = protectedSelf ? null : policies.apply(session);
+    if (!protectedSelf && policy == null) deny();
     var em = session.getProvider(org.keycloak.connections.jpa.JpaConnectionProvider.class).getEntityManager();
     var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class,
         realm.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
@@ -344,7 +350,8 @@ public final class ScopedOtpAccess {
       if (!id.equals(delivery.id) || !realm.getId().equals(delivery.realmId)
           || !account.equals(delivery.accountId) || !LifecycleAuthorization.equal(digest, delivery.intentDigest)) deny();
       if (phase == EmailPhase.REQUEST) {
-        policy.requireSelfOtpEmailStart(session, target, humanHeader);
+        if (protectedSelf) ProtectedAccountOperations.emailStart(session, authorization, target, humanHeader);
+        else policy.requireSelfOtpEmailStart(session, target, humanHeader);
         if ("SENT".equals(delivery.state) && delivery.finalJson != null)
           return Response.ok(parse(delivery.finalJson)).header("Cache-Control", "no-store").build();
         if (!"READY".equals(delivery.state) || delivery.expiresAt <= java.time.Instant.now().getEpochSecond())
@@ -354,8 +361,9 @@ public final class ScopedOtpAccess {
         return Response.status(202).entity(parse(prior.resultJson)).header("Cache-Control", "no-store").build();
       }
       // Keep provenance locks before fresh human/native-user locks. Never refresh old CAS/body.
-      var current = new MaintenanceTarget(session, authorization, mappings)
-          .readOtpSelfEmailStart(target, policy, humanHeader);
+      var current = protectedSelf
+          ? ProtectedAccountOperations.emailStart(session, authorization, target, humanHeader).current()
+          : new MaintenanceTarget(session, authorization, mappings).readOtpSelfEmailStart(target, policy, humanHeader);
       if (delivery.expiresAt <= java.time.Instant.now().getEpochSecond()) deny();
       var binding = parse(delivery.bindingJson);
       if (phase == EmailPhase.CLAIM) {
@@ -412,18 +420,21 @@ public final class ScopedOtpAccess {
       }
     }
     if (delivery != null || phase != EmailPhase.REQUEST) deny();
-    var current = new MaintenanceTarget(session, authorization, mappings)
-        .readOtpSelfEmailStart(target, policy, humanHeader);
+    var protectedCurrent = protectedSelf
+        ? ProtectedAccountOperations.emailStart(session, authorization, target, humanHeader) : null;
+    var current = protectedSelf ? protectedCurrent.current()
+        : new MaintenanceTarget(session, authorization, mappings).readOtpSelfEmailStart(target, policy, humanHeader);
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
       throw new jakarta.ws.rs.ClientErrorException("Current OTP target state conflicts", 409);
-    var human = policy.requireSelfOtpEmailStart(session, target, humanHeader).identity();
+    long humanValidUntil = protectedSelf ? protectedCurrent.humanValidUntil()
+        : policy.requireSelfOtpEmailStart(session, target, humanHeader).identity().validatedJwtExpiresAt();
     var machineToken = machine.nativeAuth().getToken();
     long now = java.time.Instant.now().getEpochSecond();
     if (machineToken.getIat() == null || machineToken.getExp() == null
         || machineToken.getIat() <= 0 || machineToken.getExp() <= machineToken.getIat()
         || machineToken.getExp() <= now) deny();
     long expiry = Math.min(request.body().path("authorityValidUntil").longValue(),
-        Math.min(Math.min(human.validatedJwtExpiresAt(), machineToken.getExp()), now + 600));
+        Math.min(Math.min(humanValidUntil, machineToken.getExp()), now + 600));
     if (expiry <= now) deny();
     var invocation = invoke(session, authorization, username, account, current, request, prepare);
     if (invocation.response().getStatus() != 202 || invocation.emailCredential() == null) deny();

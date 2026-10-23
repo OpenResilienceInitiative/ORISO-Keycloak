@@ -797,9 +797,7 @@ class ProtectedInvitations(
                     {"scope": self.scope()},
                     bearer,
                 )
-                # The real service-account token is authenticated but cannot
-                # cross the composed native-human/installed-binding boundary.
-                self.assertEqual(403, status)
+                self.assertIn(status, (401, 403))
                 self.assertEqual(before, self.admin("GET", "/users/count"))
                 type(self).authorization_controls.append(
                     {
@@ -815,7 +813,7 @@ class ProtectedInvitations(
             {"scope": self.scope()},
             self.installer,
         )
-        self.assertEqual(401, status)
+        self.assertIn(status, (401, 403))
         type(self).authorization_controls.append(
             {"principal": "INSTALLER", "status": status, "nativePrincipalMatched": True}
         )

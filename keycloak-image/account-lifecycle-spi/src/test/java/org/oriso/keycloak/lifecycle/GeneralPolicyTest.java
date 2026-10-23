@@ -13,12 +13,105 @@ public class GeneralPolicyTest {
   @Test
   public void existingReviewedSelfOperationsStillParse() {
     accepted("account.read", "account.locale", "account.profile", "account.password");
+    accepted("account.read", "account.locale", "account.profile", "account.password", "account.email", "otp.read", "otp.app-setup",
+        "otp.delete", "otp.email-start", "otp.email-finish");
+    rejected("account.email", "account.email");
+    rejected("account.email", "account.profile-transition");
+    rejected("account.email", "account.ordinary-profile");
+    rejected("account.email", "account.self-password");
   }
 
   @Test
   public void exactReviewedSelfPolicyCanNameClosedOtpOperations() {
     accepted("account.read", "account.locale", "account.profile", "account.password", "otp.read", "otp.app-setup",
         "otp.delete", "otp.email-start", "otp.email-finish");
+  }
+
+  @Test
+  public void explicitOrdinaryAdministrationNeedsClosedReviewedProfilesAndOperations() {
+    var value = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    var grant = value.putArray("adminOperations").addObject();
+    grant.put("authority", "TENANT_PEER");
+    grant.putArray("targetProfiles").add("reviewed-consultant-v1");
+    grant.putArray("operations").add("account.read").add("account.profile").add("account.email")
+        .add("account.ordinary-profile").add("account.deactivate").add("account.reactivate").add("account.profile-transition");
+    grant.put("selfOnly", false);
+    try { assertNotNull(new GeneralPolicy(value)); }
+    catch (WebApplicationException rejected) {
+      fail("Exact independently reviewed ordinary administration rejected with status "
+          + rejected.getResponse().getStatus());
+    }
+    var platform = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)platform.path("adminOperations").path(0)).put("authority", "PLATFORM");
+    assertNotNull(new GeneralPolicy(platform));
+    for (String field : java.util.List.of("authority", "targetProfiles", "operations", "selfOnly")) {
+      var missing = value.deepCopy();
+      ((com.fasterxml.jackson.databind.node.ObjectNode)missing.path("adminOperations").path(0)).remove(field);
+      rejectAdmin(missing);
+    }
+    for (String op : java.util.List.of("*", "account.*", "otp.read", "account.password", "protected.approve")) {
+      var foreign = value.deepCopy();
+      ((com.fasterxml.jackson.databind.node.ObjectNode)foreign.path("adminOperations").path(0)).putArray("operations").add(op);
+      rejectAdmin(foreign);
+    }
+    var foreignProfile = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)foreignProfile.path("adminOperations").path(0)).putArray("targetProfiles").add("protected-platform-v1");
+    rejectAdmin(foreignProfile);
+    var self = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)self.path("adminOperations").path(0)).put("selfOnly", true);
+    rejectAdmin(self);
+    var duplicate = value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ArrayNode)duplicate.path("adminOperations")).add(grant.deepCopy());
+    rejectAdmin(duplicate);
+    var absent = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    assertNotNull(new GeneralPolicy(absent));
+    absent.putArray("adminOperations");
+    assertNotNull(new GeneralPolicy(absent));
+  }
+
+  @Test
+  public void inactivityWorkflowGrantsAreExplicitClosedAndDefaultEmpty() {
+    var value = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    var grant = value.putArray("workflowOperations").addObject();
+    grant.put("kind", "INACTIVITY"); grant.putArray("targetProfiles").add("reviewed-consultant-v1");
+    grant.putArray("operations").add("account.reactivate").add("account.read").add("account.deactivate");
+    try { assertNotNull(new GeneralPolicy(value)); }
+    catch (WebApplicationException refused) { fail("Reviewed workflow grant rejected with status " + refused.getResponse().getStatus()); }
+    for (String extra : List.of("authority", "selfOnly", "subject")) {
+      var wrong = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) wrong.path("workflowOperations").path(0)).put(extra, "unreviewed"); rejectAdmin(wrong);
+    }
+    for (String op : List.of("*", "account.profile", "account.delete", "otp.read")) {
+      var wrong = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) wrong.path("workflowOperations").path(0)).putArray("operations").add(op); rejectAdmin(wrong);
+    }
+    var unknown = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) unknown.path("workflowOperations").path(0)).putArray("targetProfiles").add("protected-platform-v1"); rejectAdmin(unknown);
+    var duplicate = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ArrayNode) duplicate.path("workflowOperations")).add(grant.deepCopy()); rejectAdmin(duplicate);
+    var empty = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read"); empty.putArray("workflowOperations"); assertNotNull(new GeneralPolicy(empty));
+    assertThrows(jakarta.ws.rs.ForbiddenException.class,()->new GeneralPolicy(empty).workflowOperations.require("reviewed-consultant-v1","account.read"));
+    var imported=value.deepCopy();var importGrant=(com.fasterxml.jackson.databind.node.ObjectNode)imported.path("workflowOperations").path(0);
+    importGrant.put("kind","IMPORT");importGrant.putArray("operations").add("account.read").add("account.ordinary-profile");
+    try{assertNotNull(new GeneralPolicy(imported));}catch(WebApplicationException refused){fail("Reviewed import grant rejected with status "+refused.getResponse().getStatus());}
+    importGrant.putArray("operations").add("account.reactivate");rejectAdmin(imported);
+
+  }
+
+  @Test
+  public void ordinaryAdoptionHasOnlyExactInstalledProfileAndVersion() {
+    var value=(com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
+    var profile=((com.fasterxml.jackson.databind.node.ObjectNode)value.path("ordinaryProfiles").path(0)).deepCopy();
+    profile.put("id","reviewed-user-v2");profile.put("version",2);profile.put("groupId","user-group");profile.put("groupPath","/human-roles/user");profile.putArray("realmRoles").add("user");
+    ((com.fasterxml.jackson.databind.node.ArrayNode)value.path("ordinaryProfiles")).add(profile);
+    var entry=value.putArray("adoptedAccounts").addObject();entry.put("accountId","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");entry.put("ordinaryProfileId","reviewed-user-v2");entry.put("profileVersion",2);
+    try { assertNotNull(new GeneralPolicy(value)); } catch(WebApplicationException refused){fail("Reviewed ordinary adoption rejected with status "+refused.getResponse().getStatus());}
+    for(String field:List.of("accountId","ordinaryProfileId","profileVersion")){var wrong=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("adoptedAccounts").path(0)).remove(field);rejectAdmin(wrong);}
+    var stale=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)stale.path("adoptedAccounts").path(0)).put("profileVersion",1);rejectAdmin(stale);
+    var unknown=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)unknown.path("adoptedAccounts").path(0)).put("ordinaryProfileId","missing");rejectAdmin(unknown);
+    var duplicate=value.deepCopy();((com.fasterxml.jackson.databind.node.ArrayNode)duplicate.path("adoptedAccounts")).add(entry.deepCopy());rejectAdmin(duplicate);
+    var extra=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)extra.path("adoptedAccounts").path(0)).put("authority","DELETE");rejectAdmin(extra);
+  }
+
+  private static void rejectAdmin(JsonNode value) {
+    try { new GeneralPolicy(value); fail("Unreviewed ordinary admin policy accepted"); }
+    catch (WebApplicationException rejected) { assertEquals(400, rejected.getResponse().getStatus()); }
   }
 
   @Test
@@ -44,9 +137,9 @@ public class GeneralPolicyTest {
     }
   }
 
-  private static void rejected(String operation) {
+  private static void rejected(String... operations) {
     try {
-      new GeneralPolicy(policy(operation));
+      new GeneralPolicy(policy(operations));
       fail("Unreviewed operation selector accepted");
     } catch (WebApplicationException rejected) {
       assertEquals(400, rejected.getResponse().getStatus());

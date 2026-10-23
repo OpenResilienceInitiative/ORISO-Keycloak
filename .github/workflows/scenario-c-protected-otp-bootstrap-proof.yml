@@ -8,7 +8,7 @@ on:
       - keycloak-image/otp-config-spi/**
       - .github/workflows/scenario-c-protected-otp-bootstrap-proof.yml
   push:
-    branches: [dev, codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021]
+    branches: [codex/367-c-maintenance-keycloak-20261021, codex/367-c-receiver-finish-20261021, dev]
     paths:
       - keycloak-image/**
       - keycloak-image/otp-config-spi/**
@@ -57,7 +57,7 @@ jobs:
           python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_maintenance_ci.py -v
           python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_scoped_otp_ci.py -v
           python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_protected_otp_bootstrap_controls.py -q
-      - name: Package default-off source and run all forty-six composed lifecycle Java units
+      - name: Package default-off source and run all forty-seven composed lifecycle Java units
         working-directory: keycloak-image/account-lifecycle-spi
         env:
           MAVEN_OPTS: -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2

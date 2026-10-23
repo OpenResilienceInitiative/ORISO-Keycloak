@@ -103,3 +103,52 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
 
     def test_foreign_class_cannot_supply_the_expected_method(self):
         self.assertEqual(1, self.gate(foreign_class=True)[0])
+
+    def test_protected_read_red_requires_real_committed_peer_and_separate_operation_grant(self):
+        from protected_account_operations import classify
+        required = ('actualNativeCommitAndConsumedApprovalVerified', 'actualPeerTokenIssuerClientAudienceAndGrantsVerified',
+                    'actualPeerUserinfoAndCurrentSessionVerified', 'sameRuntimeWithoutPerPersonBindingOrRestartVerified',
+                    'canonicalAdminThreeAudiencesAndNative403', 'explicitSeparateSelfOperationGrantInstalled')
+        value = dict.fromkeys(required, True)
+        value['protectedSelfOtpReadStatus'] = 403
+        self.assertEqual('GENUINE_PROTECTED_SELF_OTP_READ403_RED', classify(value))
+        for key in required:
+            self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(value, **{key: False})))
+        value['protectedSelfOtpReadStatus'] = 200
+        self.assertEqual('BEHAVIOR_FAILURE', classify(value))
+        read = dict(value, closedOriginalOtpSetupResultVerified=True)
+        self.assertEqual('GENUINE_PROTECTED_SELF_MAINTENANCE_READ403_RED',
+                         classify(dict(read, protectedSelfMaintenanceReadStatus=403)))
+        self.assertEqual('BEHAVIOR_FAILURE', classify(dict(read, protectedSelfMaintenanceReadStatus=200)))
+        app = dict(read, protectedSelfMaintenanceReadStatus=200,
+                   closedProtectedCurrentStateVerified=True,
+                   newPlatformCommittedConsumedNative0AndRealSessionVerified=True,
+                   newPlatformExplicitRootSelfGrantWithoutPersonBindingVerified=True,
+                   newPlatformSelfOriginalReadAndStateVerified=True,
+                   protectedAppCurrentStateAndOriginalSetupSecretVerified=True)
+        self.assertEqual('GENUINE_NEW_PLATFORM_SELF_OTP_READ403_RED', classify(dict(app, newPlatformSelfOtpReadStatus=403)))
+        self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(app, newPlatformExplicitRootSelfGrantWithoutPersonBindingVerified=False)))
+        self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(app,
+                         protectedAppCurrentStateAndOriginalSetupSecretVerified=False)))
+        self.assertEqual('GENUINE_PROTECTED_SELF_OTP_APP403_RED', classify(dict(app, protectedSelfAppSetupStatus=403)))
+        complete = dict(app, protectedSelfAppSetupStatus=201,
+                        protectedSelfAppNativeEffectAndExactRetryVerified=True)
+        self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(complete))
+        operations = {'otp.delete': 200, 'otp.email-finish': 201, 'otp.email-start': 202,
+                      'account.read': 200, 'account.profile': 200}
+        red = {operation: {'status': 403, 'expected': status, 'preconditions': True,
+                           'unchangedOnDenial': True} for operation, status in operations.items()}
+        self.assertEqual('GENUINE_PROTECTED_REMAINING_OPERATIONS403_BATCH_RED',
+                         classify(dict(complete, remainingOperations=red)))
+        for operation in operations:
+            for field, value in [('status', 400), ('preconditions', False), ('unchangedOnDenial', False)]:
+                changed = {key: dict(row) for key, row in red.items()}
+                changed[operation][field] = value
+                self.assertNotEqual('GENUINE_PROTECTED_REMAINING_OPERATIONS403_BATCH_RED',
+                                    classify(dict(complete, remainingOperations=changed)))
+            missing = dict(red)
+            del missing[operation]
+            self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(dict(complete, remainingOperations=missing)))
+        green = {operation: {'status': status, 'preconditions': True,
+                             'effectAndRetryVerified': True} for operation, status in operations.items()}
+        self.assertEqual('GREEN', classify(dict(complete, remainingOperations=green)))

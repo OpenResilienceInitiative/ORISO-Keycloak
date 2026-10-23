@@ -3,9 +3,8 @@
 This is a bounded alternative for the native capability gap measured in
 [Keycloak57](https://github.com/OpenResilienceInitiative/ORISO-Keycloak/issues/57).
 It is a review proposal within Keycloak53. Hassan and Shazia still have to accept
-the boundary. The production Dockerfile packages this module in the image. The
-provider remains disabled by default, and the realm/chart bindings do not activate
-it. It contains no account-command API.
+the boundary. The production Dockerfile and realm/chart bindings do not install
+or enable this module. It contains no account-command API.
 
 The five-actor target remains unchanged. The existing MAIL service account
 (`backend-mail`) has exactly `smtp-sync`, `system-email-delivery`,

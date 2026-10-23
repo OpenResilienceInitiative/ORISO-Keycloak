@@ -1,6 +1,7 @@
 """Actual ordinary human/session -> canonical machine maintenance HTTP diagnostic."""
 
 import base64
+import copy
 import hashlib
 import hmac
 import json
@@ -542,6 +543,89 @@ class HumanMaintenance(HumanMaintenanceFixture, unittest.TestCase):
             self.admin("PUT", "/users/" + self.account_id + "/reset-password",
                        {"type": "password", "value": self.creation_input["account"]["password"],
                         "temporary": False})
+
+        # The public password form additionally requires the current password. Verify it in
+        # the owning native credential transaction, without a second login/session grant.
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        original_password = self.creation_input["account"]["password"]
+        chosen_password = "Synthetic-self-" + uuid.uuid4().hex
+        checked_command = {"target": target, "operationId": str(uuid.uuid4()),
+                           "expectedState": current["state"],
+                           "change": {"currentPassword": original_password,
+                                      "password": chosen_password, "temporary": False}}
+        self.assertEqual(200, login(original_password))
+        self.phase("human-self-password-proof-preconditions", original_password_verified=True,
+                   exact_self_read=True, current_native_session=True,
+                   existing_public_form_requires_old_password=True)
+        try:
+            status, changed = self.invoke("self-password", checked_command, human, 200)
+            self.assertEqual(200, status)
+            encoded, signature = changed["receipt"].split(".")
+            self.assertTrue(hmac.compare_digest(signature, hmac.new(CONTEXT_KEY,
+                ("maintenance-operation-receipt\n" + encoded).encode(), hashlib.sha256).hexdigest()))
+            receipt = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            self.assertEqual("self-password", receipt["command"])
+            self.assertEqual(mac("maintenance-intent", checked_command), receipt["intentDigest"])
+            self.assertNotIn(original_password, canonical(changed).decode())
+            self.assertNotIn(chosen_password, canonical(changed).decode())
+            self.assertEqual(200, login(chosen_password))
+            self.assertEqual(400, login(original_password))
+            self.assertEqual((200, changed), self.invoke("self-password", checked_command, human, 200))
+            changed_body = copy.deepcopy(checked_command)
+            changed_body["change"]["currentPassword"] = chosen_password
+            self.assertEqual(409, self.invoke("self-password", changed_body, human, 409)[0])
+            status, after = self.invoke("read", {"target": target}, human, 200)
+            self.assertEqual(200, status)
+            wrong_old = copy.deepcopy(checked_command)
+            wrong_old["operationId"] = str(uuid.uuid4())
+            wrong_old["expectedState"] = after["state"]
+            self.assertEqual(400, self.invoke("self-password", wrong_old, human, 400)[0])
+            self.assertEqual(200, login(chosen_password))
+            self.phase("human-self-password-effect-and-retry", native_old_password_checked=True,
+                       exact_retry_without_second_effect=True, changed_intent_refused=True,
+                       wrong_current_password_has_no_effect=True)
+        finally:
+            self.admin("PUT", "/users/" + self.account_id + "/reset-password",
+                       {"type": "password", "value": original_password, "temporary": False})
+
+        # A fresh bearer may resolve an old committed outcome but cannot extend a frozen
+        # password intent's original deadline into a previously absent credential write.
+        status, current = self.invoke("read", {"target": target}, human, 200)
+        self.assertEqual(200, status)
+        deadline = int(time.time()) + 8
+        bounded = {"target": target, "operationId": str(uuid.uuid4()),
+                   "expectedState": current["state"], "authorityValidUntil": deadline,
+                   "change": {"currentPassword": original_password,
+                              "password": "Synthetic-bounded-" + uuid.uuid4().hex,
+                              "temporary": False}}
+        self.phase("human-password-deadline-preconditions", exact_self_read=True,
+                   current_native_session=True, original_password_verified=login(original_password) == 200,
+                   original_deadline_still_future=deadline > time.time())
+        try:
+            status, changed = self.invoke("self-password", bounded, human, 200)
+            self.phase("human-password-deadline-positive-reply", status=status,
+                       original_deadline_still_future=deadline > time.time())
+            self.assertEqual(200, status)
+            self.assertEqual(200, login(bounded["change"]["password"]))
+            while time.time() <= deadline:
+                time.sleep(0.1)
+            self.assertEqual((200, changed), self.invoke("self-password", bounded, human, 200))
+            absent = copy.deepcopy(bounded)
+            absent["operationId"] = str(uuid.uuid4())
+            status, current = self.invoke("read", {"target": target}, human, 200)
+            self.assertEqual(200, status)
+            absent["expectedState"] = current["state"]
+            absent["change"]["currentPassword"] = bounded["change"]["password"]
+            absent["change"]["password"] = "Synthetic-expired-no-effect-" + uuid.uuid4().hex
+            self.assertEqual(400, self.invoke("self-password", absent, human, 400)[0])
+            self.assertEqual(200, login(bounded["change"]["password"]))
+            self.assertEqual(400, login(absent["change"]["password"]))
+            self.phase("human-password-expired-outcome-fence", exact_old_receipt_only=True,
+                       expired_absent_has_no_write=True, no_original_deadline_extension=True)
+        finally:
+            self.admin("PUT", "/users/" + self.account_id + "/reset-password",
+                       {"type": "password", "value": original_password, "temporary": False})
 
     def test_real_human_self_locale_keeps_admin_receipt_owner_and_rejects_origin_mix(
         self,

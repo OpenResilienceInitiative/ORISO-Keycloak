@@ -12,13 +12,29 @@ record MaintenanceRequest(
     JsonNode target,
     String operationId,
     String expectedState,
-    JsonNode change) {
+    JsonNode change,
+    Long authorityValidUntil,
+    String include,
+    JsonNode workflow) {
   static MaintenanceRequest parse(String command, String accountId, JsonNode body) {
-    if (!Set.of("read", "profile", "email", "locale", "password", "ordinary-profile",
-        "deactivate", "reactivate", "delete").contains(command)) bad();
+    if (!Set.of("read", "profile", "email", "locale", "password", "self-password", "ordinary-profile",
+        "deactivate", "reactivate", "reassign-tenant", "profile-transition", "delete").contains(command)) bad();
     boolean read = "read".equals(command);
-    if (read) fields(body, "target");
+    boolean inactivity = body.has("workflow");
+    if (inactivity && read) fields(body, "target", "workflow");
+    else if (inactivity) fields(body, "target", "workflow", "operationId", "expectedState", "change");
+    else if (read && body.has("include")) fields(body, "target", "include");
+    else if (read) fields(body, "target");
+    else if ("self-password".equals(command) && body.has("authorityValidUntil"))
+      fields(body, "target", "operationId", "expectedState", "change", "authorityValidUntil");
     else fields(body, "target", "operationId", "expectedState", "change");
+    Long deadline = null;
+    if (body.has("authorityValidUntil")) {
+      var value = body.path("authorityValidUntil");
+      if (!"self-password".equals(command) || !value.isIntegralNumber() || !value.canConvertToLong()
+          || value.longValue() <= 0) bad();
+      deadline = value.longValue();
+    }
     var target = body.path("target");
     fields(target, "accountId", "tenantId", "origin");
     String actualId = text(target, "accountId", 255, false);
@@ -40,7 +56,17 @@ record MaintenanceRequest(
         || !human && (subject != null || issuer != null || client != null || authority != null)) deny();
     if ("SELF".equals(kind) && !actualId.equals(subject)
         || "HUMAN_ADMIN".equals(kind) && authority == null) deny();
-    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null);
+    String include = null;
+    if (read && body.has("include")) {
+      include = text(body, "include", 40, false);
+      if (!"TWO_FACTOR_STATUS_V1".equals(include) || !"HUMAN_ADMIN".equals(kind)
+          || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority)) bad();
+    }
+    JsonNode workflow = inactivity ? ("IMPORT".equals(body.path("workflow").path("kind").asText())
+        ? ImportWorkflow.parse(command,target,body.path("workflow"))
+        : InactivityWorkflow.parse(command, target, body.path("workflow"))) : null;
+    if (Set.of("INACTIVITY","IMPORT").contains(kind) && workflow == null) deny();
+    if (read) return new MaintenanceRequest(command, accountId, target.deepCopy(), null, null, null, null, include, workflow);
     String operationId = text(body, "operationId", 36, false);
     uuid(operationId);
     String state = text(body, "expectedState", 64, false);
@@ -54,7 +80,11 @@ record MaintenanceRequest(
         text(change, "email", 255, true);
       }
       case "email" -> {
-        fields(change, "email");
+        if ("SELF".equals(kind) && (change.has("firstName") || change.has("lastName"))) {
+          fields(change, "firstName", "lastName", "email");
+          text(change, "firstName", 255, true);
+          text(change, "lastName", 255, true);
+        } else fields(change, "email");
         text(change, "email", 255, false);
       }
       case "locale" -> {
@@ -66,21 +96,58 @@ record MaintenanceRequest(
         text(change, "password", 4096, false);
         if (!change.path("temporary").isBoolean()) bad();
       }
+      case "self-password" -> {
+        fields(change, "currentPassword", "password", "temporary");
+        text(change, "currentPassword", 4096, false);
+        text(change, "password", 4096, false);
+        if (!change.path("temporary").isBoolean() || change.path("temporary").asBoolean()) bad();
+        if (change.path("currentPassword").equals(change.path("password")))
+          throw new jakarta.ws.rs.ClientErrorException("The new password must differ", 409);
+      }
       case "ordinary-profile" -> {
-        fields(change, "group");
+        if(workflow!=null&&"IMPORT".equals(workflow.path("kind").asText()))fields(change,"group");
+        else if (change.has("profile")) {
+          fields(change, "group", "profile");
+          fields(change.path("profile"), "firstName", "lastName", "email");
+          text(change.path("profile"), "firstName", 255, true);
+          text(change.path("profile"), "lastName", 255, true);
+          text(change.path("profile"), "email", 255, true);
+        } else fields(change, "group");
         String group = text(change, "group", 512, false);
         if (!group.matches("/human-roles/[a-z0-9-]{1,80}")) deny();
       }
+      case "profile-transition" -> {
+        if(workflow!=null||!"HUMAN_ADMIN".equals(kind)||!"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority))deny();
+        if(change.has("group")){
+          fields(change,"transition","group");
+          if(!text(change,"group",512,false).matches("/human-roles/[a-z0-9-]{1,80}"))bad();
+        }else{
+          fields(change,"transition","profileId","profileVersion");
+          text(change,"profileId",255,false);number(change,"profileVersion",true);
+        }
+        if(!Set.of("ADD_CONSULTANT_IDENTITY","ADD_AGENCY_ADMIN_IDENTITY").contains(text(change,"transition",40,false)))bad();
+      }
       case "reactivate" -> {
+        if (inactivity) { fields(change, "restoreEnabled"); if (!change.path("restoreEnabled").isBoolean()) bad(); break; }
         fields(change, "expectedUsername", "expectedEmail", "password");
         text(change, "expectedUsername", 255, false);
         text(change, "expectedEmail", 255, false);
         text(change, "password", 4096, false);
       }
+      case "reassign-tenant" -> {
+        fields(change, "tenantId"); String desired = text(change,"tenantId",19,false);
+        if(!desired.matches("[1-9][0-9]{0,18}"))bad();
+        try { if(Long.parseLong(desired)<=0)bad(); } catch(NumberFormatException invalid){bad();}
+      }
       case "deactivate", "delete" -> fields(change);
       default -> bad();
     }
-    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy());
+    return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy(), deadline, null, workflow);
+  }
+
+  void requireEffectDeadline() {
+    if (authorityValidUntil != null && authorityValidUntil <= java.time.Instant.now().getEpochSecond())
+      throw new jakarta.ws.rs.BadRequestException("Password intent expired");
   }
 
   static JsonNode availability(JsonNode body) {

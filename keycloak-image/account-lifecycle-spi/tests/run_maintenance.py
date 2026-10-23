@@ -15,10 +15,10 @@ from run_native import XmlResult
 
 EXPECTED_UNITS = {
     "org.oriso.keycloak.lifecycle.LifecycleJsonTest": 13,
-    "org.oriso.keycloak.lifecycle.MaintenanceRequestTest": 8,
-    "org.oriso.keycloak.lifecycle.GeneralPolicyTest": 4,
+    "org.oriso.keycloak.lifecycle.MaintenanceRequestTest": 14,
+    "org.oriso.keycloak.lifecycle.GeneralPolicyTest": 7,
     "org.oriso.keycloak.lifecycle.ScopedOtpRequestTest": 11,
-    "org.oriso.keycloak.lifecycle.ProtectedPeerPolicyTest": 10,
+    "org.oriso.keycloak.lifecycle.ProtectedPeerPolicyTest": 12,
 }
 NATIVE_FLOOR = 9
 
@@ -73,10 +73,10 @@ def sanitize_units(reports, destination):
             counts[key] += value
     destination.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(root).write(destination, encoding="utf-8", xml_declaration=True)
-    accepted = consistent_counts and unique_cases and actual == EXPECTED_UNITS and counts["tests"] == 46 and not any(
+    accepted = consistent_counts and unique_cases and actual == EXPECTED_UNITS and counts["tests"] == 57 and not any(
         counts[key] for key in ("failures", "errors", "skipped"))
     return {"suite_counts": actual, **counts, "required_suites": EXPECTED_UNITS,
-            "required_total": 46, "consistent_declared_counts": consistent_counts,
+            "required_total": 57, "consistent_declared_counts": consistent_counts,
             "unique_cases": unique_cases, "accepted": accepted,
             "diagnostic_boundary": "Java schema units only; not native maintenance acceptance"}
 
@@ -154,6 +154,22 @@ def native(report, workflow):
         item["case"] in native_humans & committed & failures & password_preconditions
         and item["command"] == "password" and item["expected_status"] == 200
         and item["status"] == 404 for item in human_requests)
+    self_password_preconditions = {item["case"] for item in phases
+        if item["phase"] == "human-self-password-proof-preconditions"
+        and all(item.get(key) is True for key in ("original_password_verified", "exact_self_read",
+            "current_native_session", "existing_public_form_requires_old_password"))}
+    human_self_password_red = not result.errors and not result.skipped and any(
+        item["case"] in native_humans & committed & failures & self_password_preconditions
+        and item["command"] == "self-password" and item["expected_status"] == 200
+        and item["status"] == 404 for item in human_requests)
+    deadline_preconditions = {item["case"] for item in phases
+        if item["phase"] == "human-password-deadline-preconditions"
+        and all(item.get(key) is True for key in ("original_password_verified", "exact_self_read",
+            "current_native_session", "original_deadline_still_future"))}
+    human_password_deadline_red = not result.errors and not result.skipped and any(
+        item["case"] in native_humans & committed & failures & deadline_preconditions
+        and item["phase"] == "human-password-deadline-positive-reply"
+        and item["status"] == 400 and item.get("original_deadline_still_future") is True for item in phases)
     availability_case = "test_maintenance.MaintenancePermissions.test_creator_exact_username_availability_exposes_only_a_boolean"
     availability_preconditions = any(item.get("case") == availability_case
         and item.get("phase") == "username-availability-preconditions"
@@ -182,13 +198,15 @@ def native(report, workflow):
         "genuine_human_read_red": bool(human_read_red), "genuine_human_locale_red": bool(human_locale_red),
         "genuine_username_availability_red": availability_red,
         "genuine_human_profile_red": bool(human_profile_red),
+        "genuine_human_self_password_red": bool(human_self_password_red),
+        "genuine_human_password_deadline_red": bool(human_password_deadline_red),
         "genuine_human_password_red": bool(human_password_red),
         "diagnostic_boundary": "Receiver bounded read/delete and first native human locale diagnostic; domain caller, OTP, MariaDB and full Scenario C remain open",
     }
     summary["accepted"] = bool(result.wasSuccessful() and result.testsRun == discovered
         and not result.skipped and summary["jar_stable"] and summary["source_stable"] and summary["workflow_stable"])
     summary["status"] = "GREEN" if summary["accepted"] else (
-        "BEHAVIOR_RED" if summary["genuine_read_red"] or summary["genuine_delete_red"] or human_read_red or human_locale_red or availability_red or human_profile_red or human_password_red
+        "BEHAVIOR_RED" if summary["genuine_read_red"] or summary["genuine_delete_red"] or human_read_red or human_locale_red or availability_red or human_profile_red or human_password_red or human_self_password_red or human_password_deadline_red
         else "FAILED_WITHOUT_CONFIRMED_READ_OR_DELETE_RED")
     write_json(report, summary)
     print(json.dumps({key: value for key, value in summary.items() if key != "source_manifest"}, sort_keys=True))

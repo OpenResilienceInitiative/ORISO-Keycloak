@@ -66,7 +66,6 @@ class SanitizedResult(unittest.TestResult):
             "protected_approval_replay_cases.py",
             "protected_impersonation_cases.py",
             "protected_native_tls.py",
-            "protected_auth_lock_readiness.py",
             "lifecycle_fixture.py",
             "protected_resources.py",
         }

@@ -74,6 +74,11 @@ public final class ProtectedInvitationFactory implements RealmResourceProviderFa
     return new ProtectedInvitationResource(session, configuration, authorization);
   }
 
+  static boolean configuredAdoptedTarget(KeycloakSession session,String account){
+    var provider=session.getKeycloakSessionFactory().getProviderFactory(RealmResourceProvider.class,"oriso-protected-invitations");
+    return provider instanceof ProtectedInvitationFactory factory && factory.configuration!=null
+        && factory.configuration.adoptedAccounts.containsKey(account);
+  }
   static ProtectedInvitationConfiguration checkedBootstrapConfiguration(KeycloakSession session) {
     var provider = session.getKeycloakSessionFactory().getProviderFactory(
         RealmResourceProvider.class, "oriso-protected-invitations");

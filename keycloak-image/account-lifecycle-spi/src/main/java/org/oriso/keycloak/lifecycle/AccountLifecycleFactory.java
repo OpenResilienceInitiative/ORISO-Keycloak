@@ -81,7 +81,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   RealmResourceProvider createMaintenance(KeycloakSession session) {
     return authorization == null
         ? null
-        : new AccountMaintenanceResource(session, authorization, groups, () -> checkedHumanPolicy(session));
+        : new AccountMaintenanceResource(session, authorization, groups, () -> checkedHumanPolicy(session), humanPolicy);
   }
 
   public String getId() {
