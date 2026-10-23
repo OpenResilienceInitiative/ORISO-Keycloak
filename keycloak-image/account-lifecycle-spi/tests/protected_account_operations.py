@@ -68,6 +68,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         from protected_adoption_operations import install
         install_policy(cls, helper, value)
         value = install(cls, helper, value, PROFILE, TENANT)
+        from profile_transition_operations import install_self_source
+        value = install_self_source(helper, value)
         fixture = Path(os.environ.get('SCOPED_OTP_READY_FIXTURE_JAR', ''))
         if not fixture.is_file(): raise AssertionError('Existing isolated native observer JAR required')
         command = cls.command.copy(); index = command.index(IMAGE)
@@ -183,6 +185,8 @@ class ProtectedOperationRead(PeerReadiness):
         timestamp_boundaries(self, helper, o)
         from protected_adoption_operations import incarnation
         incarnation(self, helper, primary, o)
+        from profile_transition_operations import self_source_policy_boundary
+        self_source_policy_boundary(self, helper, o)
 
     def remaining_operations(self, helper, account, human, target, observed):
         """Five finite public receiver assertions; every setup error remains an error."""

@@ -28,6 +28,19 @@ public class ProtectedPeerPolicyTest {
     assertEquals("platform-v1", parsed.adoptedAccounts.get("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").profileId());
     assertTrue(new ProtectedInvitationConfiguration(base()).adoptedAccounts.isEmpty());
     assertTrue(new ProtectedInvitationConfiguration(base()).bindingAccountOperations.values().stream().allMatch(java.util.List::isEmpty));
+    var variants=base();var refs=((ObjectNode)variants.path("bindings").path(0)).putArray("sourceProfileVariants");
+    refs.addObject().put("profileId","platform-v1").put("profileVersion",1);assertAccepted(variants);
+    var emptyVariants=base();((ObjectNode)emptyVariants.path("bindings").path(0)).putArray("sourceProfileVariants");assertAccepted(emptyVariants);
+    for(String field:new String[]{"profileId","profileVersion"}){var missing=variants.deepCopy();((ObjectNode)missing.path("bindings").path(0).path("sourceProfileVariants").path(0)).remove(field);assertRejected(missing);}
+    var extraVariant=variants.deepCopy();((ObjectNode)extraVariant.path("bindings").path(0).path("sourceProfileVariants").path(0)).put("authority","PLATFORM");assertRejected(extraVariant);
+    var duplicateVariant=variants.deepCopy();((ArrayNode)duplicateVariant.path("bindings").path(0).path("sourceProfileVariants")).add(refs.path(0).deepCopy());assertRejected(duplicateVariant);
+    var wrongVersion=variants.deepCopy();((ObjectNode)wrongVersion.path("bindings").path(0).path("sourceProfileVariants").path(0)).put("profileVersion",2);assertRejected(wrongVersion);
+    var wrongFamily=variants.deepCopy();((ObjectNode)wrongFamily.path("bindings").path(0).path("sourceProfileVariants").path(0)).put("profileId","tenant-v1");assertRejected(wrongFamily);
+    var wildcardVariant=variants.deepCopy();((ObjectNode)wildcardVariant.path("bindings").path(0).path("sourceProfileVariants").path(0)).put("profileId","*");assertRejected(wildcardVariant);
+    var tenantVariant=variants.deepCopy();var tenantBinding=(ObjectNode)tenantVariant.path("bindings").path(0);tenantBinding.put("authority","TENANT_PEER");tenantBinding.putArray("authorizerTenantIds").add(17);tenantBinding.putArray("protectedProfileIds").add("tenant-v1");tenantBinding.putArray("realmRoles").add("tenant-admin");
+    ((ObjectNode)tenantBinding.path("sourceProfileVariants").path(0)).put("profileId","tenant-v1");assertAccepted(tenantVariant);
+    ((ObjectNode)tenantBinding.path("sourceProfileVariants").path(0)).put("profileId","platform-v1");assertRejected(tenantVariant);
+
   }
 
   @Test
