@@ -24,7 +24,8 @@ final class MaintenanceLineage {
     for (var row : rows) {
       em.refresh(row);
       var value = parse(row.snapshotJson);
-      fields(value, "v", "realmId", "accountId", "provenanceDigest", "sequence", "previousLineageDigest",
+      var closed=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)closed).remove("roleChange");
+      fields(closed, "v", "realmId", "accountId", "provenanceDigest", "sequence", "previousLineageDigest",
           "operationId", "command", "intentDigest", "previousState", "from", "desired");
       if (number(value, "v", true) != 1 || !realm.equals(row.realmId) || !account.equals(row.accountId)
           || !realm.equals(value.path("realmId").asText()) || !account.equals(value.path("accountId").asText())
@@ -40,12 +41,21 @@ final class MaintenanceLineage {
       String nextId = text(desired, "profileId", 255, false);
       long nextVersion = number(desired, "profileVersion", true);
       String command = text(value, "command", 40, false);
-      if (!current.kind.equals(nextKind)
-          || !("ordinary-profile".equals(command) && "ORDINARY".equals(nextKind)
-                  && current.tenant.equals(desired.path("tenantId"))
-              || "reassign-tenant".equals(command) && "PROTECTED".equals(nextKind)
-                  && current.profileId.equals(nextId) && current.profileVersion == nextVersion
-                  && positiveTenant(current.tenant) && positiveTenant(desired.path("tenantId")))) deny();
+      if(!current.kind.equals(nextKind))deny();
+      if(value.has("roleChange")){
+        var capsule=value.path("roleChange");
+        if(!current.tenant.equals(desired.path("tenantId"))
+            ||!("profile-transition".equals(command)&&!"IMPORT".equals(capsule.path("kind").asText())
+                ||"ordinary-profile".equals(command)&&"ORDINARY".equals(nextKind)&&"IMPORT".equals(capsule.path("kind").asText())))deny();
+        MaintenanceRoleChange.require(capsule,nextKind,current.nativeProfile,desired.path("nativeProfile"));
+      }else if("ordinary-profile".equals(command)&&"ORDINARY".equals(nextKind)){
+        var before=HumanPolicyJson.strings(current.nativeProfile.path("realmRoles"),1,10,255);
+        var after=HumanPolicyJson.strings(desired.path("nativeProfile").path("realmRoles"),1,10,255);
+        if(!current.tenant.equals(desired.path("tenantId"))||!java.util.Objects.equals(LifecycleGroups.allowedKind(before),LifecycleGroups.allowedKind(after))
+            ||!canonical(current.nativeProfile.path("clientRoles")).equals(canonical(desired.path("nativeProfile").path("clientRoles"))))deny();
+      }else if(!("reassign-tenant".equals(command)&&"PROTECTED".equals(nextKind)&&current.profileId.equals(nextId)
+          &&current.profileVersion==nextVersion&&positiveTenant(current.tenant)&&positiveTenant(desired.path("tenantId"))
+          &&canonical(current.nativeProfile).equals(canonical(desired.path("nativeProfile")))))deny();
       var operation = em.find(AccountMaintenanceOperation.class, row.id, LockModeType.PESSIMISTIC_WRITE);
       if (operation == null) deny();
       em.refresh(operation);
@@ -89,6 +99,7 @@ final class MaintenanceLineage {
     value.put("sequence", current.sequence + 1); value.put("previousLineageDigest", current.digest);
     value.put("operationId", request.operationId()); value.put("command", request.command());
     value.put("intentDigest", crypto.mac("maintenance-intent", body)); value.put("previousState", request.expectedState());
+    var roleChange=MaintenanceRoleChange.capsule(request);if(roleChange!=null)value.set("roleChange",roleChange);
     value.set("from", binding(current));
     value.set("desired", binding(new Current(current.kind, profileId, version, tenant, null, 0, current.provenance, nativeProfile)));
     var row = new AccountMaintenanceLineage(); row.id = realm + ":" + request.operationId();

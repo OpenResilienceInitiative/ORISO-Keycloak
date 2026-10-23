@@ -50,7 +50,7 @@ final class ProtectedAccountOperations {
     return true;
   }
 
-  record CheckedCurrent(JsonNode current, long humanValidUntil, MaintenanceLineage.Current lineage, ProtectedInvitationConfiguration.Profile profile) {}
+  record CheckedCurrent(JsonNode current, long humanValidUntil, MaintenanceLineage.Current lineage, ProtectedInvitationConfiguration.Profile profile, ProtectedInvitationConfiguration.Profile desired) {}
 
   static JsonNode readSelfOperation(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String humanHeader, String operation) {
@@ -73,7 +73,7 @@ final class ProtectedAccountOperations {
   static void mutate(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, JsonNode body, String humanHeader) {
     if (!"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
-        || !Set.of("profile", "email", "reassign-tenant").contains(request.command())) deny();
+        || !Set.of("profile", "email", "reassign-tenant", "profile-transition").contains(request.command())) deny();
     var checked=readChecked(session, crypto, request, humanHeader, "account." + request.command());
     var current = checked.current();
     if (!LifecycleAuthorization.equal(request.expectedState(), current.path("state").asText()))
@@ -83,6 +83,19 @@ final class ProtectedAccountOperations {
     var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
     if (cache != null && user != null) { cache.evict(realm, user); user = session.users().getUserById(realm, request.accountId()); }
     if (user == null) throw MaintenancePreflightRefusal.current(409);
+    if("profile-transition".equals(request.command())){
+      var desired=checked.desired();var from=session.groups().getGroupById(realm,checked.profile().groupId());
+      var to=session.groups().getGroupById(realm,desired.groupId());
+      if(from==null||to==null)throw MaintenancePreflightRefusal.current(409);
+      MaintenanceLineage.append(session,crypto,request,body,checked.lineage(),desired.id(),desired.version(),
+          request.target().path("tenantId"),desired.snapshot());
+      if(!from.getId().equals(to.getId())){user.leaveGroup(from);user.joinGroup(to);}
+      var em=CurrentNativeHumanIdentity.entityManager(session);em.flush();var fresh=AccountLifecycleResource.lockedSnapshot(em,request.accountId());
+      if(!fresh.path("roles").isEmpty()||fresh.path("groups").size()!=1||!desired.groupId().equals(fresh.path("groups").path(0).asText())
+          ||fresh.path("attributes").path("tenantId").size()!=1||!request.target().path("tenantId").equals(fresh.path("attributes").path("tenantId").path(0)))
+        throw new IllegalStateException("Native protected profile effect did not complete");
+      return;
+    }
     if("reassign-tenant".equals(request.command())) {
       if(body==null||!"TENANT_ADMIN".equals(checked.profile().kind()))deny();
       MaintenanceLineage.append(session,crypto,request,body,checked.lineage(),checked.profile().id(),checked.profile().version(),
@@ -121,12 +134,15 @@ final class ProtectedAccountOperations {
 
   private static CheckedCurrent readChecked(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String fullHumanHeader, String operation, CausalPasswordRequest causal) {
-    boolean inactivity=request.workflow()!=null;
-    boolean scheduled=inactivity&&"INACTIVITY".equals(request.target().path("origin").path("kind").asText());
-    if(causal==null && !inactivity && (!selected(request.target())||!Set.of("read","profile","email","reassign-tenant").contains(request.command())
+    boolean inactivity=request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText());
+    boolean imported=request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText());
+    boolean scheduled=inactivity&&"INACTIVITY".equals(request.target().path("origin").path("kind").asText())
+        ||imported&&"IMPORT".equals(request.target().path("origin").path("kind").asText());
+    if(causal==null && !inactivity && !imported && (!selected(request.target())||!Set.of("read","profile","email","reassign-tenant","profile-transition").contains(request.command())
         ||!Set.of("otp.read","account.read","account.profile","account.email","account.reassign-tenant","otp.app-setup",
-            "otp.delete","otp.email-finish","otp.email-start").contains(operation)))deny();
+            "otp.delete","otp.email-finish","otp.email-start","account.profile-transition").contains(operation)))deny();
     if(inactivity&&(!Set.of("read","deactivate","reactivate").contains(request.command())||!("account."+request.command()).equals(operation)))deny();
+    if(imported&&(!"read".equals(request.command())||!"account.read".equals(operation)))deny();
     boolean needsHuman=causal==null&&!scheduled;
     if(needsHuman && (fullHumanHeader==null||fullHumanHeader.length()>32775||!fullHumanHeader.regionMatches(true,0,"Bearer ",0,7)))
       throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
@@ -195,15 +211,22 @@ final class ProtectedAccountOperations {
     }
     var lineage=MaintenanceLineage.resolve(session,crypto,request.accountId(),provenance,"PROTECTED",profile.id(),profile.version(),
         JSON.valueToTree(Long.toString(tenant)),profile.snapshot());
-    if(!profile.id().equals(lineage.profileId())||profile.version()!=lineage.profileVersion()
+    var originalProfile=profile;profile=config.profiles.get(lineage.profileId());
+    if(profile==null||profile.version()!=lineage.profileVersion()||!originalProfile.kind().equals(profile.kind())
         ||!canonical(profile.snapshot()).equals(canonical(lineage.nativeProfile())))deny();
+    var desired=profile;
+    if("profile-transition".equals(request.command())){
+      if(!request.change().has("profileId"))deny();
+      desired=config.profiles.get(request.change().path("profileId").asText());
+      if(desired==null||desired.version()!=request.change().path("profileVersion").longValue())deny();
+    }
     try{tenant=Long.parseLong(lineage.tenant().asText());}catch(NumberFormatException malformed){deny();return null;}
     if(("PLATFORM_ADMIN".equals(profile.kind())?tenant!=0:tenant<=0)||!Long.toString(tenant).equals(request.target().path("tenantId").asText()))deny();
     long validUntil;
     if (causal != null) {
       causal.requireProfile("PROTECTED", profile.id(), profile.version()); validUntil = 0;
     } else if(scheduled){
-      config.workflowOperations.require(profile.id(),operation);validUntil=0;
+      config.workflowOperations.require(imported?"IMPORT":"INACTIVITY",profile.id(),operation);validUntil=0;
     } else if (approval != null && "PLATFORM_ADMIN".equals(profile.kind())
         && "SELF".equals(request.target().path("origin").path("kind").asText())) {
       validUntil = requireCommittedRecipientSelf(session, config, approval, profile, request, rawHuman, operation, tenant);
@@ -225,17 +248,18 @@ final class ProtectedAccountOperations {
         if (policies.size() != 1) deny();
         grants = config.peerAccountOperations.get(policies.get(0).id());
       }
-      if (grants == null || grants.stream().noneMatch(grant ->
-          grant.authority().equals(resolved.binding().authority()) && grant.profiles().contains(profile.id())
-              && grant.operations().contains(operation)
-              && (!grant.selfOnly() || human.subject().equals(request.accountId()))
-              && (grant.targetSubjects().isEmpty() || grant.targetSubjects().contains(request.accountId())))) deny();
+      if(grants==null)deny();
+      for(var selectedProfile:new java.util.HashSet<>(java.util.List.of(profile.id(),desired.id())))
+        if(grants.stream().noneMatch(grant ->
+            grant.authority().equals(resolved.binding().authority())&&grant.profiles().contains(selectedProfile)
+                &&grant.operations().contains(operation)&&(!grant.selfOnly()||human.subject().equals(request.accountId()))
+                &&(grant.targetSubjects().isEmpty()||grant.targetSubjects().contains(request.accountId()))))deny();
       if ("TENANT_PEER".equals(resolved.binding().authority()) && human.tenantId() != tenant
           || "PLATFORM".equals(resolved.binding().authority()) && human.tenantId() != 0) deny();
       validUntil = human.validatedJwtExpiresAt();
     }
     try {
-    config.validateProfile(session, profile);
+    config.validateProfile(session, profile);config.validateProfile(session,desired);
     var current = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
     var groups = new TreeSet<String>(); current.path("groups").forEach(value -> groups.add(value.asText()));
     var tenantValues = current.path("attributes").path("tenantId");
@@ -246,6 +270,7 @@ final class ProtectedAccountOperations {
     for (var technical : config.installation.path("technicalSubjects"))
       if (request.accountId().equals(technical.asText())) deny();
     if (causal != null) causal.requireNativeBinding(crypto, current);
+    if("profile-transition".equals(request.command()))MaintenanceRoleChange.require(MaintenanceRoleChange.capsule(request),"PROTECTED",profile.snapshot(),desired.snapshot());
     if(adoptionBaseline!=null)adoptionBaseline.checked(session);
     var state = JSON.createObjectNode();
     state.put("realmId", config.realmId); state.set("account", current);
@@ -265,7 +290,7 @@ final class ProtectedAccountOperations {
     result.put("passwordChangeRequired", passwordChange);
     result.put("state", crypto.mac("maintenance-state", state));
     if ("TWO_FACTOR_STATUS_V1".equals(request.include())) result.set("twoFactor", NativeOtpStatus.read(current));
-    return new CheckedCurrent(result, validUntil, lineage, profile);
+    return new CheckedCurrent(result, validUntil, lineage, profile, desired);
     } catch (jakarta.ws.rs.WebApplicationException refused) {
       int status = refused.getResponse().getStatus();
       if ((inactivity||"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText()))

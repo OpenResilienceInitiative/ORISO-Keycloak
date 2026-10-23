@@ -109,7 +109,7 @@ final class MaintenanceTarget {
       var frozen=lineage.nativeProfile();currentPath=text(frozen,"groupPath",512,false);currentGroup=text(frozen,"groupId",255,false);
       var desiredRoles=HumanPolicyJson.strings(frozen.path("realmRoles"),1,10,255);
       if(!desiredRoles.equals(mappings.get(currentPath))||!frozen.path("clientRoles").isObject()||!frozen.path("clientRoles").isEmpty()
-          ||!Objects.equals(LifecycleGroups.allowedKind(expectedRoles),LifecycleGroups.allowedKind(desiredRoles))
+          ||LifecycleGroups.allowedKind(desiredRoles)==null
           ||!lineage.tenant().equals(scope.path("tenantId")))deny();
       expectedRoles=desiredRoles;
     }

@@ -71,6 +71,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "account.read", "POST",
           "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("read", account, body);
+      if(request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText()))
+        return Response.ok(ImportOperations.read(session,auth,mappings,humanPolicies,request,rawHumanBearer)).header("Cache-Control","no-store").build();
       if(request.workflow()!=null)
         return Response.ok(InactivityOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,request,rawHumanBearer)).header("Cache-Control","no-store").build();
       if (ProtectedAccountOperations.selected(request.target())) {
@@ -230,6 +232,13 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   }
 
   @POST
+  @Path("v1/accounts/{account}/profile-transition")
+  public Response profileTransition(@PathParam("account") String account,byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context")String proof,@HeaderParam("X-ORISO-Human-Authorization")String human){
+    return selfMutation("profile-transition",account,raw,proof,human);
+  }
+
+  @POST
   @Path("v1/accounts/{account}/reassign-tenant")
   public Response reassignTenant(@PathParam("account") String account,byte[] raw,
       @HeaderParam("X-ORISO-Task-Context") String proof,@HeaderParam("X-ORISO-Human-Authorization") String human) {
@@ -270,7 +279,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
 
   private Response selfMutation(String command, String account, byte[] raw, String proof,
       String rawHumanBearer) {
-    if (!Set.of("locale", "profile", "email", "ordinary-profile", "deactivate", "reactivate", "reassign-tenant", "password", "self-password").contains(command)) deny();
+    if (!Set.of("locale", "profile", "email", "ordinary-profile", "deactivate", "reactivate", "reassign-tenant", "profile-transition", "password", "self-password").contains(command)) deny();
     return guarded(() -> {
       var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
       var body = parse(raw);
@@ -278,13 +287,14 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse(command, account, body);
-      boolean inactivity=request.workflow()!=null;
+      boolean inactivity=request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText());
+      boolean importing=request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText());
       boolean humanAdmin = ProtectedAccountOperations.selected(request.target())
           && "HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
-          && Set.of("profile", "email", "ordinary-profile", "deactivate", "reactivate", "reassign-tenant").contains(command);
-      if (!("SELF".equals(request.target().path("origin").path("kind").asText()) || humanAdmin || inactivity)) deny();
+          && Set.of("profile", "email", "ordinary-profile", "deactivate", "reactivate", "reassign-tenant", "profile-transition").contains(command);
+      if (!("SELF".equals(request.target().path("origin").path("kind").asText()) || humanAdmin || inactivity || importing)) deny();
       if(inactivity&&"INACTIVITY".equals(request.target().path("origin").path("kind").asText())&&rawHumanBearer!=null)deny();
-      var humanPolicy = humanAdmin || inactivity ? null : humanPolicies.get();
+      var humanPolicy = humanAdmin || inactivity || importing ? null : humanPolicies.get();
       var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
       var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
       if (lockedRealm == null) deny();
@@ -304,7 +314,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
         // then return before mutable target/CAS resolution or any second native effect.
         if (humanAdmin) { var source=HumanAdminSource.require(session, auth, request, rawHumanBearer);
           if(inactivity&&!"PLATFORM".equals(source.authority()))deny(); }
-        else if(inactivity) { if(rawHumanBearer!=null)deny(); }
+        else if(inactivity||importing) { if(rawHumanBearer!=null)deny(); }
         else humanPolicy.requireSelf(session, request, rawHumanBearer);
         return MaintenanceResults.saved(prior, auth, request);
       }
@@ -315,6 +325,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
       try {
         if(inactivity) InactivityOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,machine,request,body,rawHumanBearer);
+        else if(importing) ImportOperations.mutate(session,auth,mappings,humanPolicies,request,body,rawHumanBearer);
         else if (humanAdmin) {
           if (ProtectedAccountOperations.protectedTarget(session, request))
             ProtectedAccountOperations.mutate(session, auth, request, body, rawHumanBearer);
@@ -324,7 +335,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
         else if (Set.of("password", "self-password").contains(command)) targets.password(request, humanPolicy, rawHumanBearer);
         else deny();
       } catch (MaintenancePreflightRefusal refused) {
-        if (!humanAdmin && !inactivity) throw refused;
+        if (!humanAdmin && !inactivity && !importing) throw refused;
         return MaintenanceResults.noEffect(session, auth, machine, request, body, refused.getResponse().getStatus());
       }
       var outcome = JSON.createObjectNode();

@@ -45,7 +45,7 @@ final class OrdinaryAccountOperations {
     // Every definite preflight check above precedes the first native write below.
     switch (request.command()) {
       case "profile", "email" -> profile(user, request.change());
-      case "ordinary-profile" -> {
+      case "ordinary-profile", "profile-transition" -> {
         var desired = session.groups().getGroupById(realm, prepared.desired.groupId);
         var current = session.groups().getGroupById(realm, prepared.profile.groupId);
         if (desired == null || current == null) throw new IllegalStateException("Profile changed during effect");
@@ -73,7 +73,7 @@ final class OrdinaryAccountOperations {
     }
     var em = CurrentNativeHumanIdentity.entityManager(session); em.flush();
     var fresh = AccountLifecycleResource.lockedSnapshot(em, request.accountId());
-    if ("ordinary-profile".equals(request.command())
+    if (Set.of("ordinary-profile","profile-transition").contains(request.command())
         && (fresh.path("groups").size() != 1 || !prepared.desired.groupId.equals(fresh.path("groups").path(0).asText())
             || !fresh.path("roles").isEmpty())) throw new IllegalStateException("Profile membership effect did not complete");
     if (Set.of("deactivate", "reactivate").contains(request.command())
@@ -95,7 +95,7 @@ final class OrdinaryAccountOperations {
   private static Prepared prepare(KeycloakSession session, LifecycleAuthorization crypto,
       Map<String, Set<String>> mappings, GeneralPolicy policy, MaintenanceRequest request, String human,
       CausalPasswordRequest causal) {
-    if (policy == null || !Set.of("read", "profile", "email", "ordinary-profile", "deactivate", "reactivate")
+    if (policy == null || !Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate")
         .contains(request.command())) deny();
     var realm = session.getContext().getRealm(); var em = CurrentNativeHumanIdentity.entityManager(session);
     var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
@@ -135,9 +135,12 @@ final class OrdinaryAccountOperations {
     var lineage = MaintenanceLineage.resolve(session, crypto, request.accountId(), provenance,
         "ORDINARY", baseline.id, baseline.version, originalTenant, baseline.snapshot);
     var profile = policy.profile(lineage.profileId(), lineage.profileVersion());
-    var desired = "ordinary-profile".equals(request.command())
+    boolean transition="profile-transition".equals(request.command());
+    boolean imported=request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText());
+    if(transition&&!request.change().has("group"))deny();
+    var desired = Set.of("ordinary-profile","profile-transition").contains(request.command())
         ? policy.desiredProfile(request.change().path("group").asText()) : profile;
-    if (!Objects.equals(LifecycleGroups.allowedKind(profile.realmRoles), LifecycleGroups.allowedKind(desired.realmRoles))
+    if (!transition&&!imported&&!Objects.equals(LifecycleGroups.allowedKind(profile.realmRoles), LifecycleGroups.allowedKind(desired.realmRoles))
         ||!canonical(profile.snapshot).equals(canonical(lineage.nativeProfile()))
         ||!profile.realmRoles.equals(mappings.get(profile.path))||!desired.realmRoles.equals(mappings.get(desired.path))) deny();
     LifecycleGroups.group(session,realm,profile.path,profile.realmRoles);
@@ -145,9 +148,12 @@ final class OrdinaryAccountOperations {
     if (causal != null) causal.requireProfile("ORDINARY", profile.id, profile.version);
     else if(request.workflow()!=null && "INACTIVITY".equals(request.target().path("origin").path("kind").asText())) {
       if(human!=null)deny();policy.workflowOperations.require(profile.id,"account."+request.command());
+    } else if(imported&&"IMPORT".equals(request.target().path("origin").path("kind").asText())){
+      if(human!=null)deny();
+      for(var id:new HashSet<>(List.of(profile.id,desired.id)))policy.workflowOperations.require("IMPORT",id,"account."+request.command());
     } else {
       var source = HumanAdminSource.require(session, crypto, request, human);
-      if(request.workflow()!=null&&!"PLATFORM".equals(source.authority()))deny();
+      if(request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText())&&!"PLATFORM".equals(source.authority()))deny();
       policy.requireAdmin(source, request, "account." + request.command(), profile, desired);
       if ("ordinary-profile".equals(request.command()) && request.change().has("profile"))
         policy.requireAdmin(source, request, "account.profile", profile, desired);
@@ -166,6 +172,9 @@ final class OrdinaryAccountOperations {
       if (!tenants.isMissingNode() && tenants.size() != 1 || !actualTenant.equals(lineage.tenant())
           || actualTenant.isNull() && !profile.allowUnassignedTenant) deny();
       if (causal != null) causal.requireNativeBinding(crypto, current);
+      if(imported)MaintenanceRoleChange.requireImportProfile(profile.snapshot);
+      var roleChange=MaintenanceRoleChange.capsule(request);
+      if(roleChange!=null)MaintenanceRoleChange.require(roleChange,"ORDINARY",profile.snapshot,desired.snapshot);
       if(adoptionBaseline!=null)adoptionBaseline.checked(session);
       var state = JSON.createObjectNode(); state.set("account", current); state.put("realmId", realm.getId());
       state.put("provenance", stateProvenance); state.put("groupId", profile.groupId);
