@@ -156,12 +156,15 @@ def exercise(test, helper, tenant, observed):
                         test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
                     record['currentExplicitPasswordGrantWithdrawalDeniesSavedThenReviewedRestorationRecovers'] = True
                 if label == 'PROTECTED.TENANT_ADMIN_DUAL':
+                    test.assertEqual((200, result), HumanMaintenanceFixture.invoke(helper, 'self-password', body, fresh, 200))
+                    record['sameBoundBearerExactSavedReplayBeforeDisabled'] = True
                     before_disabled = helper.admin('GET', '/users/' + account)
                     disabled = copy.deepcopy(before_disabled); disabled['enabled'] = False
                     helper.admin('PUT', '/users/' + account, disabled)
                     try:
                         denied_status, denied = HumanMaintenanceFixture.invoke(helper, 'self-password', body, fresh, 403)
                         record['disabledCurrentProtectedSelfStatus'] = denied_status
+                        # Native authentication may reject the disabled bearer before profile authorization.
                         test.assertIn(denied_status, {401, 403}); test.assertNotIn('receipt', denied)
                         test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
                     finally:
