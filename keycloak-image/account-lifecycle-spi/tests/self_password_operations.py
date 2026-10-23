@@ -14,10 +14,10 @@ def exercise(test, helper, tenant, observed):
     records = observed['actualSelfPassword'] = {}
     original_account, original_creation = helper.account_id, helper.creation_input
     cases = []
-    for kind, group in [('USER', 'user'), ('CONSULTANT', 'consultant'),
+    for kind, group in [('ASKER', 'user'), ('CONSULTANT', 'consultant'),
                          ('AGENCY_ADMIN', 'agency-admin'), ('CONSULTANT_AGENCY_ADMIN', 'consultant-agency-admin')]:
         account, creation = committed_kind(test, helper, kind, group)
-        cases.append(('ORDINARY.' + kind, account, creation['account']['password']))
+        cases.append(('ORDINARY.' + ('USER' if kind == 'ASKER' else kind), account, creation['account']['password']))
     initial = LifecycleFixture.creation(helper)['account']['password']
     cases += [('PROTECTED.TENANT_ADMIN_DUAL', tenant[0], initial),
               ('PROTECTED.PLATFORM_ADMIN', type(helper).new_platform_account, initial)]
@@ -112,8 +112,8 @@ def exercise(test, helper, tenant, observed):
                     login_status, live = login(native['username'], password); test.assertEqual(200, login_status)
                     test.assertEqual((200, result), HumanMaintenanceFixture.invoke(helper, 'self-password', body, live['access_token'], 200))
                     expired = copy.deepcopy(wrong); expired['operationId'] = str(uuid.uuid4()); expired['authorityValidUntil'] = deadline
-                    expired_status, expired_result = HumanMaintenanceFixture.invoke(helper, 'self-password', expired, live['access_token'], 403)
-                    test.assertEqual(403, expired_status); test.assertNotIn('receipt', expired_result)
+                    expired_status, expired_result = HumanMaintenanceFixture.invoke(helper, 'self-password', expired, live['access_token'], 400)
+                    test.assertEqual(400, expired_status); test.assertNotIn('receipt', expired_result)
                     record['exactSavedAfterOriginalDeadlineAndExpiredAbsentDenial'] = True
             finally:
                 helper.admin('PUT', '', {'passwordPolicy': previous_policy})

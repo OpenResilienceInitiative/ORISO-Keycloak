@@ -27,6 +27,17 @@ public class MaintenanceRequestTest {
   public void nativeRepresentationFieldsCannotRideInsideProfile() {
     rejected("profile", "{\"firstName\":\"a\",\"lastName\":\"b\",\"email\":null,"
         + "\"enabled\":true,\"attributes\":{\"tenantId\":[\"0\"]}}");
+    accepted("email", "{\"email\":\"owned@example.invalid\"}");
+    accepted("email", "{\"firstName\":null,\"lastName\":\"Owned\",\"email\":\"owned@example.invalid\"}");
+    for(String invalid:java.util.List.of("{\"firstName\":\"Owned\",\"email\":\"owned@example.invalid\"}",
+        "{\"firstName\":1,\"lastName\":\"Owned\",\"email\":\"owned@example.invalid\"}",
+        "{\"firstName\":\"Owned\",\"lastName\":\"Self\",\"email\":null}",
+        "{\"firstName\":\"Owned\",\"lastName\":\"Self\",\"email\":\"owned@example.invalid\",\"emailVerified\":true}"))rejected("email",invalid);
+    var human=(com.fasterxml.jackson.databind.node.ObjectNode)parse(command("{\"firstName\":\"Owned\",\"lastName\":\"Self\",\"email\":\"owned@example.invalid\"}"));
+    var origin=(com.fasterxml.jackson.databind.node.ObjectNode)human.path("target").path("origin");
+    origin.put("kind","HUMAN_ADMIN");origin.put("humanAuthority","PROTECTED_ACCOUNT_OPERATIONS_V1");
+    try{MaintenanceRequest.parse("email",ID,human);fail("Combined email is confined to actual SELF");}
+    catch(WebApplicationException expected){assertEquals(400,expected.getResponse().getStatus());}
   }
 
   @Test

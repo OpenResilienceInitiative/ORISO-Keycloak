@@ -13,6 +13,12 @@ public class GeneralPolicyTest {
   @Test
   public void existingReviewedSelfOperationsStillParse() {
     accepted("account.read", "account.locale", "account.profile", "account.password");
+    accepted("account.read", "account.locale", "account.profile", "account.password", "account.email", "otp.read", "otp.app-setup",
+        "otp.delete", "otp.email-start", "otp.email-finish");
+    rejected("account.email", "account.email");
+    rejected("account.email", "account.profile-transition");
+    rejected("account.email", "account.ordinary-profile");
+    rejected("account.email", "account.self-password");
   }
 
   @Test
@@ -131,9 +137,9 @@ public class GeneralPolicyTest {
     }
   }
 
-  private static void rejected(String operation) {
+  private static void rejected(String... operations) {
     try {
-      new GeneralPolicy(policy(operation));
+      new GeneralPolicy(policy(operations));
       fail("Unreviewed operation selector accepted");
     } catch (WebApplicationException rejected) {
       assertEquals(400, rejected.getResponse().getStatus());
