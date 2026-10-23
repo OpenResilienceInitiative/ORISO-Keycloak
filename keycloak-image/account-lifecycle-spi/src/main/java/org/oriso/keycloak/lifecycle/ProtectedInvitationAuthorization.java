@@ -27,16 +27,52 @@ final class ProtectedInvitationAuthorization {
   }
 
   LifecycleAuthorization.CheckedMachine requireMachine(KeycloakSession session, Set<String> allowedActors) {
+    var preflight = preflightMachine(session, allowedActors);
+    requireCurrentMachine(session, preflight, allowedActors);
+    return preflight.machine();
+  }
+
+  static final class Preflight {
+    private final LifecycleAuthorization.CheckedMachine machine;
+    private Preflight(LifecycleAuthorization.CheckedMachine machine) { this.machine = machine; }
+    LifecycleAuthorization.CheckedMachine machine() { return machine; }
+  }
+
+  Preflight preflightMachine(KeycloakSession session, Set<String> allowedActors) {
+    return new Preflight(checkedNative(new BearerTokenAuthenticator(session).authenticate(), allowedActors));
+  }
+
+  private LifecycleAuthorization.CheckedMachine checkedNative(
+      org.keycloak.services.managers.AuthenticationManager.AuthResult auth, Set<String> allowedActors) {
     if (allowedActors.isEmpty() || !CLIENTS.keySet().containsAll(allowedActors)) deny();
-    var auth = new BearerTokenAuthenticator(session).authenticate();
     if (auth == null) throw new NotAuthorizedException("Bearer");
     var token = auth.getToken();
+    if (!token.isActive()) throw new NotAuthorizedException("Bearer");
     String actor = CLIENTS.entrySet().stream().filter(entry -> entry.getValue().equals(token.getIssuedFor()))
         .map(Map.Entry::getKey).findFirst().orElse(null);
     if (actor == null || !allowedActors.contains(actor) || auth.getClient() == null || auth.getUser() == null) deny();
     String clientId = CLIENTS.get(actor), subject = config.actors.get(actor);
     if (subject == null || !subject.equals(token.getSubject()) || !subject.equals(auth.getUser().getId())
         || !config.issuer.equals(token.getIssuer()) || token.getIat() == null) deny();
+    if (token.getRealmAccess() == null || !ROLES.get(actor).equals(token.getRealmAccess().getRoles())
+        || token.getResourceAccess().values().stream().anyMatch(access -> access.getRoles() != null && !access.getRoles().isEmpty())) deny();
+    var audiences = token.getAudience() == null ? Set.<String>of() : new HashSet<>(Arrays.asList(token.getAudience()));
+    if (token.getAudience() == null || audiences.size() != token.getAudience().length
+        || !HumanPolicyJson.strings(config.installation.path("machineAudienceSets").get(actor), 1, 30, 255).equals(audiences)) deny();
+    return new LifecycleAuthorization.CheckedMachine(actor, clientId, subject, auth);
+  }
+
+  void requireCurrentMachine(KeycloakSession session, Preflight preflight,
+      Set<String> allowedActors) {
+    if (preflight == null) deny();
+    var machine = preflight.machine();
+    var checked = checkedNative(machine.nativeAuth(), allowedActors);
+    if (!checked.actor().equals(machine.actor()) || !checked.clientId().equals(machine.clientId())
+        || !checked.subject().equals(machine.subject())) deny();
+    // The same natively authenticated request reaches the current locked checks.
+    var auth = machine.nativeAuth();
+    var token = auth.getToken();
+    String actor = machine.actor(), clientId = machine.clientId(), subject = machine.subject();
     var em = CurrentNativeHumanIdentity.entityManager(session);
     var realm = one(em, "select NAME, ENABLED, NOT_BEFORE from REALM where ID = :id for update", config.realmId);
     if (!config.realmId.equals(session.getContext().getRealm().getId()) || !config.realmName.equals(text(realm[0]))
@@ -89,7 +125,6 @@ final class ProtectedInvitationAuthorization {
         || nativeRights.users().canManage() || nativeRights.users().canView() || nativeRights.users().canQuery()) deny();
     LifecycleAuthorization.requireNoNativePermissions(session, token);
     crypto.requireDistinctNativeSecret(text(client[12]));
-    return new LifecycleAuthorization.CheckedMachine(actor, clientId, subject, auth);
   }
 
   private static Set<String> jsonIds(JsonNode values) {
