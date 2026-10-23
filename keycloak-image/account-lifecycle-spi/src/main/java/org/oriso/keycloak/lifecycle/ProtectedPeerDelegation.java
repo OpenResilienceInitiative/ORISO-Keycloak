@@ -76,11 +76,15 @@ final class ProtectedPeerDelegation {
   }
 
   CurrentHumanAuthorization.VerifiedHuman require(Resolved resolved) {
+    if (resolved.sourceProfile() == null)
+      return CurrentHumanAuthorization.requirePrimary(session, config, resolved.binding(), null);
     var human = CurrentHumanAuthorization.require(session, resolved.binding().policy());
     return checkedProfile(resolved, human);
   }
 
   CurrentHumanAuthorization.VerifiedHuman require(Resolved resolved, String rawHumanBearer) {
+    if (resolved.sourceProfile() == null)
+      return CurrentHumanAuthorization.requirePrimary(session, config, resolved.binding(), rawHumanBearer);
     return checkedProfile(resolved,
         CurrentHumanAuthorization.require(session, resolved.binding().policy(), rawHumanBearer));
   }

@@ -229,7 +229,7 @@ final class ProtectedInvitationConfiguration {
 
   void validateInstallation(KeycloakSession session) {
     if (!realmId.equals(session.getContext().getRealm().getId()) || !realmName.equals(session.getContext().getRealm().getName())) deny();
-    for (var binding : bindings.values()) CurrentHumanAuthorization.validateInstallation(session, binding.policy());
+    for (var binding : bindings.values()) CurrentHumanAuthorization.validatePrimaryInstallation(session, this, binding);
     if (!actors.equals(CurrentNativeHumanIdentity.currentRoutineSubjects(CurrentNativeHumanIdentity.entityManager(session), realmId))) deny();
     for (var peer : peerPolicies.values()) CurrentNativeHumanIdentity.validateInstallation(session, peer.nativePolicy());
     for (var profile : profiles.values()) validateProfile(session, profile);

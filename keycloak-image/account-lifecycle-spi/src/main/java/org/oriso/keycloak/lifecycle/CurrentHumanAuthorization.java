@@ -37,6 +37,17 @@ public final class CurrentHumanAuthorization {
   }
 
   public static void validateInstallation(KeycloakSession session, Policy policy) {
+    validateInstallation(session, policy, null);
+  }
+
+  static void validatePrimaryInstallation(KeycloakSession session, ProtectedInvitationConfiguration config,
+      ProtectedInvitationConfiguration.Binding binding) {
+    requirePrimaryBinding(config, binding);
+    validateInstallation(session, binding.policy(), config);
+  }
+
+  private static void validateInstallation(KeycloakSession session, Policy policy,
+      ProtectedInvitationConfiguration config) {
     CurrentNativeHumanIdentity.validateInstallation(session, policy.nativePolicy);
     var em = CurrentNativeHumanIdentity.entityManager(session);
     var user = AccountLifecycleResource.lockedSnapshot(em, policy.subject);
@@ -53,7 +64,37 @@ public final class CurrentHumanAuthorization {
     user.path("groups").forEach(value -> groupIds.add(value.asText()));
     var grants = NativeCurrentGrants.read(em, policy.nativePolicy.realmId, roleIds, groupIds);
     if (!Collections.disjoint(grants.groups().keySet(), policy.nativePolicy.groups)
-        || !policy.realmRoles.equals(grants.realmRoles()) || !policy.clientRoles.equals(grants.clientRoles())) deny();
+        || !matchesPrimary(session, config, policy, user, grants.realmRoles(), grants.clientRoles())) deny();
+  }
+
+  static VerifiedHuman requirePrimary(KeycloakSession session, ProtectedInvitationConfiguration config,
+      ProtectedInvitationConfiguration.Binding binding, String rawHumanBearer) {
+    requirePrimaryBinding(config, binding);
+    var policy = binding.policy();
+    var human = rawHumanBearer == null ? CurrentNativeHumanIdentity.require(session, policy.nativePolicy)
+        : CurrentNativeHumanIdentity.require(session, policy.nativePolicy, rawHumanBearer);
+    if (!policy.subject.equals(human.subject()) || human.tenantId() == null || !policy.tenants.contains(human.tenantId())) deny();
+    var user = AccountLifecycleResource.lockedSnapshot(CurrentNativeHumanIdentity.entityManager(session), human.subject());
+    if (!matchesPrimary(session, config, policy, user, human.realmRoles(), human.clientRoles())) deny();
+    return new VerifiedHuman(human, policy.version);
+  }
+
+  private static void requirePrimaryBinding(ProtectedInvitationConfiguration config,
+      ProtectedInvitationConfiguration.Binding binding) {
+    if (config.bindings.get(binding.policy().subject) != binding) deny();
+  }
+
+  private static boolean matchesPrimary(KeycloakSession session, ProtectedInvitationConfiguration config,
+      Policy policy, JsonNode user, Set<String> roles, Map<String, Set<String>> clientRoles) {
+    if (policy.realmRoles.equals(roles) && policy.clientRoles.equals(clientRoles)) return true;
+    if (config == null || !user.path("roles").isEmpty() || user.path("groups").size() != 1) return false;
+    for (var profile : config.sourceProfileVariants.getOrDefault(policy.subject, List.of())) {
+      if (!profile.groupId().equals(user.path("groups").path(0).asText())
+          || !profile.realmRoles().equals(roles) || !profile.clientRoles().equals(clientRoles)) continue;
+      config.validateProfile(session, profile);
+      return true;
+    }
+    return false;
   }
 
   public static VerifiedHuman require(KeycloakSession session, Policy policy) {
