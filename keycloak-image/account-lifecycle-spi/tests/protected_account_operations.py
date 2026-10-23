@@ -16,10 +16,96 @@ from protected_otp_bootstrap import BootstrapFixture
 from protected_peer_readiness import PeerFixture, PeerReadiness, PROFILE, POLICY, TENANT
 from test_otp_scoped import ScopedOtpRead
 from maintenance_human_fixture import HumanMaintenanceFixture
-from test_protected_invitations import ProtectedInvitations
+from test_protected_invitations import ProtectedInvitations, ISSUER
 
 
 class OperationFixture(BootstrapFixture, PeerFixture):
+    native_issuer = ISSUER
+
+    @staticmethod
+    def installer_claims(token):
+        encoded = token.split('.')[1]
+        return json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+
+    def check_installer_identity(self, tokens, phase):
+        self.assertIn(phase, ['NATIVE_READY', 'RENEWAL'])
+        self.assertTrue(self.native_issuer.endswith('/realms/' + REALM))
+        master_issuer = self.native_issuer.removesuffix('/realms/' + REALM) + '/realms/master'
+        claims_list = [self.installer_claims(token) for token in tokens]
+        facts = {'phase': phase, 'tokenCount': len(tokens),
+            'subjectClaimPresent': ['sub' in claims for claims in claims_list],
+            'pinnedMasterIssuer': [claims.get('iss') == master_issuer for claims in claims_list]}
+        ProtectedOperationRead.observation.setdefault('installerIdentityChecks', []).append(facts)
+        for claims in claims_list:
+            self.assertEqual('admin-cli', claims['azp'])
+            self.assertEqual(master_issuer, claims['iss'])
+            self.assertIs(type(claims['exp']), int)
+            self.assertIs(type(claims['sid']), str)
+            self.assertTrue(claims['sid'])
+            self.assertEqual('sub' in claims_list[0], 'sub' in claims)
+            if 'sub' in claims:
+                self.assertEqual(claims_list[0]['sub'], claims['sub'])
+        # Keycloak 26.6.3 admin-cli is lightweight. Bind its optional subject through
+        # the authenticated UserResource/ModelToRepresentation native session records.
+        status, installers = call(self.base, 'GET',
+            '/admin/realms/master/users?username=synthetic-installer&exact=true', token=self.installer)
+        facts['userReadStatus'] = status
+        self.assertEqual(200, status)
+        self.assertIs(type(installers), list)
+        self.assertEqual(1, len(installers))
+        installer = installers[0]
+        self.assertEqual('synthetic-installer', installer['username'])
+        self.assertIs(installer['enabled'], True)
+        self.assertIs(type(installer['id']), str)
+        self.assertTrue(installer['id'])
+        status, sessions = call(self.base, 'GET',
+            '/admin/realms/master/users/' + installer['id'] + '/sessions', token=self.installer)
+        facts['sessionReadStatus'] = status
+        self.assertEqual(200, status)
+        self.assertIs(type(sessions), list)
+        for claims in claims_list:
+            matched = [session for session in sessions if session['id'] == claims['sid']]
+            self.assertEqual(1, len(matched))
+            self.assertEqual(installer['id'], matched[0]['userId'])
+            self.assertIs(type(matched[0]['clients']), dict)
+            self.assertIn('admin-cli', matched[0]['clients'].values())
+            if 'sub' in claims:
+                self.assertEqual(installer['id'], claims['sub'])
+        facts['sameActualEnabledMasterInstallerAndNativeSessionVerified'] = True
+
+    @classmethod
+    def ready(cls):
+        super().ready()
+        helper = cls('runTest')
+        helper.check_installer_identity([cls.installer], 'NATIVE_READY')
+
+    def admin(self, method, path="", body=None):
+        previous_token = self.installer
+        previous = self.installer_claims(previous_token)
+        expiry = previous.get('exp')
+        self.assertIs(type(expiry), int)
+        now = int(time.time())
+        if expiry <= now + 30:
+            # This existing disposable installer is fixture setup/observation only. Renew before
+            # an action, never retry a rejected action or alter a routine/human token's lifetime.
+            type(self).ready(); self.installer = type(self).installer
+            current = self.installer_claims(self.installer)
+            refreshed_expiry = current['exp']
+            self.assertGreater(refreshed_expiry, now + 30)
+            renewal = {'checkedAt': now, 'previousExpiry': expiry, 'newExpiry': refreshed_expiry,
+                'subjectClaimPresent': 'sub' in previous}
+            ProtectedOperationRead.observation.setdefault('installerTokenRefreshes', []).append(renewal)
+            self.check_installer_identity([previous_token, self.installer], 'RENEWAL')
+            renewal.update(bothSessionsOwnedBySameActualMasterInstaller=True,
+                sameExistingFixtureIdentityBeforeAction=True)
+        try:
+            return super().admin(method, path, body)
+        except AssertionError:
+            from protected_otp_bootstrap import BootstrapRead
+            ProtectedOperationRead.observation['installerAdminFailure'] = copy.deepcopy(
+                BootstrapRead.observation.get('installerAdminFailure', {}))
+            raise
+
     @classmethod
     def prepare_installation(cls, helper, configuration):
         value = PeerFixture.prepare_installation.__func__(cls, helper, configuration)
@@ -179,6 +265,12 @@ class ProtectedOperationRead(PeerReadiness):
         from protected_adoption_operations import exercise as adoption
         terminal(self, helper, primary, admin_target, o)
         ordinary(self, helper, primary, (account, human), o)
+        from adopted_admin_operations import exercise as adopted_admin
+        adopted_admin(self, helper, (account, human), o)
+        from causal_password_operations import exercise as adopted_causal
+        adopted_causal(self, helper, o, adopted=True)
+        from import_workflow_operations import exercise as adopted_import
+        adopted_import(self, helper, primary, (account, human), o, adopted=True)
         adoption(self, helper, primary, o)
         from causal_password_operations import exercise as causal
         causal(self, helper, o)
@@ -202,6 +294,8 @@ class ProtectedOperationRead(PeerReadiness):
         self_password(self, helper, (account, human), o)
         from consultant_deletion_operations import exercise as consultant_deletion
         consultant_deletion(self, helper, primary, (account, human), o)
+        from adopted_self_operations import exercise as adopted_self
+        adopted_self(self, helper, o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 

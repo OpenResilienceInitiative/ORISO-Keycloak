@@ -76,11 +76,15 @@ def install_policy(cls, helper, protected):
         'operations': ['account.deactivate', 'account.reactivate', 'account.read']},
         {'kind': 'IMPORT', 'targetProfiles': ['consultant-v1', 'consultant-agency-admin-v1'],
          'operations': ['account.read', 'account.ordinary-profile']}]
+    from adopted_self_operations import install as install_adopted_self
+    install_adopted_self(cls, helper, config)
+    from adopted_admin_operations import install as install_adopted_admin
+    install_adopted_admin(cls, helper, config)
     command = cls.command.copy()
     for index, argument in enumerate(command):
         if argument.startswith('ORISO_ACCOUNT_LIFECYCLE_GROUPS='):
             reviewed_groups = json.loads(argument.split('=', 1)[1])
-            reviewed_groups['/human-roles/consultant-basic'] = ['consultant']
+            reviewed_groups.update({profile['groupPath']: profile['realmRoles'] for profile in profiles})
             command[index] = 'ORISO_ACCOUNT_LIFECYCLE_GROUPS=' + json.dumps(reviewed_groups, separators=(',', ':'))
     index = command.index(IMAGE)
     command[index:index] = ['-e', 'ORISO_ACCOUNT_MAINTENANCE_CONFIG=' + json.dumps(config, separators=(',', ':'))]

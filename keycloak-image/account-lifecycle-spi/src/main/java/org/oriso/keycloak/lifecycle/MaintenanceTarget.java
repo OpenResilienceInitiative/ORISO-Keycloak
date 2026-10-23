@@ -86,7 +86,9 @@ final class MaintenanceTarget {
         AccountLifecycleAttempt.class)
         .setParameter("realm", realm.getId()).setParameter("account", request.accountId())
         .setLockMode(LockModeType.PESSIMISTIC_WRITE).getResultList();
-    if (attempts.isEmpty() && !humanSelf) return readAdopted(request);
+    if (attempts.isEmpty()) return humanSelf
+        ? OrdinaryAccountOperations.readAdoptedSelf(session, auth, mappings, policy, request, rawHumanBearer, otpOperation)
+        : readAdopted(request);
     if (attempts.size() != 1) deny();
     var row = attempts.get(0);
     em.refresh(row);

@@ -16,7 +16,8 @@ def exercise(test, helper, primary, peer, observed):
     disabled_native = helper.admin('GET', '/users/' + disabled); disabled_native['enabled'] = False
     helper.admin('PUT', '/users/' + disabled, disabled_native)
     targets = [('ordinary-adopted', type(helper).ordinary_adopted_account, None), ('ordinary-disabled', disabled, None), ('ordinary', ordinary, None), ('tenant-admin', type(helper).adopted_account, None),
-               ('platform-admin', type(helper).new_platform_account, None), ('manual-platform', peer[0], primary)]
+               ('platform-admin', type(helper).new_platform_account, None), ('manual-platform', peer[0], primary),
+               ('adopted-history-incarnation', type(helper).adopted_admin_cases['INACTIVITY.incarnation'][0], None)]
     adoption_boundaries(test, helper, records)
     for label, account, human in targets:
         native = helper.admin('GET', '/users/' + account)
@@ -44,6 +45,9 @@ def exercise(test, helper, primary, peer, observed):
         body = {**copy.deepcopy(read), 'operationId': str(uuid.uuid4()),
                 'expectedState': current['state'], 'change': {}}
         if human is None:
+            from machine_history_operations import terminal
+            no_effect = terminal(test, helper, 'deactivate', body)
+        if human is None:
             future = copy.deepcopy(body); future['operationId'] = str(uuid.uuid4())
             future['workflow']['dueAt'] = now + 10000
             test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'deactivate', future, None, 403)[0])
@@ -56,6 +60,12 @@ def exercise(test, helper, primary, peer, observed):
             test.assertEqual((status, suspended), HumanMaintenanceFixture.invoke(helper, 'deactivate', body, human, 200))
         if status != 200:
             continue
+        if human is None:
+            from machine_history_operations import profile_drift, read_only_profile
+            history = observed.setdefault('machineWorkflowHistory', {})
+            profile_drift(test, helper, 'deactivate', body, suspended, no_effect, history, 'INACTIVITY.' + label)
+            if label == 'ordinary':
+                read_only_profile(test, helper, 'deactivate', body, suspended, no_effect, history, 'INACTIVITY.' + label)
         restore_read = copy.deepcopy(read); restore_read['workflow'].update(action='RESTORE', suspensionOperationId=body['operationId'], workId=str(uuid.uuid4()), rowDigest=mac('claimed-inactivity-row/v1', {'restoreOf': work}))
         restore_read['target']['origin']['workflowId'] = restore_read['workflow']['workId']
         status, after = HumanMaintenanceFixture.invoke(helper, 'read', restore_read, human, 200)
@@ -74,6 +84,10 @@ def exercise(test, helper, primary, peer, observed):
             test.assertEqual(native['enabled'], helper.admin('GET', '/users/' + account)['enabled'])
             test.assertEqual((status, restored), HumanMaintenanceFixture.invoke(helper, 'reactivate', restore, human, 200))
             records[label]['nativeOriginalEnabledAndExactRetryVerified'] = True
+        if label == 'adopted-history-incarnation' and status == 200:
+            from machine_history_operations import incarnation
+            incarnation(test, helper, [('SUSPEND', 'deactivate', body), ('RESTORE', 'reactivate', restore),
+                ('NO_EFFECT', 'deactivate', no_effect[0])], observed.setdefault('machineWorkflowHistory', {}), 'INACTIVITY.adopted')
     helper.account_id, helper.creation_input = original_account, original_creation
 
 
