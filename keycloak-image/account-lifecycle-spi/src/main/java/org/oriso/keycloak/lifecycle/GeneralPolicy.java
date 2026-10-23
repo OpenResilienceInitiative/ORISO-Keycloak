@@ -102,9 +102,17 @@ final class GeneralPolicy {
   }
 
   OrdinaryHuman requireSelf(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
-    if (!Set.of("read", "locale", "profile", "password", "self-password").contains(request.command())) deny();
+    if (!Set.of("read", "locale", "profile", "email", "password", "self-password").contains(request.command())) deny();
     return requireSelectedSelf(session, request, rawHumanBearer,
         "account." + ("self-password".equals(request.command()) ? "password" : request.command()));
+  }
+
+  OrdinaryHuman requireSelfRead(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
+    return requireSelectedSelf(session, request, rawHumanBearer, "account.read");
+  }
+
+  OrdinaryHuman requireSelfProfile(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
+    return requireSelectedSelf(session, request, rawHumanBearer, "account.profile");
   }
 
   OrdinaryHuman requireSelfOtpRead(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {

@@ -1,13 +1,30 @@
 """Actual SELF password compatibility, native verifier effects and permanently fenced policy refusal."""
 import base64
 import copy
+import hashlib
+import hmac
 import json
 import time
 import uuid
 
-from lifecycle_fixture import LifecycleFixture, REALM, call
+from lifecycle_fixture import ACTORS, SUBJECTS, CONTEXT_KEY, LifecycleFixture, REALM, call, canonical, mac
 from maintenance_human_fixture import HumanMaintenanceFixture
 from profile_transition_operations import committed_kind
+
+
+def verify_terminal(test, helper, body, result, status):
+    test.assertEqual({'operationId', 'accountId', 'result', 'status', 'receipt'}, set(result))
+    test.assertEqual(body['operationId'], result['operationId']); test.assertEqual(body['target']['accountId'], result['accountId'])
+    test.assertEqual('NO_EFFECT', result['result']); test.assertEqual(status, result['status'])
+    encoded, signature = result['receipt'].split('.')
+    test.assertEqual(hmac.new(CONTEXT_KEY, ('maintenance-no-effect-receipt/v1\n' + encoded).encode(), hashlib.sha256).hexdigest(), signature)
+    payload = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))
+    expected = {'realmId': helper.realm_id, 'accountId': body['target']['accountId'], 'operationId': body['operationId'],
+        'command': 'self-password', 'ownerClient': ACTORS['ACCOUNT_ADMIN'][0], 'ownerSubject': SUBJECTS['ACCOUNT_ADMIN'],
+        'intentDigest': mac('maintenance-intent', body), 'previousState': body['expectedState'],
+        'tenantId': body['target']['tenantId'], 'originDigest': mac('maintenance-origin', body['target']['origin']),
+        'result': 'NO_EFFECT', 'status': status}
+    test.assertEqual(expected, json.loads(payload)); test.assertEqual(canonical(expected), payload)
 
 
 def exercise(test, helper, tenant, observed):
@@ -89,18 +106,23 @@ def exercise(test, helper, tenant, observed):
                 stale_status, stale_result = HumanMaintenanceFixture.invoke(helper, 'self-password', stale, fresh, 409)
                 with test.subTest(operation='self-password.' + label + '.definite-stale-cas-fence'):
                     test.assertEqual(409, stale_status); test.assertEqual('NO_EFFECT', stale_result.get('result'))
+                    verify_terminal(test, helper, stale, stale_result, 409)
                     record['definiteStaleCasSignedAndFenced'] = True
                 if label in {'ORDINARY.CONSULTANT', 'PROTECTED.TENANT_ADMIN_DUAL'}:
                     policy_body = copy.deepcopy(wrong); policy_body['operationId'] = str(uuid.uuid4())
                     policy_body['change'] = {'currentPassword': password, 'password': 'Policy-short-42', 'temporary': False}
                     policy = helper.admin('GET', '').get('passwordPolicy', '')
-                    helper.admin('PUT', '', {'passwordPolicy': (policy + ' and ' if policy else '') + 'length(100)'})
+                    stored_algorithm = json.loads(next(c for c in credentials if c['type'] == 'password')['credentialData'])['algorithm']
+                    other_algorithm = 'pbkdf2-sha256' if stored_algorithm != 'pbkdf2-sha256' else 'argon2'
+                    helper.admin('PUT', '', {'passwordPolicy': 'hashAlgorithm(' + other_algorithm + ') and length(100)'})
                     try:
                         policy_status, terminal = HumanMaintenanceFixture.invoke(helper, 'self-password', policy_body, fresh, 400)
                         test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
                         record['policyStatus'] = policy_status
                         with test.subTest(operation='self-password.' + label + '.prewrite-policy-fence'):
                             test.assertEqual(400, policy_status); test.assertEqual('NO_EFFECT', terminal.get('result'))
+                            # The committing refusal must not run a queued old-password hash refresh.
+                            verify_terminal(test, helper, policy_body, terminal, 400)
                     finally:
                         helper.admin('PUT', '', {'passwordPolicy': policy})
                     if terminal.get('result') == 'NO_EFFECT':
@@ -115,6 +137,37 @@ def exercise(test, helper, tenant, observed):
                     expired_status, expired_result = HumanMaintenanceFixture.invoke(helper, 'self-password', expired, live['access_token'], 400)
                     test.assertEqual(400, expired_status); test.assertNotIn('receipt', expired_result)
                     record['exactSavedAfterOriginalDeadlineAndExpiredAbsentDenial'] = True
+                    primary = helper.human(record=False)
+                    admin_target = copy.deepcopy(target); admin_target['origin'].update(kind='HUMAN_ADMIN',
+                        workflowId=str(uuid.uuid4()), humanSubject=helper.human_subject,
+                        humanAuthority='PROTECTED_ACCOUNT_OPERATIONS_V1')
+                    for group in ['consultant-basic', 'consultant']:
+                        read_status, current_admin = HumanMaintenanceFixture.invoke(helper, 'read', {'target': admin_target}, primary, 200)
+                        test.assertEqual(200, read_status)
+                        profile_body = {'target': admin_target, 'operationId': str(uuid.uuid4()),
+                            'expectedState': current_admin['state'], 'change': {'group': '/human-roles/' + group}}
+                        changed_status, changed = HumanMaintenanceFixture.invoke(helper, 'ordinary-profile', profile_body, primary, 200)
+                        test.assertEqual(200, changed_status); test.assertEqual('UPDATED', changed['result'])
+                        login_status, changed_human = login(native['username'], password); test.assertEqual(200, login_status)
+                        result_status, result_body = HumanMaintenanceFixture.invoke(helper, 'self-password', body, changed_human['access_token'], 403 if group == 'consultant-basic' else 200)
+                        test.assertEqual(403 if group == 'consultant-basic' else 200, result_status)
+                        if group == 'consultant-basic': test.assertNotIn('receipt', result_body)
+                        else: test.assertEqual(result, result_body)
+                        test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+                    record['currentExplicitPasswordGrantWithdrawalDeniesSavedThenReviewedRestorationRecovers'] = True
+                if label == 'PROTECTED.TENANT_ADMIN_DUAL':
+                    before_disabled = helper.admin('GET', '/users/' + account)
+                    disabled = copy.deepcopy(before_disabled); disabled['enabled'] = False
+                    helper.admin('PUT', '/users/' + account, disabled)
+                    try:
+                        denied_status, denied = HumanMaintenanceFixture.invoke(helper, 'self-password', body, fresh, 403)
+                        test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+                        test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+                    finally:
+                        helper.admin('PUT', '/users/' + account, before_disabled)
+                    login_status, current_self = login(native['username'], password); test.assertEqual(200, login_status)
+                    test.assertEqual((200, result), HumanMaintenanceFixture.invoke(helper, 'self-password', body, current_self['access_token'], 200))
+                    record['disabledCurrentProtectedSelfCannotRecoverSavedReceipt'] = True
             finally:
                 helper.admin('PUT', '', {'passwordPolicy': previous_policy})
     finally:

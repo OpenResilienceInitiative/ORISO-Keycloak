@@ -13,7 +13,7 @@ final class MaintenancePreflightRefusal extends jakarta.ws.rs.WebApplicationExce
     return passwordPolicy(request,null);
   }
   static MaintenancePreflightRefusal passwordPolicy(MaintenanceRequest request,MaintenanceReplayReach.Checked reach) {
-    if (!MaintenanceResults.passwordReactivation(request)) throw new IllegalArgumentException();
+    if (!MaintenanceResults.passwordReactivation(request) && !"self-password".equals(request.command())) throw new IllegalArgumentException();
     return new MaintenancePreflightRefusal(400,reach);
   }
   static MaintenancePreflightRefusal current(int status) {

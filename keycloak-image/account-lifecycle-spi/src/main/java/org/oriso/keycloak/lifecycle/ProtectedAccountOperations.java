@@ -55,7 +55,8 @@ final class ProtectedAccountOperations {
   static JsonNode readSelfOperation(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String humanHeader, String operation) {
     if (!"SELF".equals(request.target().path("origin").path("kind").asText())
-        || !Set.of("otp.app-setup", "otp.delete", "otp.email-finish", "otp.email-start").contains(operation)) deny();
+        || !Set.of("otp.app-setup", "otp.delete", "otp.email-finish", "otp.email-start",
+            "account.password", "account.profile", "account.email", "account.locale").contains(operation)) deny();
     return readCurrent(session, crypto, request, humanHeader, operation);
   }
 
@@ -154,9 +155,9 @@ final class ProtectedAccountOperations {
     boolean imported=request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText());
     boolean scheduled=inactivity&&"INACTIVITY".equals(request.target().path("origin").path("kind").asText())
         ||imported&&"IMPORT".equals(request.target().path("origin").path("kind").asText());
-    if(causal==null && !inactivity && !imported && (!selected(request.target())||!Set.of("read","profile","email","reassign-tenant","profile-transition").contains(request.command())
+    if(causal==null && !inactivity && !imported && (!selected(request.target())||!Set.of("read","profile","email","locale","password","self-password","reassign-tenant","profile-transition").contains(request.command())
         ||!Set.of("otp.read","account.read","account.profile","account.email","account.reassign-tenant","otp.app-setup",
-            "otp.delete","otp.email-finish","otp.email-start","account.profile-transition").contains(operation)))deny();
+            "otp.delete","otp.email-finish","otp.email-start","account.profile-transition","account.password","account.locale").contains(operation)))deny();
     if(inactivity&&(!Set.of("read","deactivate","reactivate").contains(request.command())||!("account."+request.command()).equals(operation)))deny();
     if(imported&&(!"read".equals(request.command())||!"account.read".equals(operation)))deny();
     boolean needsHuman=causal==null&&!scheduled;

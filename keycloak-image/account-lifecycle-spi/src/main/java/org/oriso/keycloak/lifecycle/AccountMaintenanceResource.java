@@ -294,7 +294,9 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           && Set.of("profile", "email", "ordinary-profile", "deactivate", "reactivate", "reassign-tenant", "profile-transition").contains(command);
       if (!("SELF".equals(request.target().path("origin").path("kind").asText()) || humanAdmin || inactivity || importing)) deny();
       if(inactivity&&"INACTIVITY".equals(request.target().path("origin").path("kind").asText())&&rawHumanBearer!=null)deny();
-      var humanPolicy = humanAdmin || inactivity || importing ? null : humanPolicies.get();
+      boolean protectedSelf = "SELF".equals(request.target().path("origin").path("kind").asText())
+          && ProtectedAccountOperations.selected(request.target());
+      var humanPolicy = humanAdmin || inactivity || importing || protectedSelf ? null : humanPolicies.get();
       var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
       var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
       if (lockedRealm == null) deny();
@@ -314,7 +316,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
         // The saved result never repeats CAS or native effects.
         if (humanAdmin) MaintenanceReplayReach.require(session,auth,mappings,humanPolicies,configuredPolicy,request,prior,rawHumanBearer);
         else if(inactivity||importing) { if(rawHumanBearer!=null)deny(); }
-        else humanPolicy.requireSelf(session, request, rawHumanBearer);
+        else SelfAccountOperations.current(session, auth, targets, humanPolicy, request, rawHumanBearer);
         return MaintenanceResults.saved(prior, auth, request);
       }
       request.requireEffectDeadline();
@@ -330,12 +332,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           if (ProtectedAccountOperations.protectedTarget(session, request))
             reach=ProtectedAccountOperations.mutate(session, auth, request, body, rawHumanBearer);
           else reach=OrdinaryAccountOperations.mutate(session, auth, mappings, humanPolicies.get(), request, body, rawHumanBearer);
-        } else if ("locale".equals(command)) targets.locale(request, humanPolicy, rawHumanBearer);
-        else if ("profile".equals(command)) targets.profile(request, humanPolicy, rawHumanBearer);
-        else if (Set.of("password", "self-password").contains(command)) targets.password(request, humanPolicy, rawHumanBearer);
-        else deny();
+        } else SelfAccountOperations.mutate(session, auth, targets, humanPolicy, request, rawHumanBearer);
       } catch (MaintenancePreflightRefusal refused) {
-        if (!humanAdmin && !inactivity && !importing) throw refused;
         return MaintenanceResults.noEffect(session, auth, machine, request, body, refused.getResponse().getStatus(),refused.reach());
       }
       var outcome = JSON.createObjectNode();
