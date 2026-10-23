@@ -34,9 +34,16 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             current = json.loads(base64.urlsafe_b64decode(refreshed + '=' * (-len(refreshed) % 4)))
             refreshed_expiry = current['exp']
             self.assertGreater(refreshed_expiry, now + 30)
+            self.assertTrue(self.native_issuer.endswith('/realms/' + REALM))
+            master_issuer = self.native_issuer.removesuffix('/realms/' + REALM) + '/realms/master'
+            renewal = {'checkedAt': now, 'previousExpiry': expiry, 'newExpiry': refreshed_expiry,
+                'subjectClaimPresent': 'sub' in previous,
+                'previousPinnedMasterIssuer': previous.get('iss') == master_issuer,
+                'currentPinnedMasterIssuer': current.get('iss') == master_issuer}
+            ProtectedOperationRead.observation.setdefault('installerTokenRefreshes', []).append(renewal)
             for claims in [previous, current]:
                 self.assertEqual('admin-cli', claims['azp'])
-                self.assertEqual(self.base + '/realms/master', claims['iss'])
+                self.assertEqual(master_issuer, claims['iss'])
             self.assertEqual('sub' in previous, 'sub' in current)
             if 'sub' in previous:
                 self.assertEqual(previous['sub'], current['sub'])
@@ -60,11 +67,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
                 self.assertIn('admin-cli', matched[0]['clients'].values())
                 if 'sub' in claims:
                     self.assertEqual(installer['id'], claims['sub'])
-            ProtectedOperationRead.observation.setdefault('installerTokenRefreshes', []).append({
-                'checkedAt': now, 'previousExpiry': expiry, 'newExpiry': refreshed_expiry,
-                'subjectClaimPresent': 'sub' in previous,
-                'bothSessionsOwnedBySameActualMasterInstaller': True,
-                'sameExistingFixtureIdentityBeforeAction': True})
+            renewal.update(bothSessionsOwnedBySameActualMasterInstaller=True,
+                sameExistingFixtureIdentityBeforeAction=True)
         try:
             return super().admin(method, path, body)
         except AssertionError:
