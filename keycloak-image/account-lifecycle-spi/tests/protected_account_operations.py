@@ -202,6 +202,8 @@ class ProtectedOperationRead(PeerReadiness):
         self_password(self, helper, (account, human), o)
         from consultant_deletion_operations import exercise as consultant_deletion
         consultant_deletion(self, helper, primary, (account, human), o)
+        from adopted_self_operations import exercise as adopted_self
+        adopted_self(self, helper, o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 
