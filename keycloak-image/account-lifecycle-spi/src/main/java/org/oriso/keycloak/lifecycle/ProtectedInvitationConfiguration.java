@@ -13,6 +13,7 @@ final class ProtectedInvitationConfiguration {
   final JsonNode installation;
   final Map<String, String> actors;
   final Map<String, Binding> bindings;
+  final Map<String, List<Profile>> sourceProfileVariants;
   final Map<String, Profile> profiles;
   final Map<String, PeerPolicy> peerPolicies;
   final Map<String, List<OperationGrant>> bindingAccountOperations, peerAccountOperations;
@@ -58,7 +59,7 @@ final class ProtectedInvitationConfiguration {
     if (configuredBindings == null || !configuredBindings.isArray() || configuredBindings.isEmpty() || configuredBindings.size() > 100) bad();
     var bySubject = new TreeMap<String, Binding>();
     for (var binding : configuredBindings) {
-      fields(without(binding, "accountOperations"), "subject", "authority", "authorizerTenantIds", "humanClientIds", "audienceSets", "protectedProfileIds", "realmRoles", "clientRoles", "version");
+      fields(without(binding, "accountOperations", "sourceProfileVariants"), "subject", "authority", "authorizerTenantIds", "humanClientIds", "audienceSets", "protectedProfileIds", "realmRoles", "clientRoles", "version");
       String authority = text(binding, "authority", 20, false);
       var tenants = HumanPolicyJson.tenants(binding.get("authorizerTenantIds"));
       var roles = HumanPolicyJson.strings(binding.get("realmRoles"), 1, 100, 255);
@@ -97,6 +98,27 @@ final class ProtectedInvitationConfiguration {
     }
     profiles = Map.copyOf(byProfile);
     for (var binding : bindings.values()) if (!profiles.keySet().containsAll(binding.profiles())) bad();
+    var variants = new TreeMap<String, List<Profile>>();
+    for (var owner : configuredBindings) {
+      String subject = text(owner, "subject", 36, false);
+      var selected = new ArrayList<Profile>();
+      if (owner.has("sourceProfileVariants")) {
+        var configured = owner.path("sourceProfileVariants");
+        if (!configured.isArray() || configured.size() > 20) bad();
+        var unique = new HashSet<String>();
+        String family = "PLATFORM".equals(bindings.get(subject).authority()) ? "PLATFORM_ADMIN" : "TENANT_ADMIN";
+        for (var entry : configured) {
+          fields(entry, "profileId", "profileVersion");
+          String id = text(entry, "profileId", 255, false);
+          long version = number(entry, "profileVersion", true);
+          var profile = profiles.get(id);
+          if (profile == null || profile.version() != version || !family.equals(profile.kind()) || !unique.add(id)) bad();
+          selected.add(profile);
+        }
+      }
+      variants.put(subject, List.copyOf(selected));
+    }
+    sourceProfileVariants = Map.copyOf(variants);
     peerPolicies = peerPolicies(config);
     var primaryOperations = new TreeMap<String, List<OperationGrant>>();
     for (var binding : configuredBindings) {
