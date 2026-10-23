@@ -80,7 +80,11 @@ record MaintenanceRequest(
         text(change, "email", 255, true);
       }
       case "email" -> {
-        fields(change, "email");
+        if ("SELF".equals(kind) && (change.has("firstName") || change.has("lastName"))) {
+          fields(change, "firstName", "lastName", "email");
+          text(change, "firstName", 255, true);
+          text(change, "lastName", 255, true);
+        } else fields(change, "email");
         text(change, "email", 255, false);
       }
       case "locale" -> {

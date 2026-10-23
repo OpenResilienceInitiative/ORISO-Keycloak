@@ -69,6 +69,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         current_peer.update(id='own-tenant-consultant-v2', sourceProfileId=dual['id'],
             sourceProfileVersion=2, realmRoles=roles, protectedProfileIds=sorted([PROFILE, dual['id']]))
         current_peer['accountOperations'][0]['targetProfiles'] = sorted([PROFILE, dual['id']])
+        current_peer['accountOperations'].append({'authority': 'TENANT_PEER', 'targetProfiles': [dual['id']],
+            'selfOnly': True, 'operations': ['account.email', 'account.locale', 'account.profile']})
         value['peerDelegationPolicies'].append(current_peer)
         value['workflowOperations'][0]['targetProfiles'].append(dual['id'])
         value['workflowOperations'].append({'kind': 'IMPORT', 'targetProfiles': [PROFILE, dual['id']],
@@ -194,6 +196,8 @@ class ProtectedOperationRead(PeerReadiness):
         timestamp_boundaries(self, helper, o)
         from protected_adoption_operations import incarnation
         incarnation(self, helper, primary, o)
+        from self_profile_operations import exercise as self_profile
+        self_profile(self, helper, (account, human), o)
         from self_password_operations import exercise as self_password
         self_password(self, helper, (account, human), o)
         from profile_transition_operations import self_source_policy_boundary

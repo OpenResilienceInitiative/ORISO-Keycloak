@@ -127,6 +127,8 @@ def install_self_source(helper, configuration):
     binding['accountOperations'].append({'authority': 'PLATFORM',
         'targetProfiles': sorted([original['id'], desired['id']]), 'selfOnly': False,
         'operations': ['account.profile-transition', 'account.read']})
+    binding['accountOperations'].append({'authority': 'PLATFORM', 'targetProfiles': [desired['id']],
+        'selfOnly': True, 'operations': ['account.email', 'account.locale', 'account.password', 'account.profile', 'account.read']})
     configuration['adoptedAccounts'].append({'accountId': helper.human_subject,
         'protectedProfileId': original['id'], 'profileVersion': original['version']})
     username = 'reviewed-source-variant-' + uuid.uuid4().hex
@@ -215,6 +217,8 @@ def self_source_policy_boundary(test, helper, observed):
             fresh = login(native['username'], full)
             test.assertEqual((200, first), HumanMaintenanceFixture.invoke(helper, 'profile-transition', body, fresh, 200))
             record['reviewedVariantStartupAndNoSecondEffectVerified'] = True
+            from self_profile_operations import account as self_profile
+            self_profile(test, helper, 'PROTECTED.PLATFORM_ADMIN_DUAL', account, fresh, observed)
             helper.admin('POST', '/users/' + account + '/role-mappings/realm', [helper.admin('GET', '/roles/user')])
             extra = login(native['username'], full | {'user'})
             denied_status, denied = HumanMaintenanceFixture.invoke(helper, 'profile-transition', body, extra, 403)
