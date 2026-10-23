@@ -50,6 +50,27 @@ def docker(*args, **kwargs):
     )
 
 
+def installed_key_guard_names(text):
+    """Export fixed provider guard names, never raw startup logs or arbitrary exit credit."""
+    guards = {
+        "LIFECYCLE": "Lifecycle key must contain at least 32 bytes",
+        "SMTP": "SMTP context key must contain at least 32 bytes",
+        "PROTECTED": "Invalid protected context key",
+        "SESSION": "Invalid session key length",
+    }
+    found = set()
+    for line in text.splitlines():
+        value = line.strip()
+        if value.startswith("ERROR: "):
+            value = value.removeprefix("ERROR: ")
+        if "java.lang.IllegalStateException: " in value:
+            value = value.rsplit("java.lang.IllegalStateException: ", 1)[1]
+        for name, message in guards.items():
+            if value == message:
+                found.add(name)
+    return sorted(found)
+
+
 def source_manifest():
     paths = subprocess.run(
         ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True
@@ -207,10 +228,14 @@ class InstalledImage(unittest.TestCase):
             self.assertNotEqual(0, state["ExitCode"])
             logs = docker("logs", name)
             text = logs.stdout + logs.stderr
-            self.assertTrue(any(marker in text for marker in (
-                "Lifecycle key must contain at least 32 bytes",
-                "SMTP context key must contain at least 32 bytes",
-            )), "Failure must come from the installed provider key guard")
+            guards = installed_key_guard_names(text)
+            type(self).receipt["invalidKeyStartup"] = {
+                "readinessRefused": ready is False,
+                "containerExited": state["Running"] is False,
+                "nonzeroExitVerified": state["ExitCode"] != 0,
+                "guardNames": guards,
+            }
+            self.assertTrue(guards, "Failure must come from the installed provider key guard")
 
 
 def main():
