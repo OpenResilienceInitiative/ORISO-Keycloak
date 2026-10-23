@@ -20,6 +20,33 @@ from test_protected_invitations import ProtectedInvitations
 
 
 class OperationFixture(BootstrapFixture, PeerFixture):
+    def admin(self, method, path="", body=None):
+        encoded = self.installer.split('.')[1]
+        previous = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+        expiry = previous.get('exp')
+        self.assertIs(type(expiry), int)
+        now = int(time.time())
+        if expiry <= now + 30:
+            # This existing disposable installer is fixture setup/observation only. Renew before
+            # an action, never retry a rejected action or alter a routine/human token's lifetime.
+            type(self).ready(); self.installer = type(self).installer
+            refreshed = self.installer.split('.')[1]
+            current = json.loads(base64.urlsafe_b64decode(refreshed + '=' * (-len(refreshed) % 4)))
+            refreshed_expiry = current['exp']
+            self.assertGreater(refreshed_expiry, now + 30)
+            for field in ['sub', 'azp', 'iss']:
+                self.assertEqual(previous[field], current[field])
+            ProtectedOperationRead.observation.setdefault('installerTokenRefreshes', []).append({
+                'checkedAt': now, 'previousExpiry': expiry, 'newExpiry': refreshed_expiry,
+                'sameExistingFixtureIdentityBeforeAction': True})
+        try:
+            return super().admin(method, path, body)
+        except AssertionError:
+            from protected_otp_bootstrap import BootstrapRead
+            ProtectedOperationRead.observation['installerAdminFailure'] = copy.deepcopy(
+                BootstrapRead.observation.get('installerAdminFailure', {}))
+            raise
+
     @classmethod
     def prepare_installation(cls, helper, configuration):
         value = PeerFixture.prepare_installation.__func__(cls, helper, configuration)
