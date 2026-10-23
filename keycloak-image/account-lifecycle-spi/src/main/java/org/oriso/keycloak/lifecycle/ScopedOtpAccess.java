@@ -205,12 +205,12 @@ public final class ScopedOtpAccess {
           || !LifecycleAuthorization.equal(digest, prior.intentDigest)
           || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState))
         throw new jakarta.ws.rs.ClientErrorException("OTP operation conflicts", 409);
-      // The immutable operation is retry provenance. Reauthorize the actual current human,
-      // then return before mutable credential/CAS lookup or a second enrollment effect.
+      // Verify current native provenance and human authority before returning the saved result.
+      // Its old CAS is not reapplied and enrollment is never repeated.
       if (protectedSelf) ProtectedAccountOperations.readSelfOperation(session, authorization, target, humanHeader, operation);
-      else if ("otp.delete".equals(operation)) policy.requireSelfOtpDelete(session, target, humanHeader);
-      else if ("otp.email-finish".equals(operation)) policy.requireSelfOtpEmailFinish(session, target, humanHeader);
-      else policy.requireSelfOtpAppSetup(session, target, humanHeader);
+      else if ("otp.delete".equals(operation)) new MaintenanceTarget(session, authorization, mappings).readOtpSelfDelete(target, policy, humanHeader);
+      else if ("otp.email-finish".equals(operation)) new MaintenanceTarget(session, authorization, mappings).readOtpSelfEmailFinish(target, policy, humanHeader);
+      else new MaintenanceTarget(session, authorization, mappings).readOtpSelfAppSetup(target, policy, humanHeader);
       var saved = parse(prior.resultJson);
       int status = saved.path("status").asInt();
       if (!("otp.delete".equals(operation) ? Set.of(200) : Set.of(200, 201, 401)).contains(status)) deny();
@@ -351,7 +351,7 @@ public final class ScopedOtpAccess {
           || !account.equals(delivery.accountId) || !LifecycleAuthorization.equal(digest, delivery.intentDigest)) deny();
       if (phase == EmailPhase.REQUEST) {
         if (protectedSelf) ProtectedAccountOperations.emailStart(session, authorization, target, humanHeader);
-        else policy.requireSelfOtpEmailStart(session, target, humanHeader);
+        else new MaintenanceTarget(session, authorization, mappings).readOtpSelfEmailStart(target, policy, humanHeader);
         if ("SENT".equals(delivery.state) && delivery.finalJson != null)
           return Response.ok(parse(delivery.finalJson)).header("Cache-Control", "no-store").build();
         if (!"READY".equals(delivery.state) || delivery.expiresAt <= java.time.Instant.now().getEpochSecond())

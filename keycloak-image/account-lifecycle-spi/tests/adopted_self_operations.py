@@ -189,7 +189,8 @@ def exercise(test, helper, observed):
                     with test.subTest(operation='adopted-self.' + group + '.new-incarnation.' + operation):
                         test.assertEqual(403, s); test.assertNotIn('receipt', refusal)
                 test.assertEqual(fresh, helper.admin('GET', '/users/' + account)); test.assertEqual(fresh_credentials, helper.admin('GET', '/users/' + account + '/credentials'))
-                record['sameUuidSameFullRolesFreshBearerCannotRecoverOrMutateOldIncarnation'] = True
+                record['sameUuidSameFullRolesFreshBearerCannotRecoverOrMutateOldIncarnation'] = all(
+                    status == 403 for status in record['newIncarnationSavedOtpStatus'].values())
             record['currentForeignProfileDeniedThenExactReviewedProfileRestored'] = True
         for group in ['unreviewed', 'consultant-basic']:
             account, password = type(helper).adopted_self_cases[group]

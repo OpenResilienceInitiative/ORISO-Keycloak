@@ -78,6 +78,8 @@ def install_policy(cls, helper, protected):
          'operations': ['account.read', 'account.ordinary-profile']}]
     from adopted_self_operations import install as install_adopted_self
     install_adopted_self(cls, helper, config)
+    from adopted_admin_operations import install as install_adopted_admin
+    install_adopted_admin(cls, helper, config)
     command = cls.command.copy()
     for index, argument in enumerate(command):
         if argument.startswith('ORISO_ACCOUNT_LIFECYCLE_GROUPS='):

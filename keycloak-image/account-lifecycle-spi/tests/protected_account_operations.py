@@ -179,6 +179,8 @@ class ProtectedOperationRead(PeerReadiness):
         from protected_adoption_operations import exercise as adoption
         terminal(self, helper, primary, admin_target, o)
         ordinary(self, helper, primary, (account, human), o)
+        from adopted_admin_operations import exercise as adopted_admin
+        adopted_admin(self, helper, (account, human), o)
         adoption(self, helper, primary, o)
         from causal_password_operations import exercise as causal
         causal(self, helper, o)
