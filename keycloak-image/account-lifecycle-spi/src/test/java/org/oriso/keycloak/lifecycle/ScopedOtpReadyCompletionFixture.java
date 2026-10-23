@@ -13,6 +13,14 @@ import org.keycloak.utils.KeycloakSessionUtil;
 @Provider
 @Priority(20)
 public final class ScopedOtpReadyCompletionFixture implements ContainerResponseFilter {
+  private static String reachText(Object value) {
+    if(value==null)return null;
+    if(value instanceof java.sql.Clob clob)try{
+      if(clob.length()>8192)throw new IllegalStateException("Isolated reach exceeds its bound");
+      return clob.getSubString(1,(int)clob.length());
+    }catch(java.sql.SQLException failure){throw new IllegalStateException("Isolated reach text unavailable");}
+    return value.toString();
+  }
   private static void replayReach(ContainerRequestContext request,ContainerResponseContext response,String operation) {
     if(!operation.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         ||!"GET".equals(request.getMethod())||response.getStatus()!=200
@@ -31,7 +39,7 @@ public final class ScopedOtpReadyCompletionFixture implements ContainerResponseF
         .setParameter("id",id).setParameter("realm",realm.getId()).setParameter("account",user.getId()).getResultList();
     String mode=request.getHeaderString("X-ORISO-Replay-Reach-Fixture-Mode");
     if(rows.size()!=1||rows.get(0)==null&&!"RESTORE".equals(mode))throw new IllegalStateException("Exact synthetic reach envelope missing");
-    String original=rows.get(0)==null?null:rows.get(0).toString();
+    String original=reachText(rows.get(0));
     if(mode==null||!java.util.Set.of("OBSERVE","MISSING","BAD_MAC","EXTRA","FOREIGN_ROW","RESTORE").contains(mode))
       throw new IllegalStateException("Unknown isolated reach mode");
     String replacement=original;
@@ -48,7 +56,7 @@ public final class ScopedOtpReadyCompletionFixture implements ContainerResponseF
         throw new IllegalStateException("Invalid isolated foreign row selector");
       var foreign=em.createNativeQuery("select REPLAY_REACH_JSON from ORISO_ACCOUNT_MAINTENANCE_OP where ID=:id and REALM_ID=:realm and ACCOUNT_ID=:account and OWNER_CLIENT='backend-account-admin' for update")
           .setParameter("id",realm.getId()+":"+other).setParameter("realm",realm.getId()).setParameter("account",user.getId()).getResultList();
-      if(foreign.size()!=1||foreign.get(0)==null)throw new IllegalStateException("Exact synthetic foreign reach missing");replacement=foreign.get(0).toString();
+      if(foreign.size()!=1||foreign.get(0)==null)throw new IllegalStateException("Exact synthetic foreign reach missing");replacement=reachText(foreign.get(0));
     }else{
       var value=(com.fasterxml.jackson.databind.node.ObjectNode)LifecycleJson.parse(original);
       if("EXTRA".equals(mode))value.put("unreviewed",true);

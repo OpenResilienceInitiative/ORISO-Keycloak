@@ -27,7 +27,7 @@ def install_policy(cls, helper, protected):
                          'groupPath': '/human-roles/' + group,
                          'groupParentId': helper.group_id('/human-roles'),
                          'realmRoles': roles, 'clientRoles': {}, 'allowUnassignedTenant': False,
-                         'selfOperations': ['account.read']})
+                         'selfOperations': ['account.password', 'account.read']})
     client = helper.admin('GET', '/clients?clientId=protected-human-web')[0]['id']
     reviewed_roles = sorted({role for profile in profiles for role in profile['realmRoles']})
     helper.admin('POST', '/clients/' + client + '/scope-mappings/realm',

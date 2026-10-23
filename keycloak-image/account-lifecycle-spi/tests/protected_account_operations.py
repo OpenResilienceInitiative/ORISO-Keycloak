@@ -27,6 +27,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'authority': 'TENANT_PEER', 'targetProfiles': [PROFILE], 'selfOnly': True,
             'operations': ['account.read', 'otp.app-setup', 'otp.delete', 'otp.email-finish', 'otp.email-start', 'otp.read'],
         }]
+        value['peerDelegationPolicies'][0]['accountOperations'][0]['operations'].append('account.password')
+        value['peerDelegationPolicies'][0]['accountOperations'][0]['operations'].sort()
         value['peerDelegationPolicies'][0]['accountOperations'].append({
             'authority': 'TENANT_PEER', 'targetProfiles': [PROFILE], 'selfOnly': True,
             'operations': ['account.profile']})
@@ -37,6 +39,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'authority': 'PLATFORM', 'targetProfiles': ['platform-v1', PROFILE], 'selfOnly': False,
             'operations': ['account.email', 'account.profile', 'account.read'],
         }]
+        value['bindings'][0]['accountOperations'][0]['operations'].append('account.password')
+        value['bindings'][0]['accountOperations'][0]['operations'].sort()
         value['bindings'][0]['accountOperations'].append({
             'authority': 'PLATFORM', 'targetProfiles': [PROFILE], 'selfOnly': False,
             'operations': ['account.deactivate', 'account.reactivate', 'account.reassign-tenant']})
@@ -190,6 +194,8 @@ class ProtectedOperationRead(PeerReadiness):
         timestamp_boundaries(self, helper, o)
         from protected_adoption_operations import incarnation
         incarnation(self, helper, primary, o)
+        from self_password_operations import exercise as self_password
+        self_password(self, helper, (account, human), o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 
