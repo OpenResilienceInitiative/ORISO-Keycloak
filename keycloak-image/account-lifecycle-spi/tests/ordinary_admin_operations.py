@@ -84,7 +84,7 @@ def install_policy(cls, helper, protected):
     for index, argument in enumerate(command):
         if argument.startswith('ORISO_ACCOUNT_LIFECYCLE_GROUPS='):
             reviewed_groups = json.loads(argument.split('=', 1)[1])
-            reviewed_groups['/human-roles/consultant-basic'] = ['consultant']
+            reviewed_groups.update({profile['groupPath']: profile['realmRoles'] for profile in profiles})
             command[index] = 'ORISO_ACCOUNT_LIFECYCLE_GROUPS=' + json.dumps(reviewed_groups, separators=(',', ':'))
     index = command.index(IMAGE)
     command[index:index] = ['-e', 'ORISO_ACCOUNT_MAINTENANCE_CONFIG=' + json.dumps(config, separators=(',', ':'))]

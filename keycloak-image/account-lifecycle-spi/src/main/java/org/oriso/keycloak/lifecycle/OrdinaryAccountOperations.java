@@ -175,8 +175,9 @@ final class OrdinaryAccountOperations {
     GeneralPolicy.Profile baseline; JsonNode originalTenant; String provenance; String stateProvenance;
     MaintenanceAdoption.Baseline adoptionBaseline=null;
     if(rows.isEmpty()) {
-      // Adoption proves the incarnation; current SELF or the separate workflow grant supplies authority.
-      if(!self && (request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText())))deny();
+      // Adoption proves the incarnation; current human or separate workflow checks supply authority.
+      if(!self && !"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
+          && (request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText())))deny();
       var adoption=policy.adoptedAccounts.get(request.accountId());if(adoption==null)deny();
       baseline=policy.profile(adoption.profileId(),adoption.profileVersion());
       adoptionBaseline=MaintenanceAdoption.prepare(session,crypto,request.accountId(),"ORDINARY",baseline.id,baseline.version,

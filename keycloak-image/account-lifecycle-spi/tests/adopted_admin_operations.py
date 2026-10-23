@@ -16,8 +16,24 @@ def install(cls, helper, config):
     for grant in config['adminOperations']:
         if grant['authority'] == 'TENANT_PEER':
             grant['operations'] = [operation for operation in grant['operations'] if operation != 'account.email']
-    for label in ['user', 'consultant', 'agency-admin', 'consultant-agency-admin', 'peer-missing-email', 'unreviewed']:
-        group = 'consultant' if label in {'peer-missing-email', 'unreviewed'} else label
+    parent = helper.group_id('/human-roles')
+    helper.admin('POST', '/groups/' + parent + '/children', {'name': 'consultant-agency-admin-basic'})
+    group_id = helper.group_id('/human-roles/consultant-agency-admin-basic')
+    roles = ['consultant', 'restricted-agency-admin', 'user-admin']
+    helper.admin('POST', '/groups/' + group_id + '/role-mappings/realm', [helper.admin('GET', '/roles/' + role) for role in roles])
+    basic = copy.deepcopy(next(profile for profile in config['ordinaryProfiles'] if profile['id'] == 'consultant-agency-admin-v1'))
+    basic.update(id='consultant-agency-admin-basic-v1', groupId=group_id, groupPath='/human-roles/consultant-agency-admin-basic', realmRoles=roles)
+    config['ordinaryProfiles'].append(basic)
+    for grant in config['adminOperations']:
+        grant['targetProfiles'] = sorted(grant['targetProfiles'] + [basic['id']])
+    cases = [(label, 'consultant' if label in {'peer-missing-email', 'unreviewed'} else label)
+        for label in ['user', 'consultant', 'agency-admin', 'consultant-agency-admin', 'peer-missing-email', 'unreviewed']]
+    cases += [('CAUSAL.' + group + '.' + kind, group) for group in ['user', 'consultant', 'agency-admin', 'consultant-agency-admin']
+        for kind in ['EXISTING_SETUP', 'PASSWORD_RESET']]
+    cases += [('IMPORT.' + group + '.' + source, group) for group in ['consultant', 'consultant-agency-admin']
+        for source in ['HUMAN_ADMIN', 'IMPORT']]
+    cases += [('IMPORT.ungranted', 'consultant-agency-admin-basic'), ('IMPORT.unreviewed', 'consultant')]
+    for label, group in cases:
         username = 'legacy-admin-' + uuid.uuid4().hex
         password = LifecycleFixture.creation(helper)['account']['password']
         helper.admin('POST', '/users', {'username': username, 'enabled': True, 'email': username + '@oriso.org',
@@ -28,7 +44,7 @@ def install(cls, helper, config):
         if defaults: helper.admin('DELETE', '/users/' + account + '/role-mappings/realm', defaults)
         helper.admin('PUT', '/users/' + account + '/groups/' + helper.group_id('/human-roles/' + group))
         helper.admin('PUT', '/users/' + account + '/reset-password', {'type': 'password', 'value': password, 'temporary': False})
-        if label != 'unreviewed':
+        if label not in {'unreviewed', 'IMPORT.unreviewed'}:
             config['adoptedAccounts'].append({'accountId': account, 'ordinaryProfileId': group + '-v1', 'profileVersion': 1})
         cls.adopted_admin_cases[label] = (account, password)
 
@@ -91,8 +107,10 @@ def exercise(test, helper, peer, observed):
                 test.assertEqual({'consultant', 'group-chat-consultant'}, set(read()['effectiveRoles']))
             if group in {'consultant', 'agency-admin'}:
                 transition = 'ADD_AGENCY_ADMIN_IDENTITY' if group == 'consultant' else 'ADD_CONSULTANT_IDENTITY'
-                change('profile-transition', {'transition': transition, 'group': '/human-roles/consultant-agency-admin'})
-                test.assertEqual({'consultant', 'group-chat-consultant', 'restricted-agency-admin', 'user-admin'}, set(read()['effectiveRoles']))
+                desired = '/human-roles/consultant-agency-admin' + ('-basic' if group == 'agency-admin' else '')
+                change('profile-transition', {'transition': transition, 'group': desired})
+                expected_roles = {'consultant', 'restricted-agency-admin', 'user-admin'} | ({'group-chat-consultant'} if group == 'consultant' else set())
+                test.assertEqual(expected_roles, set(read()['effectiveRoles']))
                 status, fresh = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
                     {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': native['username'], 'password': password, 'scope': 'openid'}, form=True)
                 test.assertEqual(200, status)

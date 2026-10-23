@@ -181,6 +181,10 @@ class ProtectedOperationRead(PeerReadiness):
         ordinary(self, helper, primary, (account, human), o)
         from adopted_admin_operations import exercise as adopted_admin
         adopted_admin(self, helper, (account, human), o)
+        from causal_password_operations import exercise as adopted_causal
+        adopted_causal(self, helper, o, adopted=True)
+        from import_workflow_operations import exercise as adopted_import
+        adopted_import(self, helper, primary, (account, human), o, adopted=True)
         adoption(self, helper, primary, o)
         from causal_password_operations import exercise as causal
         causal(self, helper, o)

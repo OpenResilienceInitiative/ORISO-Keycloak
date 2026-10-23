@@ -28,11 +28,16 @@ def invoke(helper, account, operation, body):
                 + account + '/' + suffix, body, helper.token('ACCOUNT_ADMIN'), proof=encoded + '.' + signature)
 
 
-def exercise(test, helper, observed):
-    records = observed['causalPassword'] = {}
-    for profile_kind, kind in [('ORDINARY', 'EXISTING_SETUP'), ('ORDINARY', 'PASSWORD_RESET'),
-                               ('PROTECTED', 'EXISTING_SETUP'), ('PROTECTED', 'PASSWORD_RESET')]:
-        if profile_kind == 'ORDINARY':
+def exercise(test, helper, observed, adopted=False):
+    records = observed['adoptedCausalPassword' if adopted else 'causalPassword'] = {}
+    cases = [('ORDINARY', kind, group) for group in ['user', 'consultant', 'agency-admin', 'consultant-agency-admin']
+        for kind in ['EXISTING_SETUP', 'PASSWORD_RESET']] if adopted else [
+        (family, kind, None) for family in ['ORDINARY', 'PROTECTED'] for kind in ['EXISTING_SETUP', 'PASSWORD_RESET']]
+    for profile_kind, kind, group in cases:
+        if adopted:
+            account, _ = type(helper).adopted_admin_cases['CAUSAL.' + group + '.' + kind]
+            profile_id = group + '-v1'
+        elif profile_kind == 'ORDINARY':
             account, creation = committed(test, helper)
             profile_id = 'consultant-v1'
         else:
@@ -51,7 +56,7 @@ def exercise(test, helper, observed):
                   'humanClient': None, 'humanAuthority': None}}
         read = {'target': target, 'workflow': workflow}
         status, current = invoke(helper, account, 'account.password-reset.read', read)
-        label = profile_kind + '.' + kind
+        label = profile_kind + '.' + kind + ('.' + group if adopted else '')
         records[label] = {'readStatus': status, 'preconditions': True, 'withoutHumanHeader': True, 'uppercaseOriginalUsername': workflow['expectedUsername'] != native['username']}
         with test.subTest(operation='causal.' + label + '.read'):
             test.assertEqual(200, status); test.assertEqual(account, current['id'])
@@ -104,7 +109,7 @@ def exercise(test, helper, observed):
                 test.assertEqual(helper.realm_id, added[0]['authDetails']['realmId'])
                 test.assertFalse(added[0].get('representation'))
                 records[label]['canonicalAdminEventWithoutSecretsOrReplayDuplicate'] = True
-    if all(value.get('effectAndExactRetryVerified') for value in records.values()):
+    if not adopted and all(value.get('effectAndExactRetryVerified') for value in records.values()):
         terminal_and_expired_history(test, helper, observed)
 
 
