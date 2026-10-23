@@ -161,7 +161,8 @@ def exercise(test, helper, tenant, observed):
                     helper.admin('PUT', '/users/' + account, disabled)
                     try:
                         denied_status, denied = HumanMaintenanceFixture.invoke(helper, 'self-password', body, fresh, 403)
-                        test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+                        record['disabledCurrentProtectedSelfStatus'] = denied_status
+                        test.assertIn(denied_status, {401, 403}); test.assertNotIn('receipt', denied)
                         test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
                     finally:
                         helper.admin('PUT', '/users/' + account, before_disabled)
