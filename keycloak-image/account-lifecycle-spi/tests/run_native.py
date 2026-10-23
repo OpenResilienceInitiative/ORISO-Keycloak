@@ -120,6 +120,10 @@ def main():
         if p.is_file() and "target" not in p.parts and "__pycache__" not in p.parts
     }
     summary = {
+        "invalid_key_startup": getattr(
+            getattr(module, "InvalidLifecycleConfiguration", None),
+            "invalid_key_startup", None,
+        ),
         "lock_wait_receipts": getattr(
             getattr(module, "MariaDbLifecycleProof", None), "lock_wait_receipts", []
         ),

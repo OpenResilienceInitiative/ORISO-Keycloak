@@ -21,6 +21,7 @@ SUPPORT = ROOT / "keycloak-image/account-lifecycle-spi/tests"
 sys.path.insert(0, str(SUPPORT))
 from lifecycle_fixture import call
 from run_native import XmlResult
+from installed_key_guards import installed_key_guard_names
 
 REALM = "scenario-c-installed-image"
 PASSWORD = "synthetic-installed-image-password-0001"
@@ -48,27 +49,6 @@ def docker(*args, **kwargs):
     return subprocess.run(
         ["docker", *args], check=True, capture_output=True, text=True, **kwargs
     )
-
-
-def installed_key_guard_names(text):
-    """Export fixed provider guard names, never raw startup logs or arbitrary exit credit."""
-    guards = {
-        "LIFECYCLE": "Lifecycle key must contain at least 32 bytes",
-        "SMTP": "SMTP context key must contain at least 32 bytes",
-        "PROTECTED": "Invalid protected context key",
-        "SESSION": "Invalid session key length",
-    }
-    found = set()
-    for line in text.splitlines():
-        value = line.strip()
-        if value.startswith("ERROR: "):
-            value = value.removeprefix("ERROR: ")
-        if "java.lang.IllegalStateException: " in value:
-            value = value.rsplit("java.lang.IllegalStateException: ", 1)[1]
-        for name, message in guards.items():
-            if value == message:
-                found.add(name)
-    return sorted(found)
 
 
 def source_manifest():
