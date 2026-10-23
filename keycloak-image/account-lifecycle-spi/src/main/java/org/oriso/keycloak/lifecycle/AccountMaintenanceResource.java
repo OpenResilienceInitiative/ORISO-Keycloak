@@ -5,6 +5,7 @@ import static org.oriso.keycloak.lifecycle.LifecycleJson.*;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.*;
 import java.util.Map;
+import java.util.List;
 import java.util.function.Supplier;
 import jakarta.persistence.LockModeType;
 import org.keycloak.connections.jpa.JpaConnectionProvider;
@@ -314,10 +315,20 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           throw new ClientErrorException("Maintenance operation conflicts", 409);
         // Verify historical checked reach and independently current source/target authority.
         // The saved result never repeats CAS or native effects.
+        var saved = MaintenanceResults.saved(prior, auth, request);
         if (humanAdmin) MaintenanceReplayReach.require(session,auth,mappings,humanPolicies,configuredPolicy,request,prior,rawHumanBearer);
-        else if(inactivity||importing) { if(rawHumanBearer!=null)deny(); }
+        else if(inactivity||importing) {
+          if(rawHumanBearer!=null)deny();
+          var read = new MaintenanceRequest("read", account, request.target(), null, null, null, null, null, request.workflow());
+          boolean refused = "NO_EFFECT".equals(parse(prior.resultJson).path("result").asText());
+          // A refusal requires current read reach; a saved effect also needs its logical grant.
+          for(var current : refused ? List.of(read) : List.of(read, request)) {
+            if(inactivity) InactivityOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,current,null);
+            else ImportOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,current,null);
+          }
+        }
         else SelfAccountOperations.current(session, auth, targets, humanPolicy, request, rawHumanBearer);
-        return MaintenanceResults.saved(prior, auth, request);
+        return saved;
       }
       request.requireEffectDeadline();
       if (machine.nativeAuth().getToken().getExp() == null
