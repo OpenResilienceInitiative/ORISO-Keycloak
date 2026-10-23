@@ -12,22 +12,22 @@ import org.keycloak.models.*;
 /** Only the two fixed, checked ADMIN causal routes call this closed native journal. */
 final class CausalPasswordOperations {
   static Response read(KeycloakSession session, LifecycleAuthorization crypto, Map<String,Set<String>> mappings,
-      Supplier<GeneralPolicy> policies, LifecycleAuthorization.CheckedMachine machine, CausalPasswordRequest causal) {
+      Supplier<GeneralPolicy> policies, GeneralPolicy configured, LifecycleAuthorization.CheckedMachine machine, CausalPasswordRequest causal) {
     lockRealm(session);
     var claim = find(session, crypto, machine, causal);
     if (claim != null) return saved(session, crypto, machine, causal, claim, null);
-    return Response.ok(current(session, crypto, mappings, policies, causal)).header("Cache-Control","no-store").build();
+    return Response.ok(current(session, crypto, mappings, policies, configured, causal)).header("Cache-Control","no-store").build();
   }
 
   static Response mutate(KeycloakSession session, LifecycleAuthorization crypto, Map<String,Set<String>> mappings,
-      Supplier<GeneralPolicy> policies, LifecycleAuthorization.CheckedMachine machine, CausalPasswordRequest causal, JsonNode body, Runnable freshCommand) {
+      Supplier<GeneralPolicy> policies, GeneralPolicy configured, LifecycleAuthorization.CheckedMachine machine, CausalPasswordRequest causal, JsonNode body, Runnable freshCommand) {
     lockRealm(session); var request=causal.command();
     var claim=find(session,crypto,machine,causal);
     if (claim!=null) return saved(session,crypto,machine,causal,claim,body);
     var em=CurrentNativeHumanIdentity.entityManager(session);
     if (em.find(AccountMaintenanceOperation.class,session.getContext().getRealm().getId()+":"+request.operationId(),LockModeType.PESSIMISTIC_WRITE)!=null) conflict();
     // Actual locked committed/adopted profile, tenant, exact recipient and current setup action.
-    var current=current(session,crypto,mappings,policies,causal);
+    var current=current(session,crypto,mappings,policies,configured,causal);
     causal.requireLive();
     if (machine.nativeAuth().getToken().getExp()==null || machine.nativeAuth().getToken().getExp()<=java.time.Instant.now().getEpochSecond()) deny();
     if (!LifecycleAuthorization.equal(request.expectedState(),current.path("state").asText())) {
@@ -59,9 +59,9 @@ final class CausalPasswordOperations {
   }
 
   private static JsonNode current(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
-      Supplier<GeneralPolicy> policies,CausalPasswordRequest causal){
+      Supplier<GeneralPolicy> policies,GeneralPolicy configured,CausalPasswordRequest causal){
     causal.requireLive();
-    return ProtectedAccountOperations.protectedTarget(session,causal.target())
+    return !OrdinaryAccountOperations.adoptedTarget(session,configured,causal.target()) && ProtectedAccountOperations.protectedTarget(session,causal.target())
         ? ProtectedAccountOperations.readCausal(session,crypto,causal)
         : OrdinaryAccountOperations.readCausal(session,crypto,mappings,policies.get(),causal);
   }

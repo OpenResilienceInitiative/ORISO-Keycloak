@@ -56,16 +56,7 @@ final class InactivityOperations {
 
   }
   private static boolean adoptedOrdinaryTarget(KeycloakSession session,GeneralPolicy configured,MaintenanceRequest request){
-    if(configured==null||!configured.adoptedAccounts.containsKey(request.accountId()))return false;
-    var em=CurrentNativeHumanIdentity.entityManager(session);var realm=session.getContext().getRealm();
-    var locked=em.find(org.keycloak.models.jpa.entities.RealmEntity.class,realm.getId(),LockModeType.PESSIMISTIC_WRITE);
-    if(locked==null)deny();em.refresh(locked);
-    var attempts=em.createQuery("select a.id from AccountLifecycleAttempt a where a.realmId=:realm and a.accountId=:account",String.class)
-        .setParameter("realm",realm.getId()).setParameter("account",request.accountId()).setMaxResults(2).getResultList();
-    if(!attempts.isEmpty())return false;
-    if(ProtectedInvitationFactory.configuredAdoptedTarget(session,request.accountId()))deny();
-    // This is a locator only. The selected receiver must check its grant, baseline and full native profile.
-    return true;
+    return OrdinaryAccountOperations.adoptedTarget(session,configured,request);
   }
   private static void record(KeycloakSession session,LifecycleAuthorization crypto,LifecycleAuthorization.CheckedMachine machine,
       MaintenanceRequest request,JsonNode body,boolean enabled){

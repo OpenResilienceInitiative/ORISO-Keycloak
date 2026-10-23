@@ -85,7 +85,7 @@ final class MaintenanceReplayReach {
     if(!tenants.isMissingNode()&&tenants.size()!=1)deny();
     var target=request.target().deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)target).set("tenantId",tenant.deepCopy());
     var current=new MaintenanceRequest("read",request.accountId(),target,null,null,null,null,null,request.workflow());
-    if(ProtectedAccountOperations.protectedTarget(session,current))
+    if(!OrdinaryAccountOperations.adoptedTarget(session,configured,current) && ProtectedAccountOperations.protectedTarget(session,current))
       ProtectedAccountOperations.replayReach(session,crypto,current,human,needed);
     else OrdinaryAccountOperations.replayReach(session,crypto,mappings,policies.get(),current,human,needed);
   }

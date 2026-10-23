@@ -18,6 +18,19 @@ final class OrdinaryAccountOperations {
     return prepare(session, crypto, mappings, policy, request, human).response;
   }
 
+  /** Locator only: the selected receiver still verifies the immutable baseline and every grant. */
+  static boolean adoptedTarget(KeycloakSession session, GeneralPolicy configured, MaintenanceRequest request) {
+    if (configured == null || !configured.adoptedAccounts.containsKey(request.accountId())) return false;
+    var em = CurrentNativeHumanIdentity.entityManager(session); var realm = session.getContext().getRealm();
+    var locked = em.find(org.keycloak.models.jpa.entities.RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
+    if (locked == null) deny(); em.refresh(locked);
+    var attempts = em.createQuery("select a.id from AccountLifecycleAttempt a where a.realmId=:realm and a.accountId=:account", String.class)
+        .setParameter("realm", realm.getId()).setParameter("account", request.accountId()).setMaxResults(2).getResultList();
+    if (!attempts.isEmpty()) return false;
+    if (ProtectedInvitationFactory.configuredAdoptedTarget(session, request.accountId())) deny();
+    return true;
+  }
+
   static JsonNode readCausal(KeycloakSession session, LifecycleAuthorization crypto, Map<String, Set<String>> mappings,
       GeneralPolicy policy, CausalPasswordRequest causal) {
     causal.requireLive();
@@ -176,8 +189,10 @@ final class OrdinaryAccountOperations {
     MaintenanceAdoption.Baseline adoptionBaseline=null;
     if(rows.isEmpty()) {
       // Adoption proves the incarnation; current human or separate workflow checks supply authority.
-      if(!self && !"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
-          && (request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText())))deny();
+      boolean importWorkflow = request.workflow() != null && "IMPORT".equals(request.workflow().path("kind").asText())
+          && "IMPORT".equals(request.target().path("origin").path("kind").asText());
+      if(!self && !"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText()) && causal == null
+          && !importWorkflow && (request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText())))deny();
       var adoption=policy.adoptedAccounts.get(request.accountId());if(adoption==null)deny();
       baseline=policy.profile(adoption.profileId(),adoption.profileVersion());
       adoptionBaseline=MaintenanceAdoption.prepare(session,crypto,request.accountId(),"ORDINARY",baseline.id,baseline.version,

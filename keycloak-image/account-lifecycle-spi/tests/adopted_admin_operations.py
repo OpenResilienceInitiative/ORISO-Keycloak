@@ -26,13 +26,16 @@ def install(cls, helper, config):
     config['ordinaryProfiles'].append(basic)
     for grant in config['adminOperations']:
         grant['targetProfiles'] = sorted(grant['targetProfiles'] + [basic['id']])
+    config['workflowOperations'] += [
+        {'kind': 'IMPORT', 'targetProfiles': [basic['id']], 'operations': ['account.read']},
+        {'kind': 'INACTIVITY', 'targetProfiles': [basic['id']], 'operations': ['account.read', 'account.reactivate']}]
     cases = [(label, 'consultant' if label in {'peer-missing-email', 'unreviewed'} else label)
         for label in ['user', 'consultant', 'agency-admin', 'consultant-agency-admin', 'peer-missing-email', 'unreviewed']]
     cases += [('CAUSAL.' + group + '.' + kind, group) for group in ['user', 'consultant', 'agency-admin', 'consultant-agency-admin']
         for kind in ['EXISTING_SETUP', 'PASSWORD_RESET']]
     cases += [('IMPORT.' + group + '.' + source, group) for group in ['consultant', 'consultant-agency-admin']
         for source in ['HUMAN_ADMIN', 'IMPORT']]
-    cases += [('IMPORT.ungranted', 'consultant-agency-admin-basic'), ('IMPORT.unreviewed', 'consultant')]
+    cases += [('IMPORT.ungranted', 'consultant-basic'), ('IMPORT.unreviewed', 'consultant'), ('INACTIVITY.incarnation', 'user')]
     for label, group in cases:
         username = 'legacy-admin-' + uuid.uuid4().hex
         password = LifecycleFixture.creation(helper)['account']['password']

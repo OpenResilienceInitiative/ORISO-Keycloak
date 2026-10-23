@@ -72,11 +72,11 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("read", account, body);
       if(request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText()))
-        return Response.ok(ImportOperations.read(session,auth,mappings,humanPolicies,request,rawHumanBearer)).header("Cache-Control","no-store").build();
+        return Response.ok(ImportOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,request,rawHumanBearer)).header("Cache-Control","no-store").build();
       if(request.workflow()!=null)
         return Response.ok(InactivityOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,request,rawHumanBearer)).header("Cache-Control","no-store").build();
       if (ProtectedAccountOperations.selected(request.target())) {
-        var current = ProtectedAccountOperations.protectedTarget(session, request)
+        var current = !OrdinaryAccountOperations.adoptedTarget(session,configuredPolicy,request) && ProtectedAccountOperations.protectedTarget(session, request)
             ? ProtectedAccountOperations.readAccount(session, auth, request, rawHumanBearer)
             : OrdinaryAccountOperations.read(session, auth, mappings, humanPolicies.get(), request, rawHumanBearer);
         return Response.ok(current).header("Cache-Control", "no-store").build();
@@ -98,7 +98,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           "account.password-reset.read", "POST", "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       if (human != null) deny();
       var causal = CausalPasswordRequest.read(account, body);
-      return CausalPasswordOperations.read(session, auth, mappings, humanPolicies, machine, causal);
+      return CausalPasswordOperations.read(session, auth, mappings, humanPolicies, configuredPolicy, machine, causal);
     });
   }
 
@@ -112,7 +112,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account.password-reset", "POST", "realm/" + session.getContext().getRealm().getId() + "/account/" + account, body);
       if (human != null) deny();
-      return CausalPasswordOperations.mutate(session, auth, mappings, humanPolicies, machine,
+      return CausalPasswordOperations.mutate(session, auth, mappings, humanPolicies, configuredPolicy, machine,
           CausalPasswordRequest.mutation(account, body), body, () -> {
             auth.requireMachine(session, "ACCOUNT_ADMIN");
             auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
@@ -327,9 +327,9 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       MaintenanceReplayReach.Checked reach=null;
       try {
         if(inactivity) reach=InactivityOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,machine,request,body,rawHumanBearer);
-        else if(importing) reach=ImportOperations.mutate(session,auth,mappings,humanPolicies,request,body,rawHumanBearer);
+        else if(importing) reach=ImportOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,request,body,rawHumanBearer);
         else if (humanAdmin) {
-          if (ProtectedAccountOperations.protectedTarget(session, request))
+          if (!OrdinaryAccountOperations.adoptedTarget(session,configuredPolicy,request) && ProtectedAccountOperations.protectedTarget(session, request))
             reach=ProtectedAccountOperations.mutate(session, auth, request, body, rawHumanBearer);
           else reach=OrdinaryAccountOperations.mutate(session, auth, mappings, humanPolicies.get(), request, body, rawHumanBearer);
         } else SelfAccountOperations.mutate(session, auth, targets, humanPolicy, request, rawHumanBearer);

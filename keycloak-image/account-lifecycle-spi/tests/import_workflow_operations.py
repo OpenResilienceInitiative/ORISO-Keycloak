@@ -38,6 +38,9 @@ def exercise(test, helper, primary, peer, observed, adopted=False):
                     continue
                 body = {**copy.deepcopy(read), 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
                     'change': {'group': '/human-roles/consultant-agency-admin'}}
+                if adopted and source == 'IMPORT':
+                    from machine_history_operations import terminal
+                    no_effect = terminal(test, helper, 'ordinary-profile', body)
                 before = helper.admin('GET', '/users/' + account)
                 if not adopted and family == 'PROTECTED':
                     denied, _ = HumanMaintenanceFixture.invoke(helper, 'ordinary-profile', body, human, 403)
@@ -60,6 +63,12 @@ def exercise(test, helper, primary, peer, observed, adopted=False):
                     conflict_status, conflict = HumanMaintenanceFixture.invoke(helper, 'ordinary-profile', changed, human, 409)
                     test.assertEqual(409, conflict_status); test.assertNotIn('receipt', conflict)
                     records[label]['exactCompleteRoleUnionEffectAndRetryVerified'] = True
+                if adopted and source == 'IMPORT' and status == 200:
+                    from machine_history_operations import profile_drift, read_only_profile, incarnation
+                    history = observed.setdefault('machineWorkflowHistory', {})
+                    profile_drift(test, helper, 'ordinary-profile', body, result, no_effect, history, 'IMPORT.' + family)
+                    read_only_profile(test, helper, 'ordinary-profile', body, result, no_effect, history, 'IMPORT.' + family)
+                    incarnation(test, helper, [('UPDATED', 'ordinary-profile', body), ('NO_EFFECT', 'ordinary-profile', no_effect[0])], history, 'IMPORT.' + family)
         if adopted:
             for boundary in ['ungranted', 'unreviewed']:
                 account, _ = type(helper).adopted_admin_cases['IMPORT.' + boundary]
