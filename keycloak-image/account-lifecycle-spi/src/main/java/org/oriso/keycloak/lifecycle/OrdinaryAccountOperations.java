@@ -11,7 +11,7 @@ import org.keycloak.models.UserCredentialModel;
 /** Finite administration of one positively committed ordinary native profile. */
 final class OrdinaryAccountOperations {
   private record Prepared(JsonNode response, JsonNode nativeState, GeneralPolicy.Profile profile,
-      GeneralPolicy.Profile desired, MaintenanceLineage.Current lineage) {}
+      GeneralPolicy.Profile desired, MaintenanceLineage.Current lineage, MaintenanceReplayReach.Checked reach) {}
 
   static JsonNode read(KeycloakSession session, LifecycleAuthorization crypto, Map<String, Set<String>> mappings,
       GeneralPolicy policy, MaintenanceRequest request, String human) {
@@ -24,24 +24,24 @@ final class OrdinaryAccountOperations {
     return prepare(session, crypto, mappings, policy, causal.target(), null, causal).response;
   }
 
-  static void mutate(KeycloakSession session, LifecycleAuthorization crypto, Map<String, Set<String>> mappings,
+  static MaintenanceReplayReach.Checked mutate(KeycloakSession session, LifecycleAuthorization crypto, Map<String, Set<String>> mappings,
       GeneralPolicy policy, MaintenanceRequest request, JsonNode body, String human) {
     var prepared = prepare(session, crypto, mappings, policy, request, human);
     if (!LifecycleAuthorization.equal(request.expectedState(), prepared.response.path("state").asText()))
-      throw MaintenancePreflightRefusal.current(409);
+      throw MaintenancePreflightRefusal.current(409,prepared.reach);
     if ("reactivate".equals(request.command())
         && (!request.change().path("expectedUsername").equals(prepared.response.path("username"))
             || !request.change().path("expectedEmail").equals(prepared.response.path("email"))))
-      throw MaintenancePreflightRefusal.current(409);
+      throw MaintenancePreflightRefusal.current(409,prepared.reach);
     var realm = session.getContext().getRealm();
     var user = session.users().getUserById(realm, request.accountId());
     var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
     if (cache != null && user != null) { cache.evict(realm, user); user = session.users().getUserById(realm, request.accountId()); }
-    if (user == null) throw MaintenancePreflightRefusal.current(409);
+    if (user == null) throw MaintenancePreflightRefusal.current(409,prepared.reach);
     if ("reactivate".equals(request.command())
         && session.getProvider(org.keycloak.policy.PasswordPolicyManagerProvider.class)
             .validate(realm, user, request.change().path("password").textValue()) != null)
-      throw MaintenancePreflightRefusal.passwordPolicy(request);
+      throw MaintenancePreflightRefusal.passwordPolicy(request,prepared.reach);
     // Every definite preflight check above precedes the first native write below.
     switch (request.command()) {
       case "profile", "email" -> profile(user, request.change());
@@ -85,6 +85,7 @@ final class OrdinaryAccountOperations {
         var field = fields.next();
         if (!field.getValue().equals(fresh.path(field.getKey()))) throw new IllegalStateException("Profile effect did not complete");
       }
+    return prepared.reach;
   }
 
   private static Prepared prepare(KeycloakSession session, LifecycleAuthorization crypto,
@@ -95,6 +96,53 @@ final class OrdinaryAccountOperations {
   private static Prepared prepare(KeycloakSession session, LifecycleAuthorization crypto,
       Map<String, Set<String>> mappings, GeneralPolicy policy, MaintenanceRequest request, String human,
       CausalPasswordRequest causal) {
+    return prepare(session,crypto,mappings,policy,request,human,causal,null);
+  }
+
+  static MaintenanceReplayReach.Checked checkedReach(KeycloakSession session,LifecycleAuthorization crypto,
+      Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human) {
+    return prepare(session,crypto,mappings,policy,request,human).reach;
+  }
+
+  static void replayReach(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
+      GeneralPolicy policy,MaintenanceRequest request,String human,Set<String> operations) {
+    prepare(session,crypto,mappings,policy,request,human,null,operations);
+  }
+
+  record DeletedProfile(GeneralPolicy.Profile profile,JsonNode tenant) {}
+  /** Immutable provenance and lineage only; caller must first verify the exact owned deletion tombstone. */
+  static DeletedProfile deletedProfile(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
+      GeneralPolicy policy,String account) {
+    var em=CurrentNativeHumanIdentity.entityManager(session);var realm=session.getContext().getRealm();
+    var rows=em.createQuery("select a from AccountLifecycleAttempt a where a.realmId=:realm and a.accountId=:account",AccountLifecycleAttempt.class)
+        .setParameter("realm",realm.getId()).setParameter("account",account).setLockMode(LockModeType.PESSIMISTIC_WRITE).setMaxResults(2).getResultList();
+    GeneralPolicy.Profile baseline;JsonNode tenant;String provenance;
+    if(rows.isEmpty()){
+      var adoption=policy.adoptedAccounts.get(account);if(adoption==null)deny();
+      baseline=policy.profile(adoption.profileId(),adoption.profileVersion());
+      var anchor=MaintenanceAdoption.historical(session,crypto,account,"ORDINARY",baseline.id,baseline.version,baseline.snapshot);
+      tenant=anchor.tenant();provenance=anchor.provenance();
+    }else{
+      if(rows.size()!=1)deny();var row=rows.get(0);em.refresh(row);
+      if(!"COMMITTED".equals(row.state)||!"commit".equals(row.terminalOperation)||!"backend-account-create".equals(row.ownerClient)
+          ||!crypto.creatorSubject.equals(row.ownerSubject)||row.creationProof==null||row.terminalReceipt==null||row.terminalDigest==null)deny();
+      var scope=parse(row.scope);LifecycleGroups.scope(scope);var roles=mappings.get(scope.path("initialGroup").asText());
+      if(roles==null||!LifecycleAuthorization.equal(row.roleFingerprint,crypto.mac("initial-roles",JSON.valueToTree(new TreeSet<>(roles)))))deny();
+      baseline=policy.profileForGroup(row.groupId,roles);verifyCommitted(crypto,realm.getName(),row,scope);
+      var origin=JSON.createObjectNode();origin.put("attempt",row.id);origin.put("creationProof",row.creationProof);
+      origin.put("terminalReceipt",row.terminalReceipt);origin.set("scope",scope);
+      provenance=crypto.mac("maintenance-provenance/v1",origin);tenant=scope.path("tenantId");
+    }
+    var lineage=MaintenanceLineage.resolve(session,crypto,account,provenance,"ORDINARY",baseline.id,baseline.version,tenant,baseline.snapshot);
+    var current=policy.profile(lineage.profileId(),lineage.profileVersion());
+    if(!canonical(current.snapshot).equals(canonical(lineage.nativeProfile()))||!current.realmRoles.equals(mappings.get(current.path)))deny();
+    policy.validateProfile(session,current);LifecycleGroups.group(session,realm,current.path,current.realmRoles);
+    return new DeletedProfile(current,lineage.tenant());
+  }
+
+  private static Prepared prepare(KeycloakSession session,LifecycleAuthorization crypto,
+      Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human,
+      CausalPasswordRequest causal,Set<String> replayOperations) {
     if (policy == null || !Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate")
         .contains(request.command())) deny();
     var realm = session.getContext().getRealm(); var em = CurrentNativeHumanIdentity.entityManager(session);
@@ -154,10 +202,11 @@ final class OrdinaryAccountOperations {
     } else {
       var source = HumanAdminSource.require(session, crypto, request, human);
       if(request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText())&&!"PLATFORM".equals(source.authority()))deny();
-      policy.requireAdmin(source, request, "account." + request.command(), profile, desired);
-      if ("ordinary-profile".equals(request.command()) && request.change().has("profile"))
-        policy.requireAdmin(source, request, "account.profile", profile, desired);
+      for(String operation:replayOperations==null?MaintenanceReplayReach.operations(request):replayOperations)
+        policy.requireAdmin(source,request,operation,profile,desired);
     }
+    var reach=MaintenanceReplayReach.ordinary(request,profile,desired,
+        replayOperations==null?MaintenanceReplayReach.operations(request):replayOperations);
     // All failures below are definite target/CAS preflight refusals for the actual authorized source.
     try {
       if (!realm.getId().equals(policy.nativePolicy.realmId) || !lineage.tenant().equals(request.target().path("tenantId"))
@@ -192,10 +241,10 @@ final class OrdinaryAccountOperations {
       for (var action : current.path("requiredActions")) if ("UPDATE_PASSWORD".equals(action.asText())) changeRequired = true;
       result.put("passwordChangeRequired", changeRequired); result.put("state", crypto.mac("maintenance-state", state));
       if ("TWO_FACTOR_STATUS_V1".equals(request.include())) result.set("twoFactor", NativeOtpStatus.read(current));
-      return new Prepared(result, current, profile, desired, lineage);
+      return new Prepared(result, current, profile, desired, lineage, reach);
     } catch (jakarta.ws.rs.WebApplicationException refused) {
       int status = refused.getResponse().getStatus();
-      if (causal == null && (status == 403 || status == 409)) throw MaintenancePreflightRefusal.current(status);
+      if (causal == null && (status == 403 || status == 409)) throw MaintenancePreflightRefusal.current(status,reach);
       throw refused;
     }
   }

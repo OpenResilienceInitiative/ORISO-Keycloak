@@ -119,4 +119,9 @@
     </createTable>
     <addForeignKeyConstraint baseTableName="ORISO_INACTIVITY_SUSPENSION" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_INACTIVITY_SUSPEND_REALM" onDelete="CASCADE"/>
   </changeSet>
+  <changeSet id="oriso-maintenance-replay-reach-v1" author="oriso">
+    <addColumn tableName="ORISO_ACCOUNT_MAINTENANCE_OP">
+      <column name="REPLAY_REACH_JSON" type="TEXT"/>
+    </addColumn>
+  </changeSet>
 </databaseChangeLog>

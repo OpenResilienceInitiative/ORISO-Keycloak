@@ -310,10 +310,9 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
             || !LifecycleAuthorization.equal(digest, prior.intentDigest)
             || !LifecycleAuthorization.equal(request.expectedState(), prior.expectedState))
           throw new ClientErrorException("Maintenance operation conflicts", 409);
-        // The immutable operation is the retry provenance; verify the current actual human,
-        // then return before mutable target/CAS resolution or any second native effect.
-        if (humanAdmin) { var source=HumanAdminSource.require(session, auth, request, rawHumanBearer);
-          if(inactivity&&!"PLATFORM".equals(source.authority()))deny(); }
+        // Verify historical checked reach and independently current source/target authority.
+        // The saved result never repeats CAS or native effects.
+        if (humanAdmin) MaintenanceReplayReach.require(session,auth,mappings,humanPolicies,configuredPolicy,request,prior,rawHumanBearer);
         else if(inactivity||importing) { if(rawHumanBearer!=null)deny(); }
         else humanPolicy.requireSelf(session, request, rawHumanBearer);
         return MaintenanceResults.saved(prior, auth, request);
@@ -323,20 +322,21 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           || machine.nativeAuth().getToken().getExp() <= java.time.Instant.now().getEpochSecond()) deny();
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
+      MaintenanceReplayReach.Checked reach=null;
       try {
-        if(inactivity) InactivityOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,machine,request,body,rawHumanBearer);
-        else if(importing) ImportOperations.mutate(session,auth,mappings,humanPolicies,request,body,rawHumanBearer);
+        if(inactivity) reach=InactivityOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,machine,request,body,rawHumanBearer);
+        else if(importing) reach=ImportOperations.mutate(session,auth,mappings,humanPolicies,request,body,rawHumanBearer);
         else if (humanAdmin) {
           if (ProtectedAccountOperations.protectedTarget(session, request))
-            ProtectedAccountOperations.mutate(session, auth, request, body, rawHumanBearer);
-          else OrdinaryAccountOperations.mutate(session, auth, mappings, humanPolicies.get(), request, body, rawHumanBearer);
+            reach=ProtectedAccountOperations.mutate(session, auth, request, body, rawHumanBearer);
+          else reach=OrdinaryAccountOperations.mutate(session, auth, mappings, humanPolicies.get(), request, body, rawHumanBearer);
         } else if ("locale".equals(command)) targets.locale(request, humanPolicy, rawHumanBearer);
         else if ("profile".equals(command)) targets.profile(request, humanPolicy, rawHumanBearer);
         else if (Set.of("password", "self-password").contains(command)) targets.password(request, humanPolicy, rawHumanBearer);
         else deny();
       } catch (MaintenancePreflightRefusal refused) {
         if (!humanAdmin && !inactivity && !importing) throw refused;
-        return MaintenanceResults.noEffect(session, auth, machine, request, body, refused.getResponse().getStatus());
+        return MaintenanceResults.noEffect(session, auth, machine, request, body, refused.getResponse().getStatus(),refused.reach());
       }
       var outcome = JSON.createObjectNode();
       outcome.put("realmId", realm.getId());
@@ -366,6 +366,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       saved.intentDigest = digest;
       saved.expectedState = request.expectedState();
       saved.resultJson = canonical(result);
+      if(humanAdmin)saved.replayReachJson=MaintenanceReplayReach.seal(auth,saved,request,reach);
       em.persist(saved);
       if (realm.isAdminEventsEnabled()) {
         var event = new org.keycloak.events.admin.AdminEvent();

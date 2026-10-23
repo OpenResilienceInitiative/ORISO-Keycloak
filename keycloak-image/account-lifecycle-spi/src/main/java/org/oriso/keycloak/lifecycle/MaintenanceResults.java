@@ -9,13 +9,17 @@ import org.keycloak.models.KeycloakSession;
 final class MaintenanceResults {
   static Response noEffect(KeycloakSession session, LifecycleAuthorization crypto,
       LifecycleAuthorization.CheckedMachine machine, MaintenanceRequest request, JsonNode body, int status) {
+    return noEffect(session,crypto,machine,request,body,status,null);
+  }
+  static Response noEffect(KeycloakSession session,LifecycleAuthorization crypto,
+      LifecycleAuthorization.CheckedMachine machine,MaintenanceRequest request,JsonNode body,int status,MaintenanceReplayReach.Checked reach) {
     if (!allowedStatus(request, status)) deny();
     String digest = crypto.mac("maintenance-intent", body);
     var payload = payload(session, crypto, machine, request, digest, "NO_EFFECT"); payload.put("status", status);
     var result = JSON.createObjectNode(); result.put("operationId", request.operationId());
     result.put("accountId", request.accountId()); result.put("result", "NO_EFFECT"); result.put("status", status);
     result.put("receipt", crypto.receipt("maintenance-no-effect-receipt/v1", payload));
-    persist(session, machine, request, digest, result);
+    persist(session, machine, request, digest, result,reach,crypto);
     CurrentNativeHumanIdentity.entityManager(session).flush();
     return Response.status(status).entity(result).header("Cache-Control", "no-store").build();
   }
@@ -49,11 +53,18 @@ final class MaintenanceResults {
   }
   static void persist(KeycloakSession session, LifecycleAuthorization.CheckedMachine machine,
       MaintenanceRequest request, String digest, JsonNode result) {
+    persist(session,machine,request,digest,result,null,null);
+  }
+  private static void persist(KeycloakSession session,LifecycleAuthorization.CheckedMachine machine,
+      MaintenanceRequest request,String digest,JsonNode result,MaintenanceReplayReach.Checked reach,LifecycleAuthorization crypto) {
     var realm = session.getContext().getRealm().getId(); var saved = new AccountMaintenanceOperation();
     saved.id = realm + ":" + request.operationId(); saved.realmId = realm; saved.operationId = request.operationId();
     saved.accountId = request.accountId(); saved.command = request.command(); saved.ownerClient = machine.clientId();
     saved.ownerSubject = machine.subject(); saved.intentDigest = digest; saved.expectedState = request.expectedState();
-    saved.resultJson = canonical(result); CurrentNativeHumanIdentity.entityManager(session).persist(saved);
+    saved.resultJson = canonical(result);
+    if("HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText()))
+      saved.replayReachJson=MaintenanceReplayReach.seal(crypto,saved,request,reach);
+    CurrentNativeHumanIdentity.entityManager(session).persist(saved);
   }
   static Response updated(KeycloakSession session, LifecycleAuthorization crypto,
       LifecycleAuthorization.CheckedMachine machine, MaintenanceRequest request, JsonNode body) {

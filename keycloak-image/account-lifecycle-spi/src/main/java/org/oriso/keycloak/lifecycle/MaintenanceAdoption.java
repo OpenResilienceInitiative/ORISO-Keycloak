@@ -45,5 +45,21 @@ final class MaintenanceAdoption {
     }
     return new Baseline(row,fresh,value);
   }
+  /** Historical facts only, usable after an independently verified owned native deletion tombstone. */
+  static Baseline historical(KeycloakSession session,LifecycleAuthorization crypto,String account,String kind,
+      String profileId,long version,JsonNode profile){
+    String realm=session.getContext().getRealm().getId();var em=CurrentNativeHumanIdentity.entityManager(session);
+    var key=JSON.createObjectNode();key.put("realmId",realm);key.put("accountId",account);key.put("profileKind",kind);
+    var row=em.find(AccountMaintenanceAdoption.class,crypto.mac("maintenance-adoption-id/v1",key),LockModeType.PESSIMISTIC_WRITE);
+    if(row==null)deny();em.refresh(row);var value=parse(row.snapshotJson);
+    fields(value,"v","realmId","accountId","profileKind","profileId","profileVersion","profile","nativeCreatedTimestamp","originalTenantId");
+    if(!realm.equals(row.realmId)||!account.equals(row.accountId)||!kind.equals(row.kind)||number(value,"v",true)!=1
+        ||!realm.equals(value.path("realmId").asText())||!account.equals(value.path("accountId").asText())
+        ||!kind.equals(value.path("profileKind").asText())||!profileId.equals(value.path("profileId").asText())
+        ||version!=number(value,"profileVersion",true)||number(value,"nativeCreatedTimestamp",true)<=0
+        ||!canonical(profile).equals(canonical(value.path("profile")))
+        ||!LifecycleAuthorization.equal(crypto.mac("maintenance-adoption-baseline/v1",value),row.bindingMac))deny();
+    return new Baseline(row,false,value);
+  }
   private MaintenanceAdoption(){}
 }

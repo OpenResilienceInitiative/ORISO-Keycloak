@@ -91,6 +91,7 @@ def install_policy(cls, helper, protected):
 def exercise(test, helper, primary, peer, observed):
     """A separate command gets a separate subassertion; no fixture/setup exception is RED."""
     records = observed['ordinaryOperations'] = {}
+    histories = {}
     account, creation = committed(test, helper)
     target = {'accountId': account, 'tenantId': '11', 'origin': {
         'kind': 'HUMAN_ADMIN', 'workflowId': str(uuid.uuid4()), 'humanSubject': helper.human_subject,
@@ -128,6 +129,7 @@ def exercise(test, helper, primary, peer, observed):
                     test.assertEqual(account, result['id'])
                 else:
                     test.assertEqual('UPDATED', result['result'])
+                    histories[command] = (copy.deepcopy(body), copy.deepcopy(result))
                     test.assertEqual(body['operationId'], result['operationId'])
                     test.assertEqual((status, result), HumanMaintenanceFixture.invoke(helper, command, body, primary, 200))
                     fresh = helper.admin('GET', '/users/' + account)
@@ -206,6 +208,8 @@ def exercise(test, helper, primary, peer, observed):
         with test.subTest(operation='ordinary.post-role.self-read'):
             test.assertEqual(200, status); test.assertEqual(['consultant'], self_current['effectiveRoles'])
             records['postRoleSelf']['currentLineageVerified'] = True
+        from maintenance_replay_reach_operations import exercise as replay_reach
+        replay_reach(test, helper, primary, histories, observed)
         deletion = MaintenancePermissions.target(account, creation)
         status, delete_current = MaintenancePermissions.maintenance(helper, 'read', account, {'target': deletion})
         records['postRoleDeletion'] = {'readStatus': status, 'preconditions': True}
@@ -218,6 +222,8 @@ def exercise(test, helper, primary, peer, observed):
                 test.assertEqual(200, status); test.assertEqual('DELETED', deleted['result'])
                 test.assertEqual((status, deleted), MaintenancePermissions.maintenance(helper, 'delete', account, delete))
                 records['postRoleDeletion']['actualDeleteAndExactRetryVerified'] = True
+                from maintenance_replay_reach_operations import deleted_history
+                deleted_history(test, helper, primary, histories, observed)
 
     finally:
         helper.account_id, helper.creation_input = old_account, old_create

@@ -15,11 +15,11 @@ final class ImportOperations {
         ? ProtectedAccountOperations.readCurrentOperation(session,crypto,request,human)
         : OrdinaryAccountOperations.read(session,crypto,mappings,policies.get(),request,human);
   }
-  static void mutate(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
+  static MaintenanceReplayReach.Checked mutate(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
       Supplier<GeneralPolicy> policies,MaintenanceRequest request,JsonNode body,String human){
     require(request,human);
     if(!"ordinary-profile".equals(request.command())||ProtectedAccountOperations.protectedTarget(session,request))deny();
-    OrdinaryAccountOperations.mutate(session,crypto,mappings,policies.get(),request,body,human);
+    return OrdinaryAccountOperations.mutate(session,crypto,mappings,policies.get(),request,body,human);
   }
   private static void require(MaintenanceRequest request,String human){
     if(request.workflow()==null||!"IMPORT".equals(request.workflow().path("kind").asText()))deny();

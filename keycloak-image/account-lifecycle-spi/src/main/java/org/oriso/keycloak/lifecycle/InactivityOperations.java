@@ -19,9 +19,16 @@ final class InactivityOperations {
         ? ProtectedAccountOperations.readCurrentOperation(session,crypto,request,human)
         : OrdinaryAccountOperations.read(session,crypto,mappings,policies.get(),request,human);
   }
-  static void mutate(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
+  static MaintenanceReplayReach.Checked mutate(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
       Supplier<GeneralPolicy> policies,GeneralPolicy configured,LifecycleAuthorization.CheckedMachine machine,MaintenanceRequest request,JsonNode body,String human){
+    MaintenanceReplayReach.Checked reach=null;
+    try {
     var current=read(session,crypto,mappings,policies,configured,request,human);
+    if("HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())) {
+      boolean ordinary=adoptedOrdinaryTarget(session,configured,request)||!ProtectedAccountOperations.protectedTarget(session,request);
+      reach=ordinary?OrdinaryAccountOperations.checkedReach(session,crypto,mappings,policies.get(),request,human)
+          :ProtectedAccountOperations.checkedReach(session,crypto,request,human);
+    }
     if(!LifecycleAuthorization.equal(request.expectedState(),current.path("state").asText()))throw MaintenancePreflightRefusal.current(409);
     boolean suspend="deactivate".equals(request.command());
     if(suspend && "INACTIVITY".equals(request.target().path("origin").path("kind").asText())
@@ -44,6 +51,9 @@ final class InactivityOperations {
     var em=CurrentNativeHumanIdentity.entityManager(session);em.flush();
     var fresh=AccountLifecycleResource.lockedSnapshot(em,request.accountId());
     if(!fresh.path("enabled").isBoolean()||fresh.path("enabled").booleanValue()!=enabled)throw new IllegalStateException("Native status effect incomplete");
+    return reach;
+    }catch(MaintenancePreflightRefusal refused){throw refused.withReach(reach);}
+
   }
   private static boolean adoptedOrdinaryTarget(KeycloakSession session,GeneralPolicy configured,MaintenanceRequest request){
     if(configured==null||!configured.adoptedAccounts.containsKey(request.accountId()))return false;
