@@ -27,6 +27,9 @@ class OperationFixture(BootstrapFixture, PeerFixture):
             'authority': 'TENANT_PEER', 'targetProfiles': [PROFILE], 'selfOnly': True,
             'operations': ['account.read', 'otp.app-setup', 'otp.delete', 'otp.email-finish', 'otp.email-start', 'otp.read'],
         }]
+        value['peerDelegationPolicies'][0]['accountOperations'].append({
+            'authority': 'TENANT_PEER', 'targetProfiles': [PROFILE], 'selfOnly': True,
+            'operations': ['account.profile']})
         value['bindings'][0]['accountOperations'] = [{
             'authority': 'PLATFORM', 'targetProfiles': ['platform-v1'], 'selfOnly': True,
             'operations': ['account.read', 'otp.app-setup', 'otp.delete', 'otp.email-finish', 'otp.email-start', 'otp.read'],
@@ -56,6 +59,7 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         value['bindings'][0]['accountOperations'].append({'authority': 'PLATFORM',
             'targetProfiles': sorted([PROFILE, dual['id']]), 'selfOnly': False,
             'operations': ['account.profile-transition', 'account.read']})
+        value['bindings'][0]['accountOperations'][2]['targetProfiles'].append(dual['id'])
         current_peer = copy.deepcopy(value['peerDelegationPolicies'][0])
         current_peer.update(id='own-tenant-consultant-v2', sourceProfileId=dual['id'],
             sourceProfileVersion=2, realmRoles=roles, protectedProfileIds=sorted([PROFILE, dual['id']]))

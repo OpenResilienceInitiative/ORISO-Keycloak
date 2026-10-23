@@ -31,6 +31,19 @@ public class ProtectedPeerPolicyTest {
     var variants=base();var refs=((ObjectNode)variants.path("bindings").path(0)).putArray("sourceProfileVariants");
     refs.addObject().put("profileId","platform-v1").put("profileVersion",1);assertAccepted(variants);
     var emptyVariants=base();((ObjectNode)emptyVariants.path("bindings").path(0)).putArray("sourceProfileVariants");assertAccepted(emptyVariants);
+    var parsedVariants=new ProtectedInvitationConfiguration(variants);
+    assertEquals(java.util.Set.of("agency-admin","tenant-admin"),parsedVariants.bindings.values().iterator().next().policy().realmRoles);
+    assertEquals("platform-v1",parsedVariants.sourceProfileVariants.values().iterator().next().get(0).id());
+    assertTrue(new ProtectedInvitationConfiguration(base()).sourceProfileVariants.values().stream().allMatch(java.util.List::isEmpty));
+    for(var invalid:new com.fasterxml.jackson.databind.JsonNode[]{LifecycleJson.JSON.nullNode(),LifecycleJson.JSON.getNodeFactory().textNode("[]"),LifecycleJson.JSON.createObjectNode()}){
+      var value=base();((ObjectNode)value.path("bindings").path(0)).set("sourceProfileVariants",invalid);assertRejected(value);
+    }
+    for(var invalid:new com.fasterxml.jackson.databind.JsonNode[]{LifecycleJson.JSON.getNodeFactory().numberNode(0),LifecycleJson.JSON.getNodeFactory().numberNode(-1),LifecycleJson.JSON.getNodeFactory().numberNode(1.5),LifecycleJson.JSON.getNodeFactory().textNode("1"),LifecycleJson.JSON.getNodeFactory().numberNode(new java.math.BigInteger("9223372036854775808"))}){
+      var value=variants.deepCopy();((ObjectNode)value.path("bindings").path(0).path("sourceProfileVariants").path(0)).set("profileVersion",invalid);assertRejected(value);
+    }
+    var tooMany=base();var many=((ObjectNode)tooMany.path("bindings").path(0)).putArray("sourceProfileVariants");
+    for(int i=0;i<21;i++){var profile=tooMany.path("profiles").path(0).deepCopy();((ObjectNode)profile).put("id","reviewed-variant-"+i);((ArrayNode)tooMany.path("profiles")).add(profile);many.addObject().put("profileId","reviewed-variant-"+i).put("profileVersion",1);}assertRejected(tooMany);
+
     for(String field:new String[]{"profileId","profileVersion"}){var missing=variants.deepCopy();((ObjectNode)missing.path("bindings").path(0).path("sourceProfileVariants").path(0)).remove(field);assertRejected(missing);}
     var extraVariant=variants.deepCopy();((ObjectNode)extraVariant.path("bindings").path(0).path("sourceProfileVariants").path(0)).put("authority","PLATFORM");assertRejected(extraVariant);
     var duplicateVariant=variants.deepCopy();((ArrayNode)duplicateVariant.path("bindings").path(0).path("sourceProfileVariants")).add(refs.path(0).deepCopy());assertRejected(duplicateVariant);

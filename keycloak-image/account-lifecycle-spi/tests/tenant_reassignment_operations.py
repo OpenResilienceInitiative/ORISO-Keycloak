@@ -16,6 +16,16 @@ def exercise(test, helper, primary, peer, observed):
             'kind': 'HUMAN_ADMIN', 'workflowId': str(uuid.uuid4()), 'humanSubject': helper.human_subject,
             'humanIssuer': type(helper).native_issuer, 'humanClient': 'protected-human-web',
             'humanAuthority': 'PROTECTED_ACCOUNT_OPERATIONS_V1'}}
+        own_body = own_result = None
+        if label == 'committed':
+            own_target = copy.deepcopy(target); own_target['origin']['humanSubject'] = account
+            own_status, own_current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': own_target}, peer[1], 200)
+            test.assertEqual(200, own_status)
+            own_body = {'target': own_target, 'operationId': str(uuid.uuid4()), 'expectedState': own_current['state'],
+                'change': {'firstName': 'OriginalTenant', 'lastName': native['lastName'], 'email': native['email']}}
+            own_status, own_result = HumanMaintenanceFixture.invoke(helper, 'profile', own_body, peer[1], 200)
+            test.assertEqual(200, own_status); test.assertEqual('UPDATED', own_result['result'])
+            test.assertEqual((200, own_result), HumanMaintenanceFixture.invoke(helper, 'profile', own_body, peer[1], 200))
         status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, primary, 200)
         test.assertEqual(200, status)
         body = {'target': target, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
@@ -54,4 +64,11 @@ def exercise(test, helper, primary, peer, observed):
                 records[label]['newTenantSelfReadStatus'] = new_status
                 test.assertEqual(200, new_status); test.assertEqual('22', new_current['tenantId'])
                 records[label]['oldTokenDeniedNewTokenCurrentTenantVerified'] = True
+                before_replay = helper.admin('GET', '/users/' + account)
+                revoked_status, revoked = HumanMaintenanceFixture.invoke(helper, 'profile', own_body, login['access_token'], 403)
+                records[label]['originalTenantSavedProfileReplayStatus'] = revoked_status
+                with test.subTest(operation='tenant-reassignment.current-source-cannot-replay-original-tenant-reach'):
+                    test.assertEqual(403, revoked_status); test.assertNotIn('receipt', revoked)
+                    test.assertEqual(before_replay, helper.admin('GET', '/users/' + account))
+                    records[label]['savedHumanResultRequiresOriginalAndCurrentTargetScope'] = True
     helper.account_id, helper.creation_input = original_account, original_creation
