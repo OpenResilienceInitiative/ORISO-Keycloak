@@ -65,6 +65,14 @@ def exercise(test, helper, observed):
             otp_status, setup = ScopedOtpRead.scoped_read(helper, human, target, 200)
             record = records[group] = {'readStatus': status, 'otpReadStatus': otp_status,
                 'reviewedLegacyAccountWithoutCreationAttempt': True, 'actualRawSelfLogin': True}
+            if group != 'user':
+                deletion = copy.deepcopy(target); deletion['origin'].update(kind='DELETION', humanSubject=None,
+                    humanIssuer=None, humanClient=None, humanAuthority=None)
+                test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'read', {'target': deletion}, None, 403)[0])
+                denied = {'target': deletion, 'operationId': str(uuid.uuid4()), 'expectedState': current.get('state', '0' * 64), 'change': {}}
+                test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'delete', denied, None, 403)[0])
+                test.assertEqual(before, helper.admin('GET', '/users/' + account))
+                record['adoptedDeletionStillUserOnly'] = True
             with test.subTest(operation='adopted-self.' + group + '.read'):
                 test.assertEqual(200, status); test.assertEqual(account, current['id'])
             with test.subTest(operation='adopted-self.' + group + '.otp-read'):

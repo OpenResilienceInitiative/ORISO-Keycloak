@@ -24,6 +24,13 @@ final class OrdinaryAccountOperations {
     return prepare(session, crypto, mappings, policy, causal.target(), null, causal).response;
   }
 
+  static JsonNode readAdoptedSelf(KeycloakSession session, LifecycleAuthorization crypto,
+      Map<String, Set<String>> mappings, GeneralPolicy policy, MaintenanceRequest request, String human,
+      String otpOperation) {
+    if (!"SELF".equals(request.target().path("origin").path("kind").asText()) || request.workflow() != null) deny();
+    return prepare(session, crypto, mappings, policy, request, human, null, null, otpOperation).response;
+  }
+
   static MaintenanceReplayReach.Checked mutate(KeycloakSession session, LifecycleAuthorization crypto, Map<String, Set<String>> mappings,
       GeneralPolicy policy, MaintenanceRequest request, JsonNode body, String human) {
     var prepared = prepare(session, crypto, mappings, policy, request, human);
@@ -143,8 +150,18 @@ final class OrdinaryAccountOperations {
   private static Prepared prepare(KeycloakSession session,LifecycleAuthorization crypto,
       Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human,
       CausalPasswordRequest causal,Set<String> replayOperations) {
-    if (policy == null || !Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate")
+    return prepare(session,crypto,mappings,policy,request,human,causal,replayOperations,null);
+  }
+
+  private static Prepared prepare(KeycloakSession session,LifecycleAuthorization crypto,
+      Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human,
+      CausalPasswordRequest causal,Set<String> replayOperations,String otpOperation) {
+    boolean self = "SELF".equals(request.target().path("origin").path("kind").asText()) && request.workflow() == null;
+    if (policy == null || !(self ? Set.of("read", "profile", "email", "locale", "password", "self-password")
+        : Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate"))
         .contains(request.command())) deny();
+    if (otpOperation != null && (!self || !"read".equals(request.command())
+        || !Set.of("otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish").contains(otpOperation))) deny();
     var realm = session.getContext().getRealm(); var em = CurrentNativeHumanIdentity.entityManager(session);
     var lockedRealm = em.find(org.keycloak.models.jpa.entities.RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
     if (lockedRealm == null) deny(); em.refresh(lockedRealm);
@@ -158,8 +175,8 @@ final class OrdinaryAccountOperations {
     GeneralPolicy.Profile baseline; JsonNode originalTenant; String provenance; String stateProvenance;
     MaintenanceAdoption.Baseline adoptionBaseline=null;
     if(rows.isEmpty()) {
-      // Only the separately granted claimed inactivity workflow can adopt this ordinary target here.
-      if(request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText()))deny();
+      // Adoption proves the incarnation; current SELF or the separate workflow grant supplies authority.
+      if(!self && (request.workflow()==null||!"INACTIVITY".equals(request.workflow().path("kind").asText())))deny();
       var adoption=policy.adoptedAccounts.get(request.accountId());if(adoption==null)deny();
       baseline=policy.profile(adoption.profileId(),adoption.profileVersion());
       adoptionBaseline=MaintenanceAdoption.prepare(session,crypto,request.accountId(),"ORDINARY",baseline.id,baseline.version,
@@ -193,7 +210,18 @@ final class OrdinaryAccountOperations {
         ||!profile.realmRoles.equals(mappings.get(profile.path))||!desired.realmRoles.equals(mappings.get(desired.path))) deny();
     LifecycleGroups.group(session,realm,profile.path,profile.realmRoles);
     LifecycleGroups.group(session,realm,desired.path,desired.realmRoles);
-    if (causal != null) causal.requireProfile("ORDINARY", profile.id, profile.version);
+    if (self) {
+      policy.requireSelfRead(session, request, human);
+      if (otpOperation == null) policy.requireSelf(session, request, human);
+      else switch (otpOperation) {
+        case "otp.read" -> policy.requireSelfOtpRead(session, request, human);
+        case "otp.app-setup" -> policy.requireSelfOtpAppSetup(session, request, human);
+        case "otp.delete" -> policy.requireSelfOtpDelete(session, request, human);
+        case "otp.email-start" -> policy.requireSelfOtpEmailStart(session, request, human);
+        case "otp.email-finish" -> policy.requireSelfOtpEmailFinish(session, request, human);
+        default -> deny();
+      }
+    } else if (causal != null) causal.requireProfile("ORDINARY", profile.id, profile.version);
     else if(request.workflow()!=null && "INACTIVITY".equals(request.target().path("origin").path("kind").asText())) {
       if(human!=null)deny();policy.workflowOperations.require(profile.id,"account."+request.command());
     } else if(imported&&"IMPORT".equals(request.target().path("origin").path("kind").asText())){
@@ -205,7 +233,7 @@ final class OrdinaryAccountOperations {
       for(String operation:replayOperations==null?MaintenanceReplayReach.operations(request):replayOperations)
         policy.requireAdmin(source,request,operation,profile,desired);
     }
-    var reach=MaintenanceReplayReach.ordinary(request,profile,desired,
+    var reach=self ? null : MaintenanceReplayReach.ordinary(request,profile,desired,
         replayOperations==null?MaintenanceReplayReach.operations(request):replayOperations);
     // All failures below are definite target/CAS preflight refusals for the actual authorized source.
     try {
