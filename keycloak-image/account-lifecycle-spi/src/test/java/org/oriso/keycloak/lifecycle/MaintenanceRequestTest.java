@@ -51,6 +51,30 @@ public class MaintenanceRequestTest {
   }
 
   @Test
+  public void contactEmailMayOnlyPreserveTheActualSelfVerificationState() {
+    var change = accepted("email", "{\"email\":\"contact@example.invalid\",\"preserveEmailVerified\":true}");
+    assertTrue(change.change().path("preserveEmailVerified").booleanValue());
+    for (String invalid : java.util.List.of(
+        "{\"email\":\"contact@example.invalid\",\"preserveEmailVerified\":false}",
+        "{\"email\":\"contact@example.invalid\",\"preserveEmailVerified\":\"true\"}",
+        "{\"email\":\"contact@example.invalid\",\"preserveEmailVerified\":true,\"emailVerified\":true}",
+        "{\"email\":\"contact@example.invalid\",\"preserveEmailVerified\":true,\"firstName\":\"Other\"}")) {
+      rejected("email", invalid);
+    }
+    var foreign = (com.fasterxml.jackson.databind.node.ObjectNode)parse(command(
+        "{\"email\":\"contact@example.invalid\",\"preserveEmailVerified\":true}"));
+    var origin = (com.fasterxml.jackson.databind.node.ObjectNode)foreign.path("target").path("origin");
+    origin.put("kind", "HUMAN_ADMIN");
+    origin.put("humanAuthority", "PROTECTED_ACCOUNT_OPERATIONS_V1");
+    try {
+      MaintenanceRequest.parse("email", ID, foreign);
+      fail("Contact-email preservation is confined to actual SELF");
+    } catch (WebApplicationException expected) {
+      assertEquals(400, expected.getResponse().getStatus());
+    }
+  }
+
+  @Test
   public void passwordIsNeverRenderedByTheTypedRequest() {
     var request = accepted("password", "{\"password\":\"secret-do-not-log\",\"temporary\":false}");
     assertFalse(request.toString().contains("secret-do-not-log"));

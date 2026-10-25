@@ -80,7 +80,11 @@ record MaintenanceRequest(
         text(change, "email", 255, true);
       }
       case "email" -> {
-        if ("SELF".equals(kind) && (change.has("firstName") || change.has("lastName"))) {
+        if (change.has("preserveEmailVerified")) {
+          fields(change, "email", "preserveEmailVerified");
+          if (!"SELF".equals(kind) || !change.path("preserveEmailVerified").isBoolean()
+              || !change.path("preserveEmailVerified").booleanValue()) bad();
+        } else if ("SELF".equals(kind) && (change.has("firstName") || change.has("lastName"))) {
           fields(change, "firstName", "lastName", "email");
           text(change, "firstName", 255, true);
           text(change, "lastName", 255, true);

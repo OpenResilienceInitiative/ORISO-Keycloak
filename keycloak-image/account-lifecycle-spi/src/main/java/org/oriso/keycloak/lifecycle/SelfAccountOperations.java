@@ -45,6 +45,7 @@ final class SelfAccountOperations {
     var cache = session.getProvider(org.keycloak.models.cache.UserCache.class);
     if (cache != null && user != null) { cache.evict(realm, user); user = session.users().getUserById(realm, request.accountId()); }
     if (user == null) throw MaintenancePreflightRefusal.current(409);
+    boolean originalEmailVerified = user.isEmailVerified();
     if (Set.of("password", "self-password").contains(request.command())) {
       password(session, request, user);
       return;
@@ -56,7 +57,8 @@ final class SelfAccountOperations {
         if (request.change().has("firstName")) names(user, request.change());
         user.setEmail(request.change().path("email").textValue());
         // The existing SELF profile caller attests its checked profile email, not mail possession.
-        user.setEmailVerified(true);
+        user.setEmailVerified(request.change().path("preserveEmailVerified").asBoolean(false)
+            ? originalEmailVerified : true);
       }
       default -> deny();
     }
@@ -78,7 +80,8 @@ final class SelfAccountOperations {
       for (String field : List.of("firstName", "lastName", "email"))
         if (request.change().has(field) && !request.change().path(field).equals(fresh.path(field)))
           throw new IllegalStateException("Native SELF profile did not complete");
-      if ("email".equals(request.command()) && !fresh.path("emailVerified").asBoolean())
+      if ("email".equals(request.command()) && fresh.path("emailVerified").asBoolean()
+          != (request.change().path("preserveEmailVerified").asBoolean(false) ? originalEmailVerified : true))
         throw new IllegalStateException("Native SELF email did not complete");
     }
   }

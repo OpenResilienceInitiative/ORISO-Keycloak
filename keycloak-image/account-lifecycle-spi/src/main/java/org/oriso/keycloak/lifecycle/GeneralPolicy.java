@@ -102,7 +102,7 @@ final class GeneralPolicy {
   }
 
   OrdinaryHuman requireSelf(KeycloakSession session, MaintenanceRequest request, String rawHumanBearer) {
-    if (!Set.of("read", "locale", "profile", "email", "password", "self-password").contains(request.command())) deny();
+    if (!Set.of("read", "locale", "profile", "email", "password", "self-password", "deactivate").contains(request.command())) deny();
     return requireSelectedSelf(session, request, rawHumanBearer,
         "account." + ("self-password".equals(request.command()) ? "password" : request.command()));
   }
@@ -251,7 +251,7 @@ final class GeneralPolicy {
       if (!operations.isArray() || operations.isEmpty() || operations.size() > 10) bad();
       var selected = new HashSet<String>();
       for (var operation : operations) {
-        if (!operation.isTextual() || !Set.of("account.read", "account.locale", "account.profile", "account.email", "account.password", "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish").contains(operation.asText())
+        if (!operation.isTextual() || !Set.of("account.read", "account.locale", "account.profile", "account.email", "account.password", "account.deactivate", "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish").contains(operation.asText())
             || !selected.add(operation.asText())) bad();
       }
       selfOperations = Set.copyOf(selected);

@@ -25,6 +25,7 @@ def contact_email(test, helper, account_id, human, target, records):
                     'email': 'contact-' + uuid.uuid4().hex + '@oriso.org',
                     'preserveEmailVerified': True}}
         status, result = HumanMaintenanceFixture.invoke(helper, 'email', body, human, 200)
+        records['email.contact.pending'] = {'status': status}
         test.assertEqual(200, status)
         test.assertEqual('UPDATED', result.get('result'))
         after = helper.admin('GET', '/users/' + account_id)
@@ -54,9 +55,8 @@ def account(test, helper, label, account_id, human, observed, only_locale=False)
         'humanIssuer': type(helper).native_issuer, 'humanClient': 'protected-human-web',
         'humanAuthority': 'PROTECTED_ACCOUNT_OPERATIONS_V1' if label.startswith('PROTECTED') else None}}
     try:
-        if not only_locale:
-            contact_email(test, helper, account_id, human, target, records)
-            native = helper.admin('GET', '/users/' + account_id)
+        contact_email(test, helper, account_id, human, target, records)
+        native = helper.admin('GET', '/users/' + account_id)
         for command, change in [('profile', {'firstName': 'ActualSelf', 'lastName': 'NamesOnly', 'email': native['email']}),
             ('email', {'firstName': 'ActualSelf', 'lastName': 'AtomicEmail', 'email': 'self-' + uuid.uuid4().hex + '@oriso.org'}),
             ('email', {'email': 'self-single-' + uuid.uuid4().hex + '@oriso.org'}), ('locale', {'locale': 'en'})]:

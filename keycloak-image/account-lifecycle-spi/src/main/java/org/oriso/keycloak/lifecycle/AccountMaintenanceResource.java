@@ -255,6 +255,39 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   }
 
   @POST
+  @Path("v1/accounts/{account}/deactivate/outcome")
+  public Response selfDeactivationOutcome(@PathParam("account") String account,byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String human) {
+    return guarded(() -> {
+      var machine=auth.requireMachine(session,"ACCOUNT_ADMIN");
+      if(human!=null)deny();
+      var body=parse(raw);var realm=session.getContext().getRealm();
+      auth.verifyCommand(proof,machine,"oriso-account-maintenance","ACCOUNT_MAINTENANCE",
+          "account.deactivate.outcome","POST","realm/"+realm.getId()+"/account/"+account,body);
+      var request=MaintenanceRequest.parse("deactivate",account,body);
+      if(!"SELF".equals(request.target().path("origin").path("kind").asText())
+          ||!account.equals(request.target().path("origin").path("humanSubject").asText())
+          ||!request.target().path("origin").path("humanAuthority").isNull()||request.workflow()!=null)deny();
+      var em=session.getProvider(JpaConnectionProvider.class).getEntityManager();
+      var locked=em.find(RealmEntity.class,realm.getId(),LockModeType.PESSIMISTIC_WRITE);
+      if(locked==null)deny();em.refresh(locked);
+      var prior=em.find(AccountMaintenanceOperation.class,realm.getId()+":"+request.operationId(),LockModeType.PESSIMISTIC_WRITE);
+      if(prior==null)throw new ClientErrorException("Original outcome remains unknown",409);
+      em.refresh(prior);
+      if(!realm.getId().equals(prior.realmId)||!account.equals(prior.accountId)||!"deactivate".equals(prior.command)
+          ||!machine.clientId().equals(prior.ownerClient)||!machine.subject().equals(prior.ownerSubject)
+          ||!LifecycleAuthorization.equal(auth.mac("maintenance-intent",body),prior.intentDigest)
+          ||!LifecycleAuthorization.equal(request.expectedState(),prior.expectedState))
+        throw new ClientErrorException("Original outcome conflicts",409);
+      var saved=MaintenanceResults.saved(prior,auth,request);
+      if(!"UPDATED".equals(parse(prior.resultJson).path("result").asText()))deny();
+      SelfDeactivationOutcome.requireSaved(session,auth,mappings,humanPolicies.get(),request,prior);
+      return saved;
+    });
+  }
+
+  @POST
   @Path("v1/accounts/{account}/reactivate")
   public Response reactivate(@PathParam("account") String account, byte[] raw,
       @HeaderParam("X-ORISO-Task-Context") String proof,
@@ -336,6 +369,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account." + command, "POST", "realm/" + realm.getId() + "/account/" + account, body);
       MaintenanceReplayReach.Checked reach=null;
+      SelfDeactivationOutcome.Prepared selfDeactivation=null;
       try {
         if(inactivity) reach=InactivityOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,machine,request,body,rawHumanBearer);
         else if(importing) reach=ImportOperations.mutate(session,auth,mappings,humanPolicies,configuredPolicy,request,body,rawHumanBearer);
@@ -343,7 +377,9 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
           if (!OrdinaryAccountOperations.adoptedTarget(session,configuredPolicy,request) && ProtectedAccountOperations.protectedTarget(session, request))
             reach=ProtectedAccountOperations.mutate(session, auth, request, body, rawHumanBearer);
           else reach=OrdinaryAccountOperations.mutate(session, auth, mappings, humanPolicies.get(), request, body, rawHumanBearer);
-        } else SelfAccountOperations.mutate(session, auth, targets, humanPolicy, request, rawHumanBearer);
+        } else if("deactivate".equals(command)&&"SELF".equals(request.target().path("origin").path("kind").asText()))
+          selfDeactivation=SelfDeactivationOutcome.deactivate(session,auth,mappings,humanPolicy,request,rawHumanBearer);
+        else SelfAccountOperations.mutate(session, auth, targets, humanPolicy, request, rawHumanBearer);
       } catch (MaintenancePreflightRefusal refused) {
         return MaintenanceResults.noEffect(session, auth, machine, request, body, refused.getResponse().getStatus(),refused.reach());
       }
@@ -376,6 +412,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       saved.expectedState = request.expectedState();
       saved.resultJson = canonical(result);
       if(humanAdmin)saved.replayReachJson=MaintenanceReplayReach.seal(auth,saved,request,reach);
+      if(selfDeactivation!=null)saved.replayReachJson=SelfDeactivationOutcome.seal(auth,saved,request,selfDeactivation);
       em.persist(saved);
       if (realm.isAdminEventsEnabled()) {
         var event = new org.keycloak.events.admin.AdminEvent();

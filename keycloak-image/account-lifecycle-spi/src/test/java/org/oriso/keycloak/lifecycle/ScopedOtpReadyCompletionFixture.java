@@ -49,7 +49,9 @@ public final class ScopedOtpReadyCompletionFixture implements ContainerResponseF
       String encoded=request.getHeaderString("X-ORISO-Replay-Reach-Fixture-Restore");
       if(encoded==null||encoded.length()>12000)throw new IllegalStateException("Missing exact isolated restore value");
       replacement=new String(java.util.Base64.getUrlDecoder().decode(encoded),java.nio.charset.StandardCharsets.UTF_8);
-      LifecycleJson.fields(LifecycleJson.parse(replacement),"v","reach","mac");
+      var restored=LifecycleJson.parse(replacement);
+      if("SELF_DEACTIVATION_OUTCOME_V1".equals(restored.path("kind").asText()))LifecycleJson.fields(restored,"v","kind","binding","mac");
+      else LifecycleJson.fields(restored,"v","reach","mac");
     }else if("FOREIGN_ROW".equals(mode)){
       String other=request.getHeaderString("X-ORISO-Replay-Reach-Fixture-Foreign");
       if(other==null||!other.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")||other.equals(operation))

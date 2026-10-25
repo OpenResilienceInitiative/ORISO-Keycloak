@@ -18,6 +18,20 @@ final class OrdinaryAccountOperations {
     return prepare(session, crypto, mappings, policy, request, human).response;
   }
 
+  record SelfDeactivationSource(JsonNode nativeState, GeneralPolicy.Profile profile, MaintenanceLineage.Current lineage, String state) {}
+
+  static SelfDeactivationSource selfDeactivationSource(KeycloakSession session,LifecycleAuthorization crypto,
+      Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human){
+    var source=prepare(session,crypto,mappings,policy,request,human);
+    return new SelfDeactivationSource(source.nativeState,source.profile,source.lineage,source.response.path("state").asText());
+  }
+
+  static void savedSelfDeactivation(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
+      GeneralPolicy policy,MaintenanceRequest request,SelfDeactivationOutcome.Checked checked){
+    if(checked==null)deny();
+    prepare(session,crypto,mappings,policy,request,null,null,null,null,checked);
+  }
+
   /** Locator only: the selected receiver still verifies the immutable baseline and every grant. */
   static boolean adoptedTarget(KeycloakSession session, GeneralPolicy configured, MaintenanceRequest request) {
     if (configured == null || !configured.adoptedAccounts.containsKey(request.accountId())) return false;
@@ -169,8 +183,14 @@ final class OrdinaryAccountOperations {
   private static Prepared prepare(KeycloakSession session,LifecycleAuthorization crypto,
       Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human,
       CausalPasswordRequest causal,Set<String> replayOperations,String otpOperation) {
+    return prepare(session,crypto,mappings,policy,request,human,causal,replayOperations,otpOperation,null);
+  }
+
+  private static Prepared prepare(KeycloakSession session,LifecycleAuthorization crypto,
+      Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human,
+      CausalPasswordRequest causal,Set<String> replayOperations,String otpOperation,SelfDeactivationOutcome.Checked savedSelf) {
     boolean self = "SELF".equals(request.target().path("origin").path("kind").asText()) && request.workflow() == null;
-    if (policy == null || !(self ? Set.of("read", "profile", "email", "locale", "password", "self-password")
+    if (policy == null || !(self ? Set.of("read", "profile", "email", "locale", "password", "self-password", "deactivate")
         : Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate"))
         .contains(request.command())) deny();
     if (otpOperation != null && (!self || !"read".equals(request.command())
@@ -226,7 +246,10 @@ final class OrdinaryAccountOperations {
         ||!profile.realmRoles.equals(mappings.get(profile.path))||!desired.realmRoles.equals(mappings.get(desired.path))) deny();
     LifecycleGroups.group(session,realm,profile.path,profile.realmRoles);
     LifecycleGroups.group(session,realm,desired.path,desired.realmRoles);
-    if (self) {
+    if (savedSelf!=null) {
+      if(!self||human!=null||!"deactivate".equals(request.command()))deny();
+      savedSelf.requireProfile(policy,profile,lineage,request);
+    } else if (self) {
       policy.requireSelfRead(session, request, human);
       if (otpOperation == null) policy.requireSelf(session, request, human);
       else switch (otpOperation) {
@@ -273,6 +296,7 @@ final class OrdinaryAccountOperations {
       state.put("provenance", stateProvenance); state.put("groupId", profile.groupId);
       state.set("effectiveRoles", JSON.valueToTree(new TreeSet<>(profile.realmRoles)));
       if (lineage.digest() != null) state.put("lineageDigest", lineage.digest());
+      if(savedSelf!=null)savedSelf.requirePostState(session,crypto,request,state);
       var result = JSON.createObjectNode();
       for (String field : List.of("id", "username", "email", "firstName", "lastName", "enabled", "emailVerified"))
         result.set(field, current.path(field));
