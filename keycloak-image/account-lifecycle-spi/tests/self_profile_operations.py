@@ -1,4 +1,7 @@
-"""Actual SELF profile/email/locale effects for source-supported local owner families."""
+"""Actual SELF profile/email/locale effects for source-supported local owner families.
+
+Contact-email preserves prior verification; the original profile-email variants attest it.
+"""
 import base64
 import copy
 import json
