@@ -7,7 +7,7 @@ on:
       - keycloak-image/**
       - .github/workflows/scenario-c-lifecycle-proof.yml
   push:
-    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021, codex/367-c-protected-receiver-20261021, dev]
+    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021, codex/367-c-protected-receiver-20261021, codex/367-c-contact-email-native-20261025, dev]
     paths:
       - keycloak-image/**
       - .github/workflows/scenario-c-lifecycle-proof.yml

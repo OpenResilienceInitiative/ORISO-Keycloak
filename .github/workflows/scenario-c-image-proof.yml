@@ -8,7 +8,7 @@ on:
       - scripts/ci/scenario-c-image-proof.py
       - .github/workflows/scenario-c-image-proof.yml
   push:
-    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021, dev]
+    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021, codex/367-c-contact-email-native-20261025, dev]
     paths:
       - keycloak-image/**
       - scripts/ci/scenario-c-image-proof.py
