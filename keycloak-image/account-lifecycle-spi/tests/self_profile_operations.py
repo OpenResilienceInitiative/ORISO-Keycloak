@@ -9,6 +9,37 @@ from maintenance_human_fixture import HumanMaintenanceFixture
 from profile_transition_operations import committed_kind
 
 
+def contact_email(test, helper, account_id, human, target, records):
+    """The public contact-email route preserves, rather than attests, verification."""
+    for verified in (False, True):
+        fixture = helper.admin('GET', '/users/' + account_id)
+        fixture['emailVerified'] = verified
+        helper.admin('PUT', '/users/' + account_id, fixture)
+        before = helper.admin('GET', '/users/' + account_id)
+        test.assertEqual(verified, before['emailVerified'])
+        credentials = helper.admin('GET', '/users/' + account_id + '/credentials')
+        status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, human, 200)
+        test.assertEqual(200, status)
+        body = {'target': copy.deepcopy(target), 'operationId': str(uuid.uuid4()),
+                'expectedState': current['state'], 'change': {
+                    'email': 'contact-' + uuid.uuid4().hex + '@oriso.org',
+                    'preserveEmailVerified': True}}
+        status, result = HumanMaintenanceFixture.invoke(helper, 'email', body, human, 200)
+        test.assertEqual(200, status)
+        test.assertEqual('UPDATED', result.get('result'))
+        after = helper.admin('GET', '/users/' + account_id)
+        test.assertEqual(body['change']['email'], after['email'])
+        test.assertEqual(verified, after['emailVerified'])
+        for field in set(before) | set(after):
+            if field != 'email': test.assertEqual(before.get(field), after.get(field), field)
+        test.assertEqual(credentials, helper.admin('GET', '/users/' + account_id + '/credentials'))
+        test.assertEqual((200, result), HumanMaintenanceFixture.invoke(helper, 'email', body, human, 200))
+        test.assertEqual(after, helper.admin('GET', '/users/' + account_id))
+        records['email.contact.' + str(verified).lower()] = {
+            'status': status, 'originalVerificationPreserved': True,
+            'exactSavedReplyWithoutOtherProfileOrCredentialWrite': True}
+
+
 def account(test, helper, label, account_id, human, observed, only_locale=False):
     original_account, original_creation = helper.account_id, helper.creation_input
     records = observed.setdefault('actualSelfProfile', {})[label] = {}
@@ -23,6 +54,9 @@ def account(test, helper, label, account_id, human, observed, only_locale=False)
         'humanIssuer': type(helper).native_issuer, 'humanClient': 'protected-human-web',
         'humanAuthority': 'PROTECTED_ACCOUNT_OPERATIONS_V1' if label.startswith('PROTECTED') else None}}
     try:
+        if not only_locale:
+            contact_email(test, helper, account_id, human, target, records)
+            native = helper.admin('GET', '/users/' + account_id)
         for command, change in [('profile', {'firstName': 'ActualSelf', 'lastName': 'NamesOnly', 'email': native['email']}),
             ('email', {'firstName': 'ActualSelf', 'lastName': 'AtomicEmail', 'email': 'self-' + uuid.uuid4().hex + '@oriso.org'}),
             ('email', {'email': 'self-single-' + uuid.uuid4().hex + '@oriso.org'}), ('locale', {'locale': 'en'})]:
