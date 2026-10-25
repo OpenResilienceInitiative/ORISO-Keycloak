@@ -22,6 +22,22 @@ from test_protected_invitations import ProtectedInvitations, ISSUER
 class OperationFixture(BootstrapFixture, PeerFixture):
     native_issuer = ISSUER
 
+    @classmethod
+    def setUpClass(cls):
+        # Observe the existing launcher after its original wrappers add all providers/TLS/caps.
+        # Keep argv only in this disposable fixture memory; no secrets enter evidence output.
+        import subprocess
+        original = subprocess.run
+        def remember(args, *positional, **keywords):
+            if isinstance(args, list) and args[:2] == ['docker', 'run'] and getattr(cls, 'name', None) in args:
+                cls.actual_native_launch = copy.deepcopy(args)
+            return original(args, *positional, **keywords)
+        subprocess.run = remember
+        try:
+            super().setUpClass()
+        finally:
+            subprocess.run = original
+
     @staticmethod
     def installer_claims(token):
         encoded = token.split('.')[1]

@@ -153,17 +153,59 @@ def exercise(test, helper, observed):
             helper.admin('POST', '/groups/' + group + '/role-mappings/realm', [role])
         test.assertEqual((200, result), outcome())
         record['currentProfileGrantWithdrawAndRestoreCheckedWithoutHuman'] = True
+
+        # Reuse the exact actual fixture launch, including original OTP/TLS/provider wrappers.
+        # Only this reviewed nonsecret user profile's SELF grant changes; the saved row cannot
+        # replace a missing current grant, even after the original human has expired.
+        import subprocess
+        original_launch = copy.deepcopy(type(helper).actual_native_launch)
+        test.assertIn(type(helper).data_mount, original_launch)
+        test.assertIn('--memory', original_launch); test.assertEqual('1g', original_launch[original_launch.index('--memory') + 1])
+        test.assertIn('--cpus', original_launch); test.assertEqual('2', original_launch[original_launch.index('--cpus') + 1])
+        prefix = 'ORISO_ACCOUNT_MAINTENANCE_CONFIG='
+        indexes = [index for index, value in enumerate(original_launch) if value.startswith(prefix)]
+        test.assertEqual(1, len(indexes)); selected = indexes[0]
+        policy = json.loads(original_launch[selected][len(prefix):])
+        reduced = copy.deepcopy(policy)
+        user_profile = next(profile for profile in reduced['ordinaryProfiles'] if profile['id'] == 'user-v1')
+        test.assertIn('account.read', user_profile['selfOperations'])
+        user_profile['selfOperations'].remove('account.deactivate')
+        reduced_launch = original_launch.copy()
+        reduced_launch[selected] = prefix + json.dumps(reduced, separators=(',', ':'))
+        test.assertEqual([selected], [index for index, (left, right) in enumerate(zip(original_launch, reduced_launch)) if left != right])
+
+        def relaunch(command, phase):
+            subprocess.run(['docker', 'stop', '-t', '5', type(helper).name], check=True, capture_output=True, timeout=30)
+            subprocess.run(['docker', 'rm', type(helper).name], check=True, capture_output=True, timeout=30)
+            type(helper).memoryStart()
+            subprocess.run(command, check=True, capture_output=True, timeout=60)
+            type(helper).refresh_endpoint(phase); type(helper).ready()
+            helper.base = type(helper).base; helper.installer = type(helper).installer
+
+        try:
+            relaunch(reduced_launch, 'self-deactivation-outcome-grant-withdrawn')
+            denied_status, denied = outcome()
+            test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+            test.assertEqual(disabled, helper.admin('GET', '/users/' + account))
+            test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+        finally:
+            relaunch(original_launch, 'self-deactivation-outcome-grant-restored')
+        test.assertEqual((200, result), outcome())
+        record['explicitSelfDeactivationPolicyWithdrawRestoreSameImageVolumeProvidersAndCaps'] = True
         machine = helper.token('ACCOUNT_ADMIN')
         machine_groups = helper.admin('GET', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/groups')
         test.assertEqual(1, len(machine_groups))
         machine_role = helper.admin('GET', '/roles/account-maintenance')
-        machine_group = machine_groups[0]['id']
-        helper.admin('DELETE', '/groups/' + machine_group + '/role-mappings/realm', [machine_role])
+        # The sole technical group is deliberately grant-free; native machine roles are direct.
+        test.assertEqual([], helper.admin('GET', '/groups/' + machine_groups[0]['id'] + '/role-mappings/realm'))
+        machine_direct = helper.admin('GET', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/role-mappings/realm')
+        test.assertEqual(set(ACTORS['ACCOUNT_ADMIN'][1]), {role['name'] for role in machine_direct})
+        helper.admin('DELETE', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/role-mappings/realm', [machine_role])
         try:
             denied_status, denied = outcome(bearer=machine)
             test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
         finally:
-            helper.admin('POST', '/groups/' + machine_group + '/role-mappings/realm', [machine_role])
+            helper.admin('POST', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/role-mappings/realm', [machine_role])
         test.assertEqual((200, result), outcome())
         record['currentMachineGrantRevocationChecksEvenPreviouslyValidJwt'] = True
         test.assertEqual(events, native_events())
@@ -176,7 +218,17 @@ def exercise(test, helper, observed):
         replacement['credentials'] = [{'type': 'password', 'value': creation['account']['password'], 'temporary': False}]
         helper.admin('POST', '/partialImport', {'ifResourceExists': 'FAIL', 'users': [replacement]})
         helper.admin('PUT', '/users/' + account + '/groups/' + group)
+        # PartialImport may attach realm defaults; recreate the SAME original exact grant shape
+        # before the birth counterfactual, otherwise a different guard could explain refusal.
+        direct = helper.admin('GET', '/users/' + account + '/role-mappings/realm')
+        if direct:
+            helper.admin('DELETE', '/users/' + account + '/role-mappings/realm', direct)
+        test.assertEqual([], helper.admin('GET', '/users/' + account + '/role-mappings/realm'))
+        test.assertEqual({group}, {value['id'] for value in helper.admin('GET', '/users/' + account + '/groups')})
+        test.assertEqual({}, helper.admin('GET', '/users/' + account + '/role-mappings').get('clientMappings', {}))
         fresh = helper.admin('GET', '/users/' + account)
+        for field in ['id', 'username', 'enabled', 'email', 'emailVerified', 'firstName', 'lastName', 'attributes']:
+            test.assertEqual(disabled.get(field), fresh.get(field))
         test.assertNotEqual(native['createdTimestamp'], fresh['createdTimestamp'])
         denied_status, denied = outcome()
         test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
