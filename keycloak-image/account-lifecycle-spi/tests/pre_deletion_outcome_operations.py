@@ -63,11 +63,11 @@ def exercise(test, helper, observed):
         record.update(actualCommittedAsker=True, actualFreshPasswordLogin=True, actualSelfReadStatus=read_status,
             positiveNativeBirth=True, originalHumanExpiry=claims['exp'])
 
-        def outcome(request=body, actor='ACCOUNT_ADMIN', proof=None):
+        def outcome(request=body, actor='ACCOUNT_ADMIN', proof=None, bearer=None):
             changes = {'operation': 'account.deactivate.outcome'}
             changes.update(proof or {})
             return MaintenancePermissions.maintenance(helper, 'deactivate/outcome', account, request,
-                actor=actor, changes=changes)
+                actor=actor, changes=changes, bearer=bearer)
 
         missing_status, missing = outcome()
         record['absentStatus'] = missing_status
@@ -93,11 +93,16 @@ def exercise(test, helper, observed):
         while time.time() <= claims['exp']:
             time.sleep(0.1)
         record['actualHumanExpiryElapsedAfterIntentionalDisable'] = True
-        events = helper.admin('GET', '/admin-events')
+        def native_events():
+            return [event for event in helper.admin('GET', '/admin-events')
+                if event.get('resourcePath') == 'accounts/' + account
+                and event.get('authDetails', {}).get('clientId') == ACTORS['ACCOUNT_ADMIN'][0]]
+        events = native_events()
+        test.assertEqual(1, len(events))
         test.assertEqual((200, result), outcome())
         test.assertEqual(disabled, helper.admin('GET', '/users/' + account))
         test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
-        test.assertEqual(events, helper.admin('GET', '/admin-events'))
+        test.assertEqual(events, native_events())
         record['sameOriginalBodyAndRealReceiptAfterLostReplyAndHumanExpiry'] = True
         test.assertEqual((200, result), outcome())
         for actor in ['SETUP', 'ACCOUNT_CREATE', 'MAIL', 'RUNTIME']:
@@ -148,7 +153,20 @@ def exercise(test, helper, observed):
             helper.admin('POST', '/groups/' + group + '/role-mappings/realm', [role])
         test.assertEqual((200, result), outcome())
         record['currentProfileGrantWithdrawAndRestoreCheckedWithoutHuman'] = True
-        test.assertEqual(events, helper.admin('GET', '/admin-events'))
+        machine = helper.token('ACCOUNT_ADMIN')
+        machine_groups = helper.admin('GET', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/groups')
+        test.assertEqual(1, len(machine_groups))
+        machine_role = helper.admin('GET', '/roles/account-maintenance')
+        machine_group = machine_groups[0]['id']
+        helper.admin('DELETE', '/groups/' + machine_group + '/role-mappings/realm', [machine_role])
+        try:
+            denied_status, denied = outcome(bearer=machine)
+            test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+        finally:
+            helper.admin('POST', '/groups/' + machine_group + '/role-mappings/realm', [machine_role])
+        test.assertEqual((200, result), outcome())
+        record['currentMachineGrantRevocationChecksEvenPreviouslyValidJwt'] = True
+        test.assertEqual(events, native_events())
 
         # Same UUID/name/group/tenant is still a different native incarnation after installer replacement.
         helper.admin('DELETE', '/users/' + account)
