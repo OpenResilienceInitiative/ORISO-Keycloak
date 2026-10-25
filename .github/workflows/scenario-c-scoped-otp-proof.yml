@@ -8,7 +8,7 @@ on:
       - keycloak-image/otp-config-spi/**
       - .github/workflows/scenario-c-scoped-otp-proof.yml
   push:
-    branches: [codex/367-c-maintenance-keycloak-20261021, codex/367-c-receiver-finish-20261021, dev]
+    branches: [codex/367-c-maintenance-keycloak-20261021, codex/367-c-receiver-finish-20261021, codex/367-c-pre-deletion-native-finish-20261023, dev]
     paths:
       - keycloak-image/**
       - keycloak-image/otp-config-spi/**

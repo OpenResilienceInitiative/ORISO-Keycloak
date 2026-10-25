@@ -28,6 +28,8 @@ def install_policy(cls, helper, protected):
                          'groupParentId': helper.group_id('/human-roles'),
                          'realmRoles': roles, 'clientRoles': {}, 'allowUnassignedTenant': False,
                          'selfOperations': (['account.read'] if group == 'consultant-basic' else ['account.password', 'account.read']) + (['account.email', 'account.locale', 'account.profile'] if group in {'consultant', 'consultant-agency-admin'} else ['account.locale'] if group == 'user' else ['account.profile'] if group == 'consultant-basic' else ['account.email'] if group == 'agency-admin' else [])})
+    # Closed input seam: only the reviewed asker profile may request SELF deactivation.
+    next(profile for profile in profiles if profile['id'] == 'user-v1')['selfOperations'].append('account.deactivate')
     client = helper.admin('GET', '/clients?clientId=protected-human-web')[0]['id']
     reviewed_roles = sorted({role for profile in profiles for role in profile['realmRoles']})
     helper.admin('POST', '/clients/' + client + '/scope-mappings/realm',

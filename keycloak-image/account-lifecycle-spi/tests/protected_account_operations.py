@@ -296,6 +296,8 @@ class ProtectedOperationRead(PeerReadiness):
         consultant_deletion(self, helper, primary, (account, human), o)
         from adopted_self_operations import exercise as adopted_self
         adopted_self(self, helper, o)
+        from pre_deletion_outcome_operations import exercise as pre_deletion
+        pre_deletion(self, helper, o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 
