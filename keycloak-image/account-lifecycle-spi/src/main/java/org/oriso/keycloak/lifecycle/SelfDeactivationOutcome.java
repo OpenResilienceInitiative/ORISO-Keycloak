@@ -79,6 +79,16 @@ final class SelfDeactivationOutcome {
   static void requireSaved(KeycloakSession session,LifecycleAuthorization crypto,java.util.Map<String,Set<String>> mappings,
       GeneralPolicy policy,MaintenanceRequest request,AccountMaintenanceOperation row){
     fixed(request);
+    try {
+      requireSavedCapsule(session,crypto,mappings,policy,request,row);
+    } catch (jakarta.ws.rs.BadRequestException malformedStoredCapsule) {
+      // Invalid retained server data is no recovery authority; request syntax stays unchanged.
+      deny();
+    }
+  }
+
+  private static void requireSavedCapsule(KeycloakSession session,LifecycleAuthorization crypto,
+      java.util.Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,AccountMaintenanceOperation row){
     if(row.replayReachJson==null||!"backend-account-admin".equals(row.ownerClient)||!crypto.adminSubject.equals(row.ownerSubject))deny();
     var value=parse(row.replayReachJson);fields(value,"v","kind","binding","mac");
     if(number(value,"v",true)!=1||!KIND.equals(text(value,"kind",64,false))||!canonical(value).equals(row.replayReachJson))deny();
