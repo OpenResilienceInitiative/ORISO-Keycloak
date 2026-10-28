@@ -154,12 +154,18 @@ final class ProtectedAccountOperations {
 
   static void replayReach(KeycloakSession session,LifecycleAuthorization crypto,MaintenanceRequest request,
       String human,Set<String> operations,MaintenanceReplayReach.CurrentConsultantRemoval remaining){
-    var checked=readChecked(session,crypto,request,human,"account.read",null,operations);
+    var checked=readChecked(session,crypto,request,human,"account.read",null,operations,remaining);
     if(remaining!=null)remaining.requireCurrent(session,request,checked.lineage());
   }
 
   private static CheckedCurrent readChecked(KeycloakSession session,LifecycleAuthorization crypto,
       MaintenanceRequest request,String fullHumanHeader,String operation,CausalPasswordRequest causal,Set<String> replayOperations) {
+    return readChecked(session,crypto,request,fullHumanHeader,operation,causal,replayOperations,null);
+  }
+
+  private static CheckedCurrent readChecked(KeycloakSession session,LifecycleAuthorization crypto,
+      MaintenanceRequest request,String fullHumanHeader,String operation,CausalPasswordRequest causal,
+      Set<String> replayOperations,MaintenanceReplayReach.CurrentConsultantRemoval consultantRemovalReplay) {
     boolean inactivity=request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText());
     boolean imported=request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText());
     boolean scheduled=inactivity&&"INACTIVITY".equals(request.target().path("origin").path("kind").asText())
@@ -235,7 +241,10 @@ final class ProtectedAccountOperations {
           || profile.version() != adoption.profileVersion())) deny();
       provenance = attempt.id;
     }
-    if("delete".equals(request.command())&&attempt!=null)OriginalNativeBirth.require(em,crypto,attempt);
+    // Both the first inverse and its authenticated stored replay belong to this exact native birth.
+    // Adopted targets already verified their original incarnation in MaintenanceAdoption.prepare.
+    if(attempt!=null && ("delete".equals(request.command()) || GeneralPolicy.consultantRemoval(request)
+        || consultantRemovalReplay!=null)) OriginalNativeBirth.require(em,crypto,attempt);
     var lineage=MaintenanceLineage.resolve(session,crypto,request.accountId(),provenance,"PROTECTED",profile.id(),profile.version(),
         JSON.valueToTree(Long.toString(tenant)),profile.snapshot());
     var originalProfile=profile;profile=config.profiles.get(lineage.profileId());

@@ -106,6 +106,43 @@ def pure_deletion(test,helper,primary,observed):
     finally:helper.account_id,helper.creation_input=old
 
 
+def protected_inverse_birth(test, helper, primary, platform, after_success):
+    """An unchanged selector/tenant/lineage cannot transfer an original command to a new birth."""
+    from ordinary_operator_operations import replace_native
+    account, creation = protected_created(test, helper, platform)
+    helper.account_id, helper.creation_input = account, creation
+    native = helper.admin('GET', '/users/' + account)
+    selected = human_target(helper, account, native)
+    group = helper.admin('GET', '/users/' + account + '/groups')[0]['id']
+    pure = next(p for p in type(helper).installed_configuration['profiles'] if p['groupId'] == group)
+    status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': selected}, primary, 200)
+    test.assertEqual(200, status)
+    addition = {'target': selected, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
+        'change': {'transition': 'ADD_CONSULTANT_IDENTITY',
+            'profileId': 'platform-consultant-v2' if platform else 'tenant-consultant-v2', 'profileVersion': 2}}
+    test.assertEqual(200, HumanMaintenanceFixture.invoke(helper, 'profile-transition', addition, primary, 200)[0])
+    status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': selected}, primary, 200)
+    test.assertEqual(200, status)
+    original = {'target': selected, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
+        'change': {'transition': 'REMOVE_CONSULTANT_IDENTITY', 'profileId': pure['id'], 'profileVersion': pure['version']}}
+    if after_success:
+        status, result = HumanMaintenanceFixture.invoke(helper, 'profile-transition', original, primary, 200)
+        test.assertEqual(200, status); test.assertEqual('UPDATED', result['result'])
+        test.assertEqual((status, result), HumanMaintenanceFixture.invoke(helper, 'profile-transition', original, primary, 200))
+    before = helper.admin('GET', '/users/' + account)
+    before_groups = helper.admin('GET', '/users/' + account + '/groups')
+    replace_native(test, helper, account)
+    replacement = helper.admin('GET', '/users/' + account)
+    test.assertEqual(before['attributes'], replacement['attributes'])
+    test.assertEqual(before_groups, helper.admin('GET', '/users/' + account + '/groups'))
+    test.assertNotEqual(before['createdTimestamp'], replacement['createdTimestamp'])
+    status, result = HumanMaintenanceFixture.invoke(helper, 'profile-transition', original, primary, 403)
+    test.assertEqual(403, status)
+    test.assertNotIn('receipt', result)
+    test.assertEqual(replacement, helper.admin('GET', '/users/' + account))
+    test.assertEqual(before_groups, helper.admin('GET', '/users/' + account + '/groups'))
+
+
 def consultant_removal(test, helper, primary, observed):
     """Exact inverse transition preserves Administrator; ordinary replay grants no general read."""
     from ordinary_consultant_operations import login, target as ordinary_target
@@ -165,6 +202,10 @@ def consultant_removal(test, helper, primary, observed):
             records[family] = {'sameUuidTenantBirthProfileCredentialsAndEnabled': True,
                                'exactAdministratorRoleSubset': True, 'originalReceiptReplay': True,
                                'repeatRemovalDenied': True, 'readdedConsultantCannotBorrowOldRemoval': True}
+            if family in ('TENANT_ADMIN', 'PLATFORM_ADMIN'):
+                protected_inverse_birth(test, helper, primary, family == 'PLATFORM_ADMIN', False)
+                protected_inverse_birth(test, helper, primary, family == 'PLATFORM_ADMIN', True)
+                records[family].update(recreatedCombinedBeforeEffectDenied=True, recreatedPureAdministratorReplayDenied=True)
         source, source_creation = committed_kind(test, helper, 'AGENCY_ADMIN', 'agency-admin')
         source_token = login(test, helper, source, source_creation)
         account, creation = committed_kind(test, helper, 'CONSULTANT_AGENCY_ADMIN', 'consultant-agency-admin')
