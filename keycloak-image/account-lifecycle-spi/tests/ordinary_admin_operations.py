@@ -41,7 +41,6 @@ def install_policy(cls, helper, protected):
               'adminOperations': [{'authority': authority, 'selfOnly': False,
                                    'targetProfiles': ['consultant-v1', 'consultant-basic-v1', 'user-v1', 'agency-admin-v1', 'consultant-agency-admin-v1'],
                                    'operations': OPERATIONS} for authority in ['PLATFORM', 'TENANT_PEER']]}
-    config['adminOperations'].append({'authority':'PLATFORM','selfOnly':False,'targetProfiles':['agency-admin-v1'],'operations':['account.delete']})
     config['ordinaryAdminOperations']=[{'sourceProfiles':['agency-admin-v1','consultant-agency-admin-v1'],
         'targetProfiles':['user-v1','consultant-v1','consultant-basic-v1'], 'operations':['account.read','account.deactivate']}]
     username = 'adopted-ordinary-' + uuid.uuid4().hex
@@ -85,6 +84,8 @@ def install_policy(cls, helper, protected):
     install_adopted_self(cls, helper, config)
     from adopted_admin_operations import install as install_adopted_admin
     install_adopted_admin(cls, helper, config)
+    # The retained adopted combined-profile extension applies only to its original grants.
+    config['adminOperations'].append({'authority':'PLATFORM','selfOnly':False,'targetProfiles':['agency-admin-v1'],'operations':['account.delete']})
     command = cls.command.copy()
     for index, argument in enumerate(command):
         if argument.startswith('ORISO_ACCOUNT_LIFECYCLE_GROUPS='):
