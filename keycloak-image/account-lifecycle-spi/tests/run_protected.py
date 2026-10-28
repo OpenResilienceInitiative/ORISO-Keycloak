@@ -455,6 +455,7 @@ def main():
             == [
                 "agencyservice",
                 "consultingtypeservice",
+                "oriso-task-commands",
                 "tenantservice",
                 "userservice",
             ]

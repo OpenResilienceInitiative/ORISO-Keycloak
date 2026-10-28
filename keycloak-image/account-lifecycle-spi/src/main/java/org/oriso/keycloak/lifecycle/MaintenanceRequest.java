@@ -60,7 +60,7 @@ record MaintenanceRequest(
     if (read && body.has("include")) {
       include = text(body, "include", 40, false);
       if (!"TWO_FACTOR_STATUS_V1".equals(include) || !"HUMAN_ADMIN".equals(kind)
-          || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority)) bad();
+          || !Set.of("PROTECTED_ACCOUNT_OPERATIONS_V1", "ORDINARY_ACCOUNT_OPERATIONS_V1").contains(authority)) bad();
     }
     JsonNode workflow = inactivity ? ("IMPORT".equals(body.path("workflow").path("kind").asText())
         ? ImportWorkflow.parse(command,target,body.path("workflow"))

@@ -31,6 +31,10 @@ def exercise(test,helper,primary,observed):
         target=human_target(helper,target_account,helper.admin('GET','/users/'+target_account))
         target['origin'].update(humanSubject=source,humanAuthority='ORDINARY_ACCOUNT_OPERATIONS_V1')
         status,current=HumanMaintenanceFixture.invoke(helper,'read',{'target':target},human,200);test.assertEqual(200,status)
+        factor_body={'target':target,'include':'TWO_FACTOR_STATUS_V1'}
+        factor_status,factors=HumanMaintenanceFixture.invoke(helper,'read',factor_body,human,200)
+        test.assertEqual(200,factor_status);test.assertEqual({'configured':False,'active':False},factors['twoFactor'])
+        test.assertEqual(current['state'],factors['state'])
         wrong=copy.deepcopy(target);wrong['tenantId']='999'
         test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'read',{'target':wrong},human,403)[0])
         body={'target':target,'operationId':str(uuid.uuid4()),'expectedState':current['state'],'change':{}}
@@ -40,9 +44,11 @@ def exercise(test,helper,primary,observed):
         test.assertEqual((status,result),HumanMaintenanceFixture.invoke(helper,'deactivate',body,human,200))
         source_group=helper.group_id('/human-roles/agency-admin');role=helper.admin('GET','/roles/user-admin')
         helper.admin('DELETE','/groups/'+source_group+'/role-mappings/realm',[role])
-        try:test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'deactivate',body,human,403)[0])
+        try:
+            test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'deactivate',body,human,403)[0])
+            test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'read',factor_body,human,403)[0])
         finally:helper.admin('POST','/groups/'+source_group+'/role-mappings/realm',[role])
-        records['currentOrdinarySource']={'readAndDeactivate':True,'crossTenantAndUnreviewedOperationDenied':True,'exactRetry':True,'withdrawnSourceGrantReplayDenied':True}
+        records['currentOrdinarySource']={'readAndDeactivate':True,'nonsecretFactorProjectionSameGrantAndState':True,'crossTenantAndUnreviewedOperationDenied':True,'exactRetry':True,'withdrawnSourceGrantReplayDenied':True}
         for phase in ('before-first-read','between-read-and-effect'):
             account,creation=committed_kind(test,helper,'ASKER','user');helper.account_id=account;helper.creation_input=creation
             target=human_target(helper,account,helper.admin('GET','/users/'+account))
