@@ -6,15 +6,21 @@ import org.keycloak.models.KeycloakSession;
 /** Actual current primary or consumed peer. Installation selectors alone cannot construct this. */
 final class HumanAdminSource {
   private final ProtectedInvitationConfiguration config;
+  private final OrdinaryAdminSource ordinary;
   private final ProtectedPeerDelegation.Resolved resolved;
   private final CurrentHumanAuthorization.VerifiedHuman human;
   private HumanAdminSource(ProtectedInvitationConfiguration config,
       ProtectedPeerDelegation.Resolved resolved, CurrentHumanAuthorization.VerifiedHuman human) {
-    this.config = config; this.resolved = resolved; this.human = human;
+    this.config = config; this.resolved = resolved; this.human = human;this.ordinary=null;
+  }
+  private HumanAdminSource(OrdinaryAdminSource ordinary){
+    this.config=null;this.resolved=null;this.human=null;this.ordinary=ordinary;
   }
   static HumanAdminSource require(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String header) {
     var origin = request.target().path("origin");
+    if("HUMAN_ADMIN".equals(origin.path("kind").asText())&&"ORDINARY_ACCOUNT_OPERATIONS_V1".equals(origin.path("humanAuthority").asText()))
+      return new HumanAdminSource(AccountLifecycleFactory.checkedOrdinarySource(session,crypto,request,header));
     if (!"HUMAN_ADMIN".equals(origin.path("kind").asText())
         || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(origin.path("humanAuthority").asText())) deny();
     if (header == null || header.length() > 32775 || !header.regionMatches(true, 0, "Bearer ", 0, 7))
@@ -32,10 +38,12 @@ final class HumanAdminSource {
         || "TENANT_PEER".equals(resolved.binding().authority()) && human.tenantId() <= 0) deny();
     return new HumanAdminSource(config, resolved, human);
   }
-  String authority() { return resolved.binding().authority(); }
-  long tenant() { return human.tenantId(); }
-  String subject() { return human.subject(); }
+  String authority() { return ordinary==null?resolved.binding().authority():"ORDINARY"; }
+  String ordinaryProfile(){return ordinary==null?null:ordinary.profile.id;}
+  long tenant() { return ordinary==null?human.tenantId():ordinary.human.tenantId(); }
+  String subject() { return ordinary==null?human.subject():ordinary.human.subject(); }
   void protectedOperation(String account,String profile,String operation) {
+    if(ordinary!=null)deny();
     requireProtectedOperations(config,resolved,human,account,java.util.Set.of(profile),java.util.Set.of(operation));
   }
   static void requireProtectedOperations(ProtectedInvitationConfiguration config,
@@ -55,8 +63,8 @@ final class HumanAdminSource {
           &&(grant.targetSubjects().isEmpty()||grant.targetSubjects().contains(account))))deny();
   }
   void targetTenant(com.fasterxml.jackson.databind.JsonNode tenant) {
-    if ("TENANT_PEER".equals(authority())
-        && (!tenant.isTextual() || !Long.toString(human.tenantId()).equals(tenant.asText()))) deny();
+    if (("TENANT_PEER".equals(authority())||"ORDINARY".equals(authority()))
+        && (!tenant.isTextual() || !Long.toString(tenant()).equals(tenant.asText()))) deny();
   }
   @Override public String toString() { return "HumanAdminSource[redacted]"; }
 }

@@ -41,6 +41,9 @@ def install_policy(cls, helper, protected):
               'adminOperations': [{'authority': authority, 'selfOnly': False,
                                    'targetProfiles': ['consultant-v1', 'consultant-basic-v1', 'user-v1', 'agency-admin-v1', 'consultant-agency-admin-v1'],
                                    'operations': OPERATIONS} for authority in ['PLATFORM', 'TENANT_PEER']]}
+    config['adminOperations'].append({'authority':'PLATFORM','selfOnly':False,'targetProfiles':['agency-admin-v1'],'operations':['account.delete']})
+    config['ordinaryAdminOperations']=[{'sourceProfiles':['agency-admin-v1','consultant-agency-admin-v1'],
+        'targetProfiles':['user-v1','consultant-v1','consultant-basic-v1'], 'operations':['account.read','account.deactivate']}]
     username = 'adopted-ordinary-' + uuid.uuid4().hex
     helper.admin('POST', '/users', {'username': username, 'enabled': True, 'email': username + '@oriso.org',
         'firstName': 'Legacy', 'lastName': 'Asker', 'attributes': {'tenantId': ['11']}})

@@ -21,6 +21,15 @@ final class MaintenanceRoleChange {
     String kind=text(capsule,"kind",40,false);
     if(!canonical(from.path("clientRoles")).equals(canonical(desired.path("clientRoles"))))deny();
     var current=roles(from);var next=roles(desired);var union=new TreeSet<>(current);
+    if("REMOVE_ADMINISTRATOR_IDENTITY".equals(kind)){
+      fields(capsule,"kind");
+      if(!current.contains("consultant") || ("ORDINARY".equals(family)
+          ? !"CONSULTANT_AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(current))
+          : !"PROTECTED".equals(family)||!Set.of("TENANT_ADMIN","PLATFORM_ADMIN").contains(from.path("kind").asText())))deny();
+      var retained=new TreeSet<>(current);retained.retainAll(Set.of("consultant","group-chat-consultant"));
+      if(!next.equals(retained)||!"CONSULTANT".equals(LifecycleGroups.allowedKind(next)))deny();
+      return;
+    }
     if(!next.containsAll(current))deny();
     if("PROTECTED".equals(family)&&(!from.path("kind").equals(desired.path("kind"))
         ||!Set.of("TENANT_ADMIN","PLATFORM_ADMIN").contains(from.path("kind").asText())))deny();

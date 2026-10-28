@@ -41,13 +41,15 @@ final class MaintenanceLineage {
       String nextId = text(desired, "profileId", 255, false);
       long nextVersion = number(desired, "profileVersion", true);
       String command = text(value, "command", 40, false);
-      if(!current.kind.equals(nextKind))deny();
+      boolean transfer="PROTECTED".equals(current.kind)&&"ORDINARY".equals(nextKind)
+          &&"profile-transition".equals(command)&&"REMOVE_ADMINISTRATOR_IDENTITY".equals(value.path("roleChange").path("kind").asText());
+      if(!current.kind.equals(nextKind)&&!transfer)deny();
       if(value.has("roleChange")){
         var capsule=value.path("roleChange");
         if(!current.tenant.equals(desired.path("tenantId"))
             ||!("profile-transition".equals(command)&&!"IMPORT".equals(capsule.path("kind").asText())
                 ||"ordinary-profile".equals(command)&&"ORDINARY".equals(nextKind)&&"IMPORT".equals(capsule.path("kind").asText())))deny();
-        MaintenanceRoleChange.require(capsule,nextKind,current.nativeProfile,desired.path("nativeProfile"));
+        MaintenanceRoleChange.require(capsule,current.kind,current.nativeProfile,desired.path("nativeProfile"));
       }else if("ordinary-profile".equals(command)&&"ORDINARY".equals(nextKind)){
         var before=HumanPolicyJson.strings(current.nativeProfile.path("realmRoles"),1,10,255);
         var after=HumanPolicyJson.strings(desired.path("nativeProfile").path("realmRoles"),1,10,255);
@@ -101,7 +103,7 @@ final class MaintenanceLineage {
     value.put("intentDigest", crypto.mac("maintenance-intent", body)); value.put("previousState", request.expectedState());
     var roleChange=MaintenanceRoleChange.capsule(request);if(roleChange!=null)value.set("roleChange",roleChange);
     value.set("from", binding(current));
-    value.set("desired", binding(new Current(current.kind, profileId, version, tenant, null, 0, current.provenance, nativeProfile)));
+    value.set("desired", binding(new Current(destinationFamily(request,current), profileId, version, tenant, null, 0, current.provenance, nativeProfile)));
     var row = new AccountMaintenanceLineage(); row.id = realm + ":" + request.operationId();
     row.realmId = realm; row.accountId = request.accountId(); row.sequence = current.sequence + 1;
     row.operationId = request.operationId(); row.snapshotJson = canonical(value);
@@ -122,6 +124,11 @@ final class MaintenanceLineage {
         ||!originalGroup.equals(profile.path("groupId").asText())||!roles.equals(originalRoles)||!profile.path("clientRoles").isObject()
         ||!profile.path("clientRoles").isEmpty())deny();
     return resolve(session,crypto,account,provenance,"ORDINARY",text(from,"profileId",100,false),number(from,"profileVersion",true),tenant,profile);
+  }
+
+  private static String destinationFamily(MaintenanceRequest request,Current current){
+    return "PROTECTED".equals(current.kind)&&"profile-transition".equals(request.command())
+        &&"REMOVE_ADMINISTRATOR_IDENTITY".equals(request.change().path("transition").asText())?"ORDINARY":current.kind;
   }
 
   private static JsonNode binding(Current current) {

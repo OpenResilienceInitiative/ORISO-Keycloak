@@ -42,6 +42,7 @@
     "SETUP": [
       "agencyservice",
       "consultingtypeservice",
+      "oriso-task-commands",
       "tenantservice",
       "userservice"
     ],

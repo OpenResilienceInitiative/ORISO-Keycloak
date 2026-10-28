@@ -278,6 +278,7 @@ class ProtectedInvitations(
             "consultingtypeservice",
             "tenantservice",
             "userservice",
+            "oriso-task-commands",
         ]
         setup_mapper_base = (
             "/clients/" + helper.client_ids["SETUP"] + "/protocol-mappers/models"
@@ -703,6 +704,7 @@ class ProtectedInvitations(
                     "consultingtypeservice",
                     "tenantservice",
                     "userservice",
+                    "oriso-task-commands",
                 },
                 "ACCOUNT_CREATE": {"oriso-account-lifecycle", "userservice"},
                 "ACCOUNT_ADMIN": {

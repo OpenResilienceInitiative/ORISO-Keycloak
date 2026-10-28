@@ -26,6 +26,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
   private final KeycloakSession session;
   private final LifecycleAuthorization auth;
   private final Map<String, Set<String>> mappings;
+  private final Supplier<JsonNode> installationStatus;
 
   // Only the protected resource's private policy supplies this internal binding.
   // Ordinary HTTP requests always use the null-policy path below.
@@ -51,9 +52,29 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
 
   AccountLifecycleResource(
       KeycloakSession session, LifecycleAuthorization auth, Map<String, Set<String>> mappings) {
+    this(session, auth, mappings, null);
+  }
+
+  AccountLifecycleResource(KeycloakSession session, LifecycleAuthorization auth,
+      Map<String, Set<String>> mappings, Supplier<JsonNode> installationStatus) {
     this.session = session;
     this.auth = auth;
     this.mappings = mappings;
+    this.installationStatus = installationStatus;
+  }
+
+  @POST
+  @Path("v1/installation-status")
+  public Response installationStatus(byte[] raw, @HeaderParam("X-ORISO-Task-Context") String proof) {
+    return guarded(() -> {
+      var body = parse(raw);
+      fields(body);
+      var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
+      auth.verifyCommand(proof, machine, "oriso-account-lifecycle", "ACCOUNT_MAINTENANCE",
+          "installation.status", "POST", "realm/" + session.getContext().getRealm().getId() + "/installation", body);
+      if (installationStatus == null) deny();
+      return Response.ok(installationStatus.get()).header("Cache-Control", "no-store").build();
+    });
   }
 
   @PUT
@@ -404,6 +425,7 @@ public final class AccountLifecycleResource implements RealmResourceProvider {
     }
     row.accountId = user.getId();
     em.flush();
+    OriginalNativeBirth.capture(em, auth, row);
     row.profileFingerprint = auth.mac("pending-profile", lockedSnapshot(em, user.getId()));
     var creation = JSON.createObjectNode();
     creation.put("v", 1);

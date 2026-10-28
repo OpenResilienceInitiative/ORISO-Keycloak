@@ -177,6 +177,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         value['workflowOperations'][0]['targetProfiles'].append(dual['id'])
         value['workflowOperations'].append({'kind': 'IMPORT', 'targetProfiles': [PROFILE, dual['id']],
             'operations': ['account.read']})
+        from identity_removal_operations import install as install_removal
+        value=install_removal(helper,value)
         from ordinary_admin_operations import install_policy
         from protected_adoption_operations import install
         install_policy(cls, helper, value)
@@ -314,6 +316,12 @@ class ProtectedOperationRead(PeerReadiness):
         adopted_self(self, helper, o)
         from pre_deletion_outcome_operations import exercise as pre_deletion
         pre_deletion(self, helper, o)
+        from identity_removal_operations import exercise as identity_removal
+        identity_removal(self,helper,primary,o)
+        from identity_removal_operations import pure_deletion
+        pure_deletion(self,helper,primary,o)
+        from ordinary_operator_operations import exercise as ordinary_operator
+        ordinary_operator(self,helper,primary,o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 

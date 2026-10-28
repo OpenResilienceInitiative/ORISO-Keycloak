@@ -27,7 +27,7 @@ REALM = "scenario-c-installed-image"
 PASSWORD = "synthetic-installed-image-password-0001"
 SUBJECTS = {
     name: str(uuid.uuid5(uuid.NAMESPACE_URL, "oriso-image-proof/" + name))
-    for name in ("CREATE", "ADMIN", "MAIL")
+    for name in ("CREATE", "ADMIN", "SETUP")
 }
 PROVIDERS = {
     "otp": (
@@ -88,7 +88,7 @@ class InstalledImage(unittest.TestCase):
                 "IDENTITY_ACCOUNT_ADMIN_CLIENT_ID": "backend-account-admin",
                 "IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT": SUBJECTS["CREATE"],
                 "IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT": SUBJECTS["ADMIN"],
-                "IDENTITY_MAIL_SERVICE_SUBJECT": SUBJECTS["MAIL"],
+                "IDENTITY_SETUP_SERVICE_SUBJECT": SUBJECTS["SETUP"],
                 "ORISO_TASK_CONTEXT_KEY": base64.b64encode(
                     b"x" if invalid_key else bytes(range(32))
                 ).decode(),

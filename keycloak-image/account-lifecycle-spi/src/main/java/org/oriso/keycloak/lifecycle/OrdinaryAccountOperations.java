@@ -191,7 +191,7 @@ final class OrdinaryAccountOperations {
       CausalPasswordRequest causal,Set<String> replayOperations,String otpOperation,SelfDeactivationOutcome.Checked savedSelf) {
     boolean self = "SELF".equals(request.target().path("origin").path("kind").asText()) && request.workflow() == null;
     if (policy == null || !(self ? Set.of("read", "profile", "email", "locale", "password", "self-password", "deactivate")
-        : Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate"))
+        : Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate", "delete"))
         .contains(request.command())) deny();
     if (otpOperation != null && (!self || !"read".equals(request.command())
         || !Set.of("otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish").contains(otpOperation))) deny();
@@ -207,7 +207,13 @@ final class OrdinaryAccountOperations {
         .setLockMode(LockModeType.PESSIMISTIC_WRITE).setMaxResults(2).getResultList();
     GeneralPolicy.Profile baseline; JsonNode originalTenant; String provenance; String stateProvenance;
     MaintenanceAdoption.Baseline adoptionBaseline=null;
-    if(rows.isEmpty()) {
+    ProtectedOrdinaryTransfer.Checked transfer=null;
+    if(ProtectedOrdinaryTransfer.located(session,request.accountId())){
+      transfer=ProtectedOrdinaryTransfer.require(session,crypto,request.accountId());
+      var frozen=transfer.lineage();baseline=policy.profile(frozen.profileId(),frozen.profileVersion());
+      if(!canonical(baseline.snapshot).equals(canonical(frozen.nativeProfile())))deny();
+      originalTenant=frozen.tenant();provenance=frozen.provenance();stateProvenance=provenance;
+    }else if(rows.isEmpty()) {
       // Adoption proves the incarnation; current human or separate workflow checks supply authority.
       boolean importWorkflow = request.workflow() != null && "IMPORT".equals(request.workflow().path("kind").asText())
           && "IMPORT".equals(request.target().path("origin").path("kind").asText());
@@ -223,17 +229,18 @@ final class OrdinaryAccountOperations {
       if (!"COMMITTED".equals(row.state) || !"commit".equals(row.terminalOperation)
           || !"backend-account-create".equals(row.ownerClient) || !crypto.creatorSubject.equals(row.ownerSubject)
           || row.creationProof == null || row.terminalReceipt == null || row.terminalDigest == null) deny();
-      var scope = parse(row.scope); LifecycleGroups.scope(scope);
+      var scope = parse(row.scope); if(scope.has("approvalBinding"))deny(); LifecycleGroups.scope(scope);
       var originalRoles = mappings.get(scope.path("initialGroup").asText());
       if (originalRoles == null || !LifecycleAuthorization.equal(row.roleFingerprint,
           crypto.mac("initial-roles", JSON.valueToTree(new TreeSet<>(originalRoles))))) deny();
       baseline = policy.profileForGroup(row.groupId, originalRoles);
       verifyCommitted(crypto, realm.getName(), row, scope);
+      OriginalNativeBirth.require(em, crypto, row);
       var origin = JSON.createObjectNode(); origin.put("attempt", row.id); origin.put("creationProof", row.creationProof);
       origin.put("terminalReceipt", row.terminalReceipt); origin.set("scope", scope);
       provenance=crypto.mac("maintenance-provenance/v1",origin);originalTenant=scope.path("tenantId");stateProvenance=row.id;
     }
-    var lineage = MaintenanceLineage.resolve(session, crypto, request.accountId(), provenance,
+    var lineage = transfer!=null?transfer.lineage():MaintenanceLineage.resolve(session, crypto, request.accountId(), provenance,
         "ORDINARY", baseline.id, baseline.version, originalTenant, baseline.snapshot);
     var profile = policy.profile(lineage.profileId(), lineage.profileVersion());
     boolean transition="profile-transition".equals(request.command());

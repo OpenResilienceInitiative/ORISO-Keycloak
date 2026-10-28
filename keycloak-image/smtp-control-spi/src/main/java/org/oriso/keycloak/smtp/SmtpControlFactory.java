@@ -17,7 +17,7 @@ public final class SmtpControlFactory implements RealmResourceProviderFactory {
     if (enabled == null || "false".equals(enabled)) return;
     if (!"true".equals(enabled)) throw new IllegalStateException("Invalid SMTP control enable flag");
     String realm = required("ORISO_SMTP_CONTROL_REALM");
-    String subject = required("IDENTITY_MAIL_SERVICE_SUBJECT");
+    String subject = required("IDENTITY_SETUP_SERVICE_SUBJECT");
     String encoded = required("ORISO_TASK_CONTEXT_KEY");
     byte[] key;
     try {

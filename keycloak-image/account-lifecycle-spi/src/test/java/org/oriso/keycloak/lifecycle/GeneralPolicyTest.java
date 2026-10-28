@@ -70,6 +70,27 @@ public class GeneralPolicyTest {
   }
 
   @Test
+  public void ordinaryOperatorsAreDefaultEmptyAndOnlyReviewOrdinaryReadAndDeactivation(){
+    var value=(com.fasterxml.jackson.databind.node.ObjectNode)policy("account.read");
+    var source=((com.fasterxml.jackson.databind.node.ObjectNode)value.path("ordinaryProfiles").path(0)).deepCopy();
+    source.put("id","agency-v1");source.put("groupId","agency-group");source.put("groupPath","/human-roles/agency-admin");
+    source.putArray("realmRoles").add("restricted-agency-admin").add("user-admin");
+    ((com.fasterxml.jackson.databind.node.ArrayNode)value.path("ordinaryProfiles")).add(source);
+    value.putArray("ordinaryAdminOperations");assertNotNull(new GeneralPolicy(value));
+    var grant=value.putArray("ordinaryAdminOperations").addObject();grant.putArray("sourceProfiles").add("agency-v1");
+    grant.putArray("targetProfiles").add("reviewed-consultant-v1");grant.putArray("operations").add("account.read").add("account.deactivate");
+    assertNotNull(new GeneralPolicy(value));
+    for(String op:List.of("account.profile","account.delete","account.profile-transition","*")){
+      var wrong=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("ordinaryAdminOperations").path(0)).putArray("operations").add(op);rejectAdmin(wrong);
+    }
+    for(String field:List.of("sourceProfiles","targetProfiles")){
+      var wrong=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("ordinaryAdminOperations").path(0)).putArray(field).add(field.equals("sourceProfiles")?"reviewed-consultant-v1":"agency-v1");rejectAdmin(wrong);
+    }
+    var extra=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)extra.path("ordinaryAdminOperations").path(0)).put("authority","PLATFORM");rejectAdmin(extra);
+    var duplicate=value.deepCopy();((com.fasterxml.jackson.databind.node.ArrayNode)duplicate.path("ordinaryAdminOperations")).add(grant.deepCopy());rejectAdmin(duplicate);
+  }
+
+  @Test
   public void inactivityWorkflowGrantsAreExplicitClosedAndDefaultEmpty() {
     var value = (com.fasterxml.jackson.databind.node.ObjectNode) policy("account.read");
     var grant = value.putArray("workflowOperations").addObject();

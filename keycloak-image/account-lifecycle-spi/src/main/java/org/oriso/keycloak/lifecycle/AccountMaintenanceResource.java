@@ -76,6 +76,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
         return Response.ok(ImportOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,request,rawHumanBearer)).header("Cache-Control","no-store").build();
       if(request.workflow()!=null)
         return Response.ok(InactivityOperations.read(session,auth,mappings,humanPolicies,configuredPolicy,request,rawHumanBearer)).header("Cache-Control","no-store").build();
+      if(OrdinaryAdminSource.selected(request.target()))
+        return Response.ok(OrdinaryAccountOperations.read(session,auth,mappings,humanPolicies.get(),request,rawHumanBearer)).header("Cache-Control","no-store").build();
       if (ProtectedAccountOperations.selected(request.target())) {
         var current = !OrdinaryAccountOperations.adoptedTarget(session,configuredPolicy,request) && ProtectedAccountOperations.protectedTarget(session, request)
             ? ProtectedAccountOperations.readAccount(session, auth, request, rawHumanBearer)
@@ -125,7 +127,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   @POST
   @Path("v1/accounts/{account}/delete")
   public Response delete(@PathParam("account") String account, byte[] raw,
-      @HeaderParam("X-ORISO-Task-Context") String proof) {
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String human) {
     return guarded(() -> {
       var machine = auth.requireMachine(session, "ACCOUNT_ADMIN");
       var body = parse(raw);
@@ -133,6 +136,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       auth.verifyCommand(proof, machine, "oriso-account-maintenance", "ACCOUNT_MAINTENANCE",
           "account.delete", "POST", "realm/" + realm.getId() + "/account/" + account, body);
       var request = MaintenanceRequest.parse("delete", account, body);
+      if("HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText()))
+        return AdminAccountDeletion.execute(session,auth,mappings,humanPolicies,configuredPolicy,machine,request,body,human);
       var em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
       var lockedRealm = em.find(RealmEntity.class, realm.getId(), LockModeType.PESSIMISTIC_WRITE);
       if (lockedRealm == null) deny();
@@ -323,7 +328,8 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       var request = MaintenanceRequest.parse(command, account, body);
       boolean inactivity=request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText());
       boolean importing=request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText());
-      boolean humanAdmin = ProtectedAccountOperations.selected(request.target())
+      boolean humanAdmin = (ProtectedAccountOperations.selected(request.target())
+          ||OrdinaryAdminSource.selected(request.target())&&"deactivate".equals(command))
           && "HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
           && Set.of("profile", "email", "ordinary-profile", "deactivate", "reactivate", "reassign-tenant", "profile-transition").contains(command);
       if (!("SELF".equals(request.target().path("origin").path("kind").asText()) || humanAdmin || inactivity || importing)) deny();

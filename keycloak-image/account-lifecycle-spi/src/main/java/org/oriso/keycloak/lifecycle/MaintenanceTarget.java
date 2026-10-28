@@ -81,6 +81,8 @@ final class MaintenanceTarget {
         "select ID from ORISO_ACCOUNT_MAINTENANCE_OP where REALM_ID = :realm and ACCOUNT_ID = :account and COMMAND = 'delete' for update")
         .setParameter("realm", realm.getId()).setParameter("account", request.accountId())
         .getResultList().isEmpty()) deny();
+    if(humanSelf&&ProtectedOrdinaryTransfer.located(session,request.accountId()))
+      return OrdinaryAccountOperations.readAdoptedSelf(session,auth,mappings,policy,request,rawHumanBearer,otpOperation);
     var attempts = em.createQuery(
         "select a from AccountLifecycleAttempt a where a.realmId = :realm and a.accountId = :account",
         AccountLifecycleAttempt.class)
@@ -102,6 +104,7 @@ final class MaintenanceTarget {
     var expectedRoles = mappings.get(scope.path("initialGroup").asText());
     if (expectedRoles == null) deny();
     OrdinaryAccountOperations.verifyCommitted(auth,realm.getName(),row,scope);
+    OriginalNativeBirth.require(em, auth, row);
     var provenance=JSON.createObjectNode();provenance.put("attempt",row.id);provenance.put("creationProof",row.creationProof);
     provenance.put("terminalReceipt",row.terminalReceipt);provenance.set("scope",scope);
     var lineage=MaintenanceLineage.ordinaryExisting(session,auth,request.accountId(),auth.mac("maintenance-provenance/v1",provenance),

@@ -16,7 +16,7 @@ final class ProtectedInvitationAuthorization {
   private static final Map<String, String> CLIENTS = Map.of(
       "SETUP", "backend-setup", "ACCOUNT_CREATE", "backend-account-create", "ACCOUNT_ADMIN", "backend-account-admin");
   private static final Map<String, Set<String>> ROLES = Map.of(
-      "SETUP", Set.of("config-wizard", "invitation-reservations", "consultant-import"),
+      "SETUP", Set.of("config-wizard", "invitation-reservations", "consultant-import", "smtp-sync"),
       "ACCOUNT_CREATE", Set.of("account-provisioning", "account-read"),
       "ACCOUNT_ADMIN", Set.of("account-maintenance", "account-read", "otp-config-admin", "session-exchange"));
   private final ProtectedInvitationConfiguration config;

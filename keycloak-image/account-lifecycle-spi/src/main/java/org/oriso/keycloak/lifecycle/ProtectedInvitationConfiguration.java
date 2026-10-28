@@ -21,7 +21,7 @@ final class ProtectedInvitationConfiguration {
   final WorkflowOperations workflowOperations;
 
   private static final Set<String> ACCOUNT_OPERATIONS = Set.of("account.read", "account.profile",
-      "account.email", "account.locale", "account.reassign-tenant", "account.profile-transition", "account.password", "account.deactivate", "account.reactivate",
+      "account.email", "account.locale", "account.reassign-tenant", "account.profile-transition", "account.password", "account.deactivate", "account.reactivate", "account.delete",
       "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish");
 
   record Binding(String authority, Set<Long> tenants, Set<String> profiles, CurrentHumanAuthorization.Policy policy) {}
@@ -51,7 +51,7 @@ final class ProtectedInvitationConfiguration {
     if (new HashSet<>(actors.values()).size() != 5) bad();
     var technical = HumanPolicyJson.strings(config.get("technicalSubjects"), 5, 1000, 36);
     if (!technical.containsAll(actors.values())) bad();
-    for (var actor : Map.of("SETUP", Set.of("tenantservice", "agencyservice", "consultingtypeservice", "userservice"),
+    for (var actor : Map.of("SETUP", Set.of("tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"),
         "ACCOUNT_CREATE", Set.of("oriso-account-lifecycle", "userservice"),
         "ACCOUNT_ADMIN", Set.of("oriso-account-lifecycle", "oriso-otp", "userservice")).entrySet())
       if (!actor.getValue().equals(HumanPolicyJson.strings(config.path("machineAudienceSets").get(actor.getKey()), 1, 30, 255))) bad();
@@ -190,6 +190,9 @@ final class ProtectedInvitationConfiguration {
       }
       var selected = HumanPolicyJson.strings(grant.get("operations"), 1, ACCOUNT_OPERATIONS.size(), 80);
       if (!ACCOUNT_OPERATIONS.containsAll(selected)) bad();
+      if(selected.contains("account.delete")&&(grant.path("selfOnly").booleanValue()
+          ||targets.stream().anyMatch(id->profiles.get(id).realmRoles().contains("consultant")
+              ||profiles.get(id).realmRoles().contains("group-chat-consultant"))))bad();
       if (selected.contains("account.reassign-tenant") && (!"PLATFORM".equals(authority)
           || grant.path("selfOnly").booleanValue()
           || targets.stream().anyMatch(id -> !"TENANT_ADMIN".equals(profiles.get(id).kind())))) bad();

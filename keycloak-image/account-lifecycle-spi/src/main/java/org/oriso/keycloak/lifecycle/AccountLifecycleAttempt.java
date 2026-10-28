@@ -46,6 +46,9 @@ public class AccountLifecycleAttempt {
   @Column(name = "PROFILE_FINGERPRINT", length = 64)
   String profileFingerprint;
 
+  @Column(name = "ORIGINAL_NATIVE_JSON", length = 512)
+  String originalNativeJson;
+
   @Column(name = "CREATION_PROOF", length = 16384)
   String creationProof;
 

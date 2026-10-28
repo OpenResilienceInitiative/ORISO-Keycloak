@@ -1,15 +1,18 @@
-# SMTP-only receiving boundary — unactivated proposal
+# SMTP configuration receiving boundary
 
 This is a bounded alternative for the native capability gap measured in
 [Keycloak57](https://github.com/OpenResilienceInitiative/ORISO-Keycloak/issues/57).
 It is a review proposal within Keycloak53. Hassan and Shazia still have to accept
-the boundary. The production Dockerfile and realm/chart bindings do not install
-or enable this module. It contains no account-command API.
+the boundary. The production Dockerfile installs the lifecycle, OTP and SMTP modules.
+Explicit coordinated chart configuration enables them; defaults remain disabled. It contains no account-command API.
 
-The five-actor target remains unchanged. The existing MAIL service account
-(`backend-mail`) has exactly `smtp-sync`, `system-email-delivery`,
-`notification-dispatch` and `notifications-technical`. It receives no native
-management roles. A mail bearer token alone cannot change SMTP configuration.
+The five-actor model and sole context key remain unchanged. SMTP_SYNC belongs to
+SETUP (`backend-setup`), whose exact roles are config-wizard,
+invitation-reservations, consultant-import and smtp-sync. Its exact audiences are
+tenantservice, agencyservice, consultingtypeservice, userservice and
+oriso-task-commands. MAIL retains system-email-delivery, notification-dispatch and
+notifications-technical, with only the four service audiences. MAIL cannot configure
+SMTP even with a valid common-key MAC. Neither actor receives native management roles.
 
 ## Public HTTP contract
 
@@ -25,12 +28,12 @@ credentials. There is no forwarding or proxy to the stock Admin REST API.
 
 Both operations require a real Keycloak bearer token and an
 `X-ORISO-Task-Context` proof. Direct service-account subject, client, issuer,
-audience, role mappings and effective grants are checked at the receiver. MAIL
+audience, role mappings and effective grants are checked at the receiver. SETUP
 must belong only to `/protected-admins/technical-identities`, matching the
 standalone Helm preparation. The leaf and its top-level parent must have no
-role mappings, including duplicate MAIL roles. Missing, arbitrary, additional or
+role mappings, including duplicate SETUP roles. Missing, arbitrary, additional or
 lookalike nested memberships are denied. Composites, inherited defaults and all
-client-role grants remain denied. The fixed MAIL role union is verified against
+client-role grants remain denied. The fixed SETUP role union is verified against
 both current model state and issued token. There is no groupless legacy fallback.
 
 The draft additionally requires the pinned Keycloak26.6.3 FGAP v2 schema. It
@@ -43,22 +46,20 @@ evaluation context and typed permission path is used as `MgmtPermissions`; this
 does not implement a separate policy solver or enumerate human accounts.
 
 Rejecting SMTP when native powers exist does **not** revoke those powers. A
-privileged installer can still grant MAIL a native capability used through stock
+privileged installer can still grant SETUP a native capability used through stock
 Admin APIs. Production policy inventory and real native API denials remain
 separate activation gates. The receiving check proves only that this SMTP
 resource refuses a currently privileged actor.
 
-## One context key, distinct purposes
+## One context key, separate credentials
 
-The draft uses the sole managed `ORISO_TASK_CONTEXT_KEY` (base64, at least 32
-decoded bytes), distinct from the bearer client's secret. UserService also needs
-this same key for legitimate cross-service setup/context and hosts ordinary mail
-logic. The proof denies a bearer-only caller; it does not isolate code within a
-process that holds both the MAIL bearer and the common context key. Such code
-can authorize a bounded SMTP command. Even with a valid proof, the receiver
-cannot change unrelated realm/user/role fields. This shared-process trust and
-key-distribution risk requires Hassan and Shazia's explicit technical acceptance;
-the proposal introduces no second key, signer service or broker to hide it.
+The receiver uses the sole ORISO_TASK_CONTEXT_KEY (base64, at least32 decoded
+bytes), distinct from the SETUP client secret. SETUP authorizes SMTP configuration;
+MAIL authorizes delivery. A MAIL bearer plus a valid common-key MAC is refused.
+UserService currently holds all five actor credentials and this key. This is a
+credential-level boundary, not isolation against a fully compromised colocated
+UserService process that can obtain SETUP. No additional actor, signer or key is
+introduced. The receiver cannot change unrelated realm, user or role settings.
 
 Proof wire format is `base64url(canonical claims).base64url(signature)` without
 padding. Canonical JSON sorts object keys, uses UTF-8 and compact separators.
@@ -67,10 +68,10 @@ The receiver verifies all fixed fields and the constant-time signature:
 ```text
 signature = HMAC-SHA256(contextKey, "proof\n" + encodedClaims)
 payloadDigest = lowercase-hex(HMAC-SHA256(contextKey, "payload\n" + canonicalBody))
-iss=oriso-smtp-sync, aud=oriso-smtp-control, purpose=SMTP_SYNC, actor=MAIL
+iss=oriso-smtp-sync, aud=oriso-smtp-control, purpose=SMTP_SYNC, actor=SETUP
 operation=SMTP_APPLY, method=PUT (or SMTP_STATUS, method=GET, body={})
 realm=actual configured realm name; target=actual realm ID
-taskClient=backend-mail; taskSubject=configured service-account ID
+taskClient=backend-setup; taskSubject=configured service-account ID
 jti=canonical UUID; nonce=32 lowercase hex characters
 iat <= now + 5; now - 60 <= iat; now < exp <= iat + 60
 ```
@@ -86,7 +87,7 @@ The test seam is the real receiving HTTP resource and public native Admin APIs,
 using real service-account tokens in an isolated digest-pinned Keycloak26.6.3.
 The standalone jar is mounted into that throwaway server only. Credentials are
 synthetic; the test removes its container. Native Admin readback is installer
-evidence, not an additional runtime permission granted to MAIL.
+evidence, not an additional runtime permission granted to SETUP.
 
 ```sh
 mvn -q -f keycloak-image/smtp-control-spi/pom.xml clean package
@@ -96,7 +97,7 @@ SMTP_CONTROL_TEST_JAR="$PWD/keycloak-image/smtp-control-spi/target/smtp-control-
 
 Installing the jar creates one private revision table. Enabling the draft
 additionally requires `ORISO_SMTP_CONTROL_ENABLED=true`,
-`ORISO_SMTP_CONTROL_REALM`, `IDENTITY_MAIL_SERVICE_SUBJECT` and the context key.
+`ORISO_SMTP_CONTROL_REALM`, `IDENTITY_SETUP_SERVICE_SUBJECT` and the context key.
 Absent/invalid enabled configuration fails startup. The module is disabled by
 default; there is no fallback to native realm administration. The test's H2
 database does not establish MariaDB migration or deployed-realm acceptance.

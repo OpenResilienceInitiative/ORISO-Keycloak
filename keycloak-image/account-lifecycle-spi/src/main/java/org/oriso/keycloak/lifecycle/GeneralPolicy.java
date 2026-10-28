@@ -9,8 +9,11 @@ import org.keycloak.models.KeycloakSession;
 /** Positive ordinary profiles and finite self authority over one independently checked native human. */
 final class GeneralPolicy {
   final CurrentNativeHumanIdentity.NativePolicy nativePolicy;
+  final JsonNode installation;
   private final List<Profile> profiles;
   private final List<AdminGrant> adminOperations;
+  private final List<OrdinaryGrant> ordinaryAdminOperations;
+  private record OrdinaryGrant(Set<String> sources,Set<String> targets,Set<String> operations) {}
   final WorkflowOperations workflowOperations;
   final Map<String,Adoption> adoptedAccounts;
   record Adoption(String accountId,String profileId,long profileVersion) {}
@@ -19,8 +22,9 @@ final class GeneralPolicy {
 
   GeneralPolicy(JsonNode config) {
     if (config == null || !config.isObject()) bad();
+    installation = config.deepCopy();
     var required = (com.fasterxml.jackson.databind.node.ObjectNode) config.deepCopy();
-    required.remove("adminOperations"); required.remove("workflowOperations"); required.remove("adoptedAccounts");
+    required.remove("ordinaryAdminOperations"); required.remove("adminOperations"); required.remove("workflowOperations"); required.remove("adoptedAccounts");
     fields(required, "version", "native", "ordinaryProfiles");
     if (number(config, "version", true) != 1) bad();
     nativePolicy = CurrentNativeHumanIdentity.nativePolicy(config.path("native"));
@@ -38,6 +42,9 @@ final class GeneralPolicy {
     }
     profiles = List.copyOf(found);
     adminOperations = parseAdminOperations(config, ids);
+    for(var grant:adminOperations)if(grant.operations.contains("account.delete"))
+      for(String id:grant.profiles)if(profiles.stream().noneMatch(p->p.id.equals(id)&&"AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(p.realmRoles))))bad();
+    ordinaryAdminOperations=parseOrdinaryOperations(config);
     workflowOperations = new WorkflowOperations(config, ids);
     var adoptions=new TreeMap<String,Adoption>();
     if(config.has("adoptedAccounts")){
@@ -53,6 +60,23 @@ final class GeneralPolicy {
     adoptedAccounts=Map.copyOf(adoptions);
   }
 
+  private List<OrdinaryGrant> parseOrdinaryOperations(JsonNode config){
+    if(!config.has("ordinaryAdminOperations"))return List.of();
+    var entries=config.path("ordinaryAdminOperations");if(!entries.isArray()||entries.size()>20)bad();
+    var result=new ArrayList<OrdinaryGrant>();var unique=new HashSet<OrdinaryGrant>();
+    for(var value:entries){
+      fields(value,"sourceProfiles","targetProfiles","operations");
+      var sources=operationStrings(value.path("sourceProfiles"),20,100);
+      var targets=operationStrings(value.path("targetProfiles"),20,100);
+      var operations=operationStrings(value.path("operations"),2,80);
+      if(!Set.of("account.read","account.deactivate").containsAll(operations))bad();
+      for(String id:sources)if(profiles.stream().noneMatch(p->p.id.equals(id)&&Set.of("AGENCY_ADMIN","CONSULTANT_AGENCY_ADMIN").contains(LifecycleGroups.allowedKind(p.realmRoles))))bad();
+      for(String id:targets)if(profiles.stream().noneMatch(p->p.id.equals(id)&&Set.of("ASKER","CONSULTANT").contains(LifecycleGroups.allowedKind(p.realmRoles))))bad();
+      var grant=new OrdinaryGrant(sources,targets,operations);if(!unique.add(grant))bad();result.add(grant);
+    }
+    return List.copyOf(result);
+  }
+
   private static List<AdminGrant> parseAdminOperations(JsonNode config, Set<String> profileIds) {
     if (!config.has("adminOperations")) return List.of();
     var supplied = config.path("adminOperations");
@@ -60,7 +84,7 @@ final class GeneralPolicy {
     var result = new ArrayList<AdminGrant>();
     var unique = new HashSet<AdminGrant>();
     var allowed = Set.of("account.read", "account.profile", "account.email",
-        "account.ordinary-profile", "account.deactivate", "account.reactivate", "account.profile-transition");
+        "account.ordinary-profile", "account.deactivate", "account.reactivate", "account.profile-transition", "account.delete");
     for (var value : supplied) {
       fields(value, "authority", "targetProfiles", "operations", "selfOnly");
       String authority = text(value, "authority", 20, false);
@@ -153,7 +177,8 @@ final class GeneralPolicy {
         || !human.subject().equals(origin.path("humanSubject").asText())
         || !human.issuer().equals(origin.path("humanIssuer").asText())
         || !human.clientId().equals(origin.path("humanClient").asText())
-        || human.tenantId() != null && human.tenantId() <= 0) deny();
+        || human.tenantId() != null && human.tenantId() <= 0
+            && !(human.tenantId()==0&&AccountLifecycleFactory.transferredPlatformSelf(session,request))) deny();
     JsonNode actualTenant = human.tenantId() == null ? JSON.nullNode() : JSON.valueToTree(human.tenantId().toString());
     if (!actualTenant.equals(request.target().path("tenantId"))) deny();
     Profile matched = null;
@@ -206,6 +231,11 @@ final class GeneralPolicy {
   void requireAdmin(HumanAdminSource source, MaintenanceRequest request, String operation,
       Profile current, Profile desired) {
     source.targetTenant(request.target().path("tenantId"));
+    if(source.ordinaryProfile()!=null){
+      for(String selected:new HashSet<>(List.of(current.id,desired.id)))
+        if(ordinaryAdminOperations.stream().noneMatch(g->g.sources.contains(source.ordinaryProfile())&&g.targets.contains(selected)&&g.operations.contains(operation)))deny();
+      return;
+    }
     for (var selected : new HashSet<>(List.of(current.id, desired.id)))
       if (adminOperations.stream().noneMatch(grant -> grant.authority.equals(source.authority())
           && grant.profiles.contains(selected) && grant.operations.contains(operation))) deny();

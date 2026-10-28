@@ -129,7 +129,8 @@ record MaintenanceRequest(
           fields(change,"transition","profileId","profileVersion");
           text(change,"profileId",255,false);number(change,"profileVersion",true);
         }
-        if(!Set.of("ADD_CONSULTANT_IDENTITY","ADD_AGENCY_ADMIN_IDENTITY").contains(text(change,"transition",40,false)))bad();
+        if(!Set.of("ADD_CONSULTANT_IDENTITY","ADD_AGENCY_ADMIN_IDENTITY","REMOVE_ADMINISTRATOR_IDENTITY").contains(text(change,"transition",40,false)))bad();
+        if("REMOVE_ADMINISTRATOR_IDENTITY".equals(change.path("transition").asText())&&!change.has("group"))bad();
       }
       case "reactivate" -> {
         if (inactivity) { fields(change, "restoreEnabled"); if (!change.path("restoreEnabled").isBoolean()) bad(); break; }

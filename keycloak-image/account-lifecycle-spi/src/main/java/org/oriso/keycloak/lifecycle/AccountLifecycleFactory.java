@@ -11,6 +11,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   private Map<String, Set<String>> groups;
   private static final java.util.logging.Logger LOG = java.util.logging.Logger.getLogger(AccountLifecycleFactory.class.getName());
   private GeneralPolicy humanPolicy;
+  private InstallationStatus installation;
   private volatile GeneralPolicy readyHumanPolicy;
 
   public void init(Config.Scope scope) {
@@ -62,6 +63,7 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
     authorization = new LifecycleAuthorization(realm, creator, admin, key, encoded);
     String humanConfig = System.getenv("ORISO_ACCOUNT_MAINTENANCE_CONFIG");
     if (humanConfig != null) humanPolicy = new GeneralPolicy(LifecycleJson.parse(humanConfig));
+    installation = new InstallationStatus(System::getenv, config);
   }
 
   private static String required(String name) {
@@ -74,7 +76,8 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   public RealmResourceProvider create(KeycloakSession session) {
     return authorization == null
         ? null
-        : new AccountLifecycleResource(session, authorization, groups);
+        : new AccountLifecycleResource(session, authorization, groups,
+            () -> installation.read(session, authorization, checkedHumanPolicy(session)));
   }
 
   // Both finite providers share exactly the same trusted configuration parser.
@@ -111,6 +114,28 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
       }
       if (committed.get()) readyHumanPolicy = humanPolicy;
     });
+  }
+
+  static GeneralPolicy checkedOrdinaryPolicy(KeycloakSession session) {
+    var factory=session.getKeycloakSessionFactory().getProviderFactory(RealmResourceProvider.class,"oriso-account-lifecycle");
+    if(!(factory instanceof AccountLifecycleFactory))LifecycleJson.deny();
+    return ((AccountLifecycleFactory)factory).checkedHumanPolicy(session);
+  }
+
+  static OrdinaryAdminSource checkedOrdinarySource(KeycloakSession session,LifecycleAuthorization crypto,MaintenanceRequest request,String header){
+    var factory=session.getKeycloakSessionFactory().getProviderFactory(RealmResourceProvider.class,"oriso-account-lifecycle");
+    if(!(factory instanceof AccountLifecycleFactory))LifecycleJson.deny();var actual=(AccountLifecycleFactory)factory;
+    return OrdinaryAdminSource.require(session,crypto,actual.checkedHumanPolicy(session),actual.groups,request,header);
+  }
+
+  static boolean transferredPlatformSelf(KeycloakSession session,MaintenanceRequest request){
+    var factory=session.getKeycloakSessionFactory().getProviderFactory(RealmResourceProvider.class,"oriso-account-lifecycle");
+    if(!(factory instanceof AccountLifecycleFactory))LifecycleJson.deny();
+    var actual=(AccountLifecycleFactory)factory;
+    if(actual.authorization==null)LifecycleJson.deny();
+    var transfer=ProtectedOrdinaryTransfer.require(session,actual.authorization,request.accountId());
+    return transfer.originalPlatform()&&"0".equals(transfer.lineage().tenant().asText())
+        &&"CONSULTANT".equals(LifecycleGroups.allowedKind(HumanPolicyJson.strings(transfer.lineage().nativeProfile().path("realmRoles"),1,10,255)));
   }
 
   private GeneralPolicy checkedHumanPolicy(KeycloakSession session) {

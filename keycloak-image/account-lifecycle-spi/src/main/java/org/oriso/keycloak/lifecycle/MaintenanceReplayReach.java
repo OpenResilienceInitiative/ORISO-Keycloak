@@ -9,7 +9,7 @@ import org.keycloak.models.KeycloakSession;
 /** Receiver-owned historical reach, separate from the unchanged result receipt and fresh authority. */
 final class MaintenanceReplayReach {
   private static final Set<String> OPERATIONS=Set.of("account.read","account.profile","account.email",
-      "account.ordinary-profile","account.profile-transition","account.deactivate","account.reactivate","account.reassign-tenant");
+      "account.delete","account.ordinary-profile","account.profile-transition","account.deactivate","account.reactivate","account.reassign-tenant");
   static final class Checked {
     private final JsonNode entries;
     private Checked(JsonNode entries){this.entries=entries.deepCopy();}
@@ -25,6 +25,15 @@ final class MaintenanceReplayReach {
   static Checked protectedProfiles(MaintenanceRequest request,ProtectedInvitationConfiguration.Profile current,
       ProtectedInvitationConfiguration.Profile desired,Set<String> operations){
     return checked(request,"PROTECTED",current.id(),current.version(),desired.id(),desired.version(),operations);
+  }
+  static Checked transfer(MaintenanceRequest request,ProtectedInvitationConfiguration.Profile current,
+      GeneralPolicy.Profile desired,Set<String> operations){
+    if(!"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
+        ||!operations.equals(Set.of("account.profile-transition")))deny();
+    var entries=JSON.createArrayNode();
+    entries.add(entry("PROTECTED",current.id(),current.version(),request.target().path("tenantId"),operations));
+    entries.add(entry("ORDINARY",desired.id,desired.version,request.target().path("tenantId"),operations));
+    return new Checked(entries);
   }
   private static Checked checked(MaintenanceRequest request,String family,String id,long version,String desired,long desiredVersion,Set<String> operations){
     if(!"HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText()))return null;
@@ -50,7 +59,7 @@ final class MaintenanceReplayReach {
     value.put("command",row.command);value.put("intentDigest",row.intentDigest);value.put("expectedState",row.expectedState);
     value.put("originDigest",crypto.mac("maintenance-origin",request.target().path("origin")));value.set("reach",reach.deepCopy());return value;
   }
-  private static JsonNode envelope(LifecycleAuthorization crypto,AccountMaintenanceOperation row,MaintenanceRequest request){
+  static JsonNode envelope(LifecycleAuthorization crypto,AccountMaintenanceOperation row,MaintenanceRequest request){
     if(row.replayReachJson==null)deny();
     try{
       var value=parse(row.replayReachJson);fields(value,"v","reach","mac");
@@ -89,7 +98,7 @@ final class MaintenanceReplayReach {
       ProtectedAccountOperations.replayReach(session,crypto,current,human,needed);
     else OrdinaryAccountOperations.replayReach(session,crypto,mappings,policies.get(),current,human,needed);
   }
-  private static void requireOriginal(KeycloakSession session,HumanAdminSource source,Supplier<GeneralPolicy> policies,
+  static void requireOriginal(KeycloakSession session,HumanAdminSource source,Supplier<GeneralPolicy> policies,
       MaintenanceRequest request,JsonNode entry){
     source.targetTenant(entry.path("tenantId"));String id=entry.path("profileId").asText();long version=entry.path("profileVersion").longValue();
     var operations=HumanPolicyJson.strings(entry.path("operations"),1,OPERATIONS.size(),80);
