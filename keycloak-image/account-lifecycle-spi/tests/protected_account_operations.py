@@ -30,6 +30,8 @@ class OperationFixture(BootstrapFixture, PeerFixture):
         original = subprocess.run
         def remember(args, *positional, **keywords):
             if isinstance(args, list) and args[:2] == ['docker', 'run'] and getattr(cls, 'name', None) in args:
+                args = copy.deepcopy(args)
+                if '--verbose' not in args: args.append('--verbose')
                 cls.actual_native_launch = copy.deepcopy(args)
             return original(args, *positional, **keywords)
         subprocess.run = remember
@@ -91,7 +93,18 @@ class OperationFixture(BootstrapFixture, PeerFixture):
 
     @classmethod
     def ready(cls):
-        super().ready()
+        try:
+            super().ready()
+        except AssertionError:
+            # Export only source locations, never raw native logs/configuration/tokens.
+            import re, subprocess
+            logs = subprocess.run(['docker','logs','--tail','160',cls.name],
+                capture_output=True,text=True,timeout=15)
+            frames = re.findall(r'org\.oriso\.keycloak\.[A-Za-z0-9_.$]+\([^()]+\.java:[0-9]+\)',
+                logs.stdout + logs.stderr)
+            ProtectedOperationRead.observation['nativeStartupFailure'] = {
+                'phase':getattr(cls,'phase','unknown'),'sourceFrames':frames[:30]}
+            raise
         helper = cls('runTest')
         helper.check_installer_identity([cls.installer], 'NATIVE_READY')
 
