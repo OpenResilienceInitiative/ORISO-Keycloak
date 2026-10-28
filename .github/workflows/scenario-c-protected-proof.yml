@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: protected-proof-${{ github.event.pull_request.number || github.ref }}
+  group: protected-proof-${{ github.event.pull_request.number || github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
