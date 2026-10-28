@@ -86,6 +86,13 @@ final class MaintenanceReplayReach {
     boolean refused="NO_EFFECT".equals(parse(prior.resultJson).path("result").asText());
     if(request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText())&&!"PLATFORM".equals(source.authority()))deny();
     if(deleted(session,crypto,policies,mappings,source,request,prior))return;
+    if(!refused&&source.ordinaryProfile()!=null&&GeneralPolicy.consultantRemoval(request)){
+      var policy=policies.get();
+      var replay=new ConsultantRemoval(session,policy,source,request,prior,entries);
+      var current=new MaintenanceRequest("read",request.accountId(),request.target(),null,null,null,null,null,null);
+      OrdinaryAccountOperations.replayConsultantRemoval(session,crypto,mappings,policy,current,human,replay);
+      return;
+    }
     if(!refused)for(var entry:entries)requireOriginal(session,source,policies,request,entry);
     var needed=refused?Set.of("account.read"):operations(request);
     var nativeState=AccountLifecycleResource.lockedSnapshot(CurrentNativeHumanIdentity.entityManager(session),request.accountId());
@@ -94,10 +101,70 @@ final class MaintenanceReplayReach {
     if(!tenants.isMissingNode()&&tenants.size()!=1)deny();
     var target=request.target().deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)target).set("tenantId",tenant.deepCopy());
     var current=new MaintenanceRequest("read",request.accountId(),target,null,null,null,null,null,request.workflow());
+    var removal=!refused&&GeneralPolicy.consultantRemoval(request)?new CurrentConsultantRemoval(prior,request):null;
     if(!OrdinaryAccountOperations.adoptedTarget(session,configured,current) && ProtectedAccountOperations.protectedTarget(session,current))
-      ProtectedAccountOperations.replayReach(session,crypto,current,human,needed);
-    else OrdinaryAccountOperations.replayReach(session,crypto,mappings,policies.get(),current,human,needed);
+      ProtectedAccountOperations.replayReach(session,crypto,current,human,needed,removal);
+    else OrdinaryAccountOperations.replayReach(session,crypto,mappings,policies.get(),current,human,needed,removal);
   }
+  /** Postcondition only: an old receipt cannot remove a subsequently re-added Consultant. */
+  static final class CurrentConsultantRemoval {
+    private final AccountMaintenanceOperation original;
+    private final MaintenanceRequest request;
+    private CurrentConsultantRemoval(AccountMaintenanceOperation original,MaintenanceRequest request){
+      if(!GeneralPolicy.consultantRemoval(request)||!"UPDATED".equals(parse(original.resultJson).path("result").asText()))deny();
+      this.original=original;this.request=request;
+    }
+    void requireCurrent(KeycloakSession session,MaintenanceRequest current,MaintenanceLineage.Current lineage){
+      if(!request.accountId().equals(current.accountId())||!request.target().equals(current.target())
+          ||(request.change().has("group")
+              ? !"ORDINARY".equals(lineage.kind())||!request.change().path("group").equals(lineage.nativeProfile().path("groupPath"))
+              : !"PROTECTED".equals(lineage.kind())||!request.change().path("profileId").asText().equals(lineage.profileId())
+                  ||request.change().path("profileVersion").longValue()!=lineage.profileVersion()))deny();
+      var em=CurrentNativeHumanIdentity.entityManager(session);
+      var rows=em.createQuery("select l from AccountMaintenanceLineage l where l.realmId=:realm and l.accountId=:account and l.operationId=:operation",AccountMaintenanceLineage.class)
+          .setParameter("realm",original.realmId).setParameter("account",original.accountId).setParameter("operation",original.operationId)
+          .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).setMaxResults(2).getResultList();
+      if(rows.size()!=1)deny();var row=rows.get(0);em.refresh(row);
+      if(!LifecycleAuthorization.equal(row.lineageDigest,lineage.digest())||row.sequence!=lineage.sequence())deny();
+    }
+  }
+
+  /** Created only after the original stored command/result/reach was authenticated. */
+  static final class ConsultantRemoval {
+    private final MaintenanceRequest original;
+    private final String account;
+    private final CurrentConsultantRemoval remaining;
+    private final GeneralPolicy.Profile before,desired;
+    private ConsultantRemoval(KeycloakSession session,GeneralPolicy policy,HumanAdminSource source,
+        MaintenanceRequest request,AccountMaintenanceOperation prior,JsonNode entries){
+      if(entries.size()!=2||!"profile-transition".equals(prior.command)
+          ||!"UPDATED".equals(parse(prior.resultJson).path("result").asText()))deny();
+      original=request;account=prior.accountId;remaining=new CurrentConsultantRemoval(prior,request);
+      desired=policy.desiredProfile(request.change().path("group").asText());
+      GeneralPolicy.Profile found=null;boolean destination=false;
+      for(var entry:entries){
+        if(!"ORDINARY".equals(entry.path("family").asText())
+            ||!request.target().path("tenantId").equals(entry.path("tenantId"))
+            ||!HumanPolicyJson.strings(entry.path("operations"),1,OPERATIONS.size(),80).equals(Set.of("account.profile-transition")))deny();
+        var profile=policy.profile(entry.path("profileId").asText(),entry.path("profileVersion").longValue());
+        policy.validateProfile(session,profile);
+        if(profile.id.equals(desired.id)){if(destination)deny();destination=true;}
+        else{if(found!=null)deny();found=profile;}
+      }
+      if(found==null||!destination)deny();before=found;
+      policy.requireConsultantRemoval(source,request,before,desired);
+    }
+    void requireCurrent(KeycloakSession session,GeneralPolicy policy,HumanAdminSource source,
+        MaintenanceRequest current,GeneralPolicy.Profile profile,MaintenanceLineage.Current lineage){
+      if(!"read".equals(current.command())||!account.equals(current.accountId())
+          ||!original.target().equals(current.target())||!profile.id.equals(desired.id)
+          ||profile.version!=desired.version||!"ORDINARY".equals(lineage.kind())
+          ||!canonical(profile.snapshot).equals(canonical(lineage.nativeProfile())))deny();
+      policy.requireConsultantRemoval(source,original,before,desired);
+      remaining.requireCurrent(session,current,lineage);
+    }
+  }
+
   static void requireOriginal(KeycloakSession session,HumanAdminSource source,Supplier<GeneralPolicy> policies,
       MaintenanceRequest request,JsonNode entry){
     source.targetTenant(entry.path("tenantId"));String id=entry.path("profileId").asText();long version=entry.path("profileVersion").longValue();

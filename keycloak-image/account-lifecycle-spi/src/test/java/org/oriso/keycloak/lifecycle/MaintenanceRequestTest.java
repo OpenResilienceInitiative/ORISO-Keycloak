@@ -191,7 +191,7 @@ public class MaintenanceRequestTest {
         catch(WebApplicationException refused){fail("Reviewed typed profile transition rejected with status "+refused.getResponse().getStatus());}
       }
     }
-    for (String invalid : java.util.List.of("{\"transition\":\"REMOVE_CONSULTANT_IDENTITY\",\"group\":\"/human-roles/consultant\"}",
+    for (String invalid : java.util.List.of("{\"transition\":\"REMOVE_UNKNOWN_IDENTITY\",\"group\":\"/human-roles/consultant\"}",
         "{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"roles\":[\"consultant\"]}",
         "{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"group\":\"/human-roles/consultant\",\"profileId\":\"dual\",\"profileVersion\":1}",
         "{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"profileId\":\"dual\",\"profileVersion\":0}",
@@ -257,5 +257,24 @@ public class MaintenanceRequestTest {
     } catch (WebApplicationException expected) {
       assertTrue(expected.getResponse().getStatus() == 400 || expected.getResponse().getStatus() == 403);
     }
+  }
+  @Test public void consultantRemovalHasOnlyFixedOrdinaryOrProtectedSelectors(){
+    for(String authority:java.util.List.of("ORDINARY_ACCOUNT_OPERATIONS_V1","PROTECTED_ACCOUNT_OPERATIONS_V1")){
+      var body=(com.fasterxml.jackson.databind.node.ObjectNode)parse(command("{\"transition\":\"REMOVE_CONSULTANT_IDENTITY\",\"group\":\"/human-roles/agency-admin\"}"));
+      var origin=(com.fasterxml.jackson.databind.node.ObjectNode)body.path("target").path("origin");
+      origin.put("kind","HUMAN_ADMIN");origin.put("humanAuthority",authority);
+      origin.put("humanSubject","33333333-3333-4333-8333-333333333333");
+      try{assertEquals("REMOVE_CONSULTANT_IDENTITY",MaintenanceRequest.parse("profile-transition",ID,body).change().path("transition").asText());}
+      catch(WebApplicationException rejected){fail("Fixed Consultant-only removal rejected: "+rejected.getResponse().getStatus());}
+      ((com.fasterxml.jackson.databind.node.ObjectNode)body.path("change")).put("roles","arbitrary");
+      assertThrows(WebApplicationException.class,()->MaintenanceRequest.parse("profile-transition",ID,body));
+    }
+    var body=(com.fasterxml.jackson.databind.node.ObjectNode)parse(command("{\"transition\":\"REMOVE_CONSULTANT_IDENTITY\",\"profileId\":\"tenant-pure-v1\",\"profileVersion\":1}"));
+    var origin=(com.fasterxml.jackson.databind.node.ObjectNode)body.path("target").path("origin");
+    origin.put("kind","HUMAN_ADMIN");origin.put("humanAuthority","PROTECTED_ACCOUNT_OPERATIONS_V1");
+    try{assertEquals("profile-transition",MaintenanceRequest.parse("profile-transition",ID,body).command());}
+    catch(WebApplicationException rejected){fail("Fixed protected Consultant-only removal rejected: "+rejected.getResponse().getStatus());}
+    origin.put("humanAuthority","ORDINARY_ACCOUNT_OPERATIONS_V1");
+    assertThrows(WebApplicationException.class,()->MaintenanceRequest.parse("profile-transition",ID,body));
   }
 }

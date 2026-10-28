@@ -149,7 +149,13 @@ final class ProtectedAccountOperations {
 
   static void replayReach(KeycloakSession session,LifecycleAuthorization crypto,MaintenanceRequest request,
       String human,Set<String> operations) {
-    readChecked(session,crypto,request,human,"account.read",null,operations);
+    replayReach(session,crypto,request,human,operations,null);
+  }
+
+  static void replayReach(KeycloakSession session,LifecycleAuthorization crypto,MaintenanceRequest request,
+      String human,Set<String> operations,MaintenanceReplayReach.CurrentConsultantRemoval remaining){
+    var checked=readChecked(session,crypto,request,human,"account.read",null,operations);
+    if(remaining!=null)remaining.requireCurrent(session,request,checked.lineage());
   }
 
   private static CheckedCurrent readChecked(KeycloakSession session,LifecycleAuthorization crypto,

@@ -130,3 +130,23 @@ exact pure profiles. Consultant-bearing profiles are refused. A retry rechecks
 current human authority and historical native provenance after account removal;
 a recreated native UUID is refused and preserved. No generic native deletion
 power is granted. Deployment defaults do not install either new operation grant.
+
+### Consultant-only identity removal
+
+The existing `profile-transition` command accepts the fixed
+`REMOVE_CONSULTANT_IDENTITY` transition. Ordinary combined accounts select their
+reviewed pure Administrator group; protected combined accounts select the exact
+pure Administrator profile id/version. The transition removes only `consultant`
+and `group-chat-consultant`, preserves every other realm/client role, and keeps
+the original UUID, tenant, enabled state, credentials, profile and complete
+creation/adoption lineage.
+
+A restricted ordinary Administrator needs the existing explicit read/transition
+grants for both source and destination profiles and current target-tenant reach.
+Its stored removal replay verifies the remaining Administrator through a private
+original-operation frame; general peer Administrator reads and CRUD remain
+closed. Own removal requires declared current/destination source variants and a
+fresh same-human JWT after the role change. A later Consultant re-addition cannot
+borrow an old removal receipt: replay verifies the original removal is still the
+current role-lineage head. UserService must separately preserve Administrator SQL
+and prevent scheduled Consultant cleanup from deleting the remaining native user.

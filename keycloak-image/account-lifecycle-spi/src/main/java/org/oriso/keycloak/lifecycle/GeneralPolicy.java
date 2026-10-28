@@ -246,6 +246,11 @@ final class GeneralPolicy {
       Profile current, Profile desired) {
     source.targetTenant(request.target().path("tenantId"));
     if(source.ordinaryProfile()!=null){
+      if(consultantRemoval(request)){
+        if(!"account.profile-transition".equals(operation))deny();
+        requireConsultantRemoval(source,request,current,desired);
+        return;
+      }
       if(!ordinaryOperations(current).contains(operation)||!ordinaryOperations(desired).contains(operation))deny();
       boolean self=source.subject().equals(request.accountId());
       if(("AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(current.realmRoles))
@@ -268,6 +273,28 @@ final class GeneralPolicy {
     for (var selected : new HashSet<>(List.of(current.id, desired.id)))
       if (adminOperations.stream().noneMatch(grant -> grant.authority.equals(source.authority())
           && grant.profiles.contains(selected) && grant.operations.contains(operation))) deny();
+  }
+
+  static boolean consultantRemoval(MaintenanceRequest request){
+    return "profile-transition".equals(request.command())&&request.change()!=null
+        &&"REMOVE_CONSULTANT_IDENTITY".equals(request.change().path("transition").asText());
+  }
+
+  /** Fixed Consultant target operation, never a general pure-Administrator read or CRUD grant. */
+  void requireConsultantRemoval(HumanAdminSource source,MaintenanceRequest request,Profile original,Profile desired){
+    if(!consultantRemoval(request)||source.ordinaryProfile()==null||!request.change().has("group")
+        ||!"CONSULTANT_AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(original.realmRoles))
+        ||!"AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(desired.realmRoles))
+        ||!request.change().path("group").asText().equals(desired.path))deny();
+    source.targetTenant(request.target().path("tenantId"));
+    MaintenanceRoleChange.require(MaintenanceRoleChange.capsule(request),"ORDINARY",original.snapshot,desired.snapshot);
+    if(source.subject().equals(request.accountId())
+        &&ordinaryAdminOperations.stream().noneMatch(g->g.sources.containsAll(Set.of(original.id,desired.id))
+            &&g.targets.containsAll(Set.of(original.id,desired.id))
+            &&g.operations.containsAll(Set.of("account.read","account.profile-transition"))))deny();
+    for(String target:Set.of(original.id,desired.id))
+      if(ordinaryAdminOperations.stream().noneMatch(g->g.sources.contains(source.ordinaryProfile())
+          &&g.targets.contains(target)&&g.operations.containsAll(Set.of("account.read","account.profile-transition"))))deny();
   }
 
   /** Classification result carries no peer, protected, creation or arbitrary operation grant. */

@@ -338,6 +338,8 @@ class ProtectedOperationRead(PeerReadiness):
         pure_deletion(self,helper,primary,o)
         from ordinary_operator_operations import exercise as ordinary_operator
         ordinary_operator(self,helper,primary,o)
+        from identity_removal_operations import consultant_removal
+        consultant_removal(self,helper,primary,o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 

@@ -123,8 +123,9 @@ record MaintenanceRequest(
       case "profile-transition" -> {
         if(workflow!=null||!"HUMAN_ADMIN".equals(kind)
             ||!Set.of("PROTECTED_ACCOUNT_OPERATIONS_V1","ORDINARY_ACCOUNT_OPERATIONS_V1").contains(authority))deny();
-        if("ORDINARY_ACCOUNT_OPERATIONS_V1".equals(authority)&&(!actualId.equals(subject)
-            ||!change.has("group")||!"ADD_CONSULTANT_IDENTITY".equals(change.path("transition").asText())))deny();
+        if("ORDINARY_ACCOUNT_OPERATIONS_V1".equals(authority)
+            &&(!change.has("group")||!("ADD_CONSULTANT_IDENTITY".equals(change.path("transition").asText())&&actualId.equals(subject)
+                ||"REMOVE_CONSULTANT_IDENTITY".equals(change.path("transition").asText()))))deny();
         if(change.has("group")){
           fields(change,"transition","group");
           if(!text(change,"group",512,false).matches("/human-roles/[a-z0-9-]{1,80}"))bad();
@@ -132,7 +133,7 @@ record MaintenanceRequest(
           fields(change,"transition","profileId","profileVersion");
           text(change,"profileId",255,false);number(change,"profileVersion",true);
         }
-        if(!Set.of("ADD_CONSULTANT_IDENTITY","ADD_AGENCY_ADMIN_IDENTITY","REMOVE_ADMINISTRATOR_IDENTITY").contains(text(change,"transition",40,false)))bad();
+        if(!Set.of("ADD_CONSULTANT_IDENTITY","ADD_AGENCY_ADMIN_IDENTITY","REMOVE_ADMINISTRATOR_IDENTITY","REMOVE_CONSULTANT_IDENTITY").contains(text(change,"transition",40,false)))bad();
         if("REMOVE_ADMINISTRATOR_IDENTITY".equals(change.path("transition").asText())&&!change.has("group"))bad();
       }
       case "reactivate" -> {

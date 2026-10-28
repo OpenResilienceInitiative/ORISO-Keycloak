@@ -140,7 +140,20 @@ final class OrdinaryAccountOperations {
 
   static void replayReach(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
       GeneralPolicy policy,MaintenanceRequest request,String human,Set<String> operations) {
-    prepare(session,crypto,mappings,policy,request,human,null,operations);
+    replayReach(session,crypto,mappings,policy,request,human,operations,null);
+  }
+
+  static void replayReach(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
+      GeneralPolicy policy,MaintenanceRequest request,String human,Set<String> operations,
+      MaintenanceReplayReach.CurrentConsultantRemoval remaining){
+    var checked=prepare(session,crypto,mappings,policy,request,human,null,operations);
+    if(remaining!=null)remaining.requireCurrent(session,request,checked.lineage);
+  }
+
+  static void replayConsultantRemoval(KeycloakSession session,LifecycleAuthorization crypto,Map<String,Set<String>> mappings,
+      GeneralPolicy policy,MaintenanceRequest request,String human,MaintenanceReplayReach.ConsultantRemoval replay){
+    if(replay==null)deny();
+    prepare(session,crypto,mappings,policy,request,human,null,Set.of("account.profile-transition"),null,null,replay);
   }
 
   record DeletedProfile(GeneralPolicy.Profile profile,JsonNode tenant) {}
@@ -189,6 +202,13 @@ final class OrdinaryAccountOperations {
   private static Prepared prepare(KeycloakSession session,LifecycleAuthorization crypto,
       Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human,
       CausalPasswordRequest causal,Set<String> replayOperations,String otpOperation,SelfDeactivationOutcome.Checked savedSelf) {
+    return prepare(session,crypto,mappings,policy,request,human,causal,replayOperations,otpOperation,savedSelf,null);
+  }
+
+  private static Prepared prepare(KeycloakSession session,LifecycleAuthorization crypto,
+      Map<String,Set<String>> mappings,GeneralPolicy policy,MaintenanceRequest request,String human,
+      CausalPasswordRequest causal,Set<String> replayOperations,String otpOperation,SelfDeactivationOutcome.Checked savedSelf,
+      MaintenanceReplayReach.ConsultantRemoval consultantRemoval) {
     boolean self = "SELF".equals(request.target().path("origin").path("kind").asText()) && request.workflow() == null;
     if (policy == null || !(self ? Set.of("read", "profile", "email", "locale", "password", "self-password", "deactivate")
         : Set.of("read", "profile", "email", "ordinary-profile", "profile-transition", "deactivate", "reactivate", "delete"))
@@ -276,7 +296,8 @@ final class OrdinaryAccountOperations {
     } else {
       var source = HumanAdminSource.require(session, crypto, request, human);
       if(request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText())&&!"PLATFORM".equals(source.authority()))deny();
-      for(String operation:replayOperations==null?MaintenanceReplayReach.operations(request):replayOperations)
+      if(consultantRemoval!=null)consultantRemoval.requireCurrent(session,policy,source,request,profile,lineage);
+      else for(String operation:replayOperations==null?MaintenanceReplayReach.operations(request):replayOperations)
         policy.requireAdmin(source,request,operation,profile,desired);
     }
     var reach=self ? null : MaintenanceReplayReach.ordinary(request,profile,desired,

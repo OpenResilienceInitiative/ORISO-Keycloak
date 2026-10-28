@@ -219,6 +219,24 @@ def self_source_policy_boundary(test, helper, observed):
             record['reviewedVariantStartupAndNoSecondEffectVerified'] = True
             from self_profile_operations import account as self_profile
             self_profile(test, helper, 'PROTECTED.PLATFORM_ADMIN_DUAL', account, fresh, observed)
+            status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, fresh, 200)
+            test.assertEqual(200, status)
+            removal = {'target': target, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
+                       'change': {'transition': 'REMOVE_CONSULTANT_IDENTITY', 'profileId': 'platform-v1', 'profileVersion': 1}}
+            status, removed = HumanMaintenanceFixture.invoke(helper, 'profile-transition', removal, fresh, 200)
+            test.assertEqual(200, status); test.assertEqual('UPDATED', removed['result'])
+            test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'profile-transition', removal, fresh, 403)[0])
+            pure = login(native['username'], {'agency-admin', 'tenant-admin'})
+            test.assertEqual((200, removed), HumanMaintenanceFixture.invoke(helper, 'profile-transition', removal, pure, 200))
+            test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+            record['inverseRemovalFreshSameHumanAndOriginalLineageVerified'] = True
+            status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, pure, 200)
+            test.assertEqual(200, status)
+            restore = copy.deepcopy(body); restore['operationId'] = str(uuid.uuid4()); restore['expectedState'] = current['state']
+            test.assertEqual(200, HumanMaintenanceFixture.invoke(helper, 'profile-transition', restore, pure, 200)[0])
+            fresh = login(native['username'], full)
+            test.assertEqual(403, HumanMaintenanceFixture.invoke(helper, 'profile-transition', removal, fresh, 403)[0])
+            record['readdedConsultantRejectsOldRemovalReceipt'] = True
             helper.admin('POST', '/users/' + account + '/role-mappings/realm', [helper.admin('GET', '/roles/user')])
             extra = login(native['username'], full | {'user'})
             denied_status, denied = HumanMaintenanceFixture.invoke(helper, 'profile-transition', body, extra, 403)

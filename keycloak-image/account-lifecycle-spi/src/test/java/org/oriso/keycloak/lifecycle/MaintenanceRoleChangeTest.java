@@ -26,4 +26,21 @@ public class MaintenanceRoleChangeTest {
     assertThrows(jakarta.ws.rs.ForbiddenException.class,()->MaintenanceRoleChange.require(removal(),"PROTECTED",source,client));
     assertThrows(jakarta.ws.rs.ForbiddenException.class,()->MaintenanceRoleChange.require(removal(),"ORDINARY",profile("CONSULTANT","consultant"),profile("CONSULTANT","consultant")));
   }
+  @Test public void consultantRemovalPreservesExactAdministratorSubsetAndFamily(){
+    var removal=parse("{\"kind\":\"REMOVE_CONSULTANT_IDENTITY\"}");
+    try {
+    MaintenanceRoleChange.require(removal,"ORDINARY",profile("CONSULTANT_AGENCY_ADMIN","consultant","group-chat-consultant","restricted-agency-admin","user-admin"),profile("AGENCY_ADMIN","restricted-agency-admin","user-admin"));
+    MaintenanceRoleChange.require(removal,"PROTECTED",profile("TENANT_ADMIN","consultant","group-chat-consultant","single-tenant-admin"),profile("TENANT_ADMIN","single-tenant-admin"));
+    MaintenanceRoleChange.require(removal,"PROTECTED",profile("PLATFORM_ADMIN","consultant","agency-admin","tenant-admin"),profile("PLATFORM_ADMIN","agency-admin","tenant-admin"));
+    } catch(jakarta.ws.rs.WebApplicationException rejected){fail("Exact preserving Consultant removal rejected: "+rejected.getResponse().getStatus());}
+  }
+  @Test public void consultantRemovalCannotDropAdminAddRolesRetainConsultantOrChangeClients(){
+    var removal=parse("{\"kind\":\"REMOVE_CONSULTANT_IDENTITY\"}");
+    var source=profile("TENANT_ADMIN","consultant","group-chat-consultant","single-tenant-admin");
+    for(var desired:java.util.List.of(profile("CONSULTANT","consultant"),profile("TENANT_ADMIN","tenant-admin"),profile("TENANT_ADMIN","single-tenant-admin","consultant"),profile("PLATFORM_ADMIN","single-tenant-admin")))
+      assertThrows(jakarta.ws.rs.ForbiddenException.class,()->MaintenanceRoleChange.require(removal,"PROTECTED",source,desired));
+    var client=profile("TENANT_ADMIN","single-tenant-admin");((com.fasterxml.jackson.databind.node.ObjectNode)client.path("clientRoles")).putArray("app").add("new");
+    assertThrows(jakarta.ws.rs.ForbiddenException.class,()->MaintenanceRoleChange.require(removal,"PROTECTED",source,client));
+    assertThrows(jakarta.ws.rs.ForbiddenException.class,()->MaintenanceRoleChange.require(removal,"ORDINARY",profile("CONSULTANT","consultant"),profile("AGENCY_ADMIN","restricted-agency-admin","user-admin")));
+  }
 }
