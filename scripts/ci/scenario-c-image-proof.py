@@ -74,6 +74,26 @@ def operator_verifier_observation(returncode, stdout):
             "unclassifiedFailure": returncode != 0 and not checks}
 
 
+def operator_flows_with_existing_browser(source_flows):
+    # This direct-grant regression starts with an already valid browser contract.
+    # Source forms is built-in: repairing a missing browser child is a separate gap.
+    flows = copy.deepcopy(source_flows)
+    forms = [f for f in flows if f["alias"] == "forms"]
+    alias = "browser-email-otp-conditional"
+    if len(forms) != 1 or any(f["alias"] == alias for f in flows):
+        raise ValueError("Unexpected source browser fixture shape")
+    forms[0]["authenticationExecutions"].append({
+        "authenticatorFlow": True, "flowAlias": alias,
+        "requirement": "CONDITIONAL", "priority": 30})
+    flows.append({"alias": alias, "providerId": "basic-flow", "topLevel": False,
+                  "builtIn": False, "authenticationExecutions": [
+                      {"authenticator": provider, "authenticatorFlow": False,
+                       "requirement": "REQUIRED", "priority": priority}
+                      for provider, priority in [("conditional-user-configured", 10),
+                                                 ("email-form-authenticator", 20)]]})
+    return flows
+
+
 def source_manifest():
     paths = subprocess.run(
         ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True
@@ -156,6 +176,16 @@ class InstalledImage(unittest.TestCase):
             time.sleep(1)
         self.fail("Installed image reached neither readiness nor an explicit exit")
 
+    def operator_admin_token(self, base):
+        # kcadm takes longer than a bootstrap access token may live. Renew the same
+        # fixture login before the next observation; never retry a refused read.
+        status, body = call(base, "POST", "/realms/master/protocol/openid-connect/token",
+                            {"client_id": "admin-cli", "grant_type": "password",
+                             "username": "synthetic-installer", "password": PASSWORD}, form=True)
+        self.assertEqual(200, status, "Operator fixture authentication must succeed")
+        self.assertIsInstance(body.get("access_token"), str)
+        return body["access_token"]
+
     def realm(self, name, base):
         ready, token = self.await_start(name, base)
         self.assertTrue(ready, "Installed image did not start")
@@ -230,6 +260,9 @@ class InstalledImage(unittest.TestCase):
                     for f in source["authenticationFlows"] if f["alias"] in aliases}
         observations = {}
         self.receipt["operatorFlowReconciliation"] = observations
+        self.receipt["operatorBrowserFixture"] = {
+            "preseededExistingEmailContract": True, "sourceBuiltInFlagsPreserved": True,
+            "missingBuiltInBrowserRepairProven": False}
         with self.container() as (name, base):
             ready, token = self.await_start(name, base)
             self.assertTrue(ready, "Operator proof requires the actual installed image")
@@ -237,8 +270,9 @@ class InstalledImage(unittest.TestCase):
                 "/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 "
                 "--realm master --user synthetic-installer --password " + PASSWORD + "\n")
             for variant in ("current", "legacy"):
+                token = self.operator_admin_token(base)
                 realm = REALM + "-operator-" + variant
-                flows = copy.deepcopy(source["authenticationFlows"])
+                flows = operator_flows_with_existing_browser(source["authenticationFlows"])
                 configs = copy.deepcopy(source["authenticatorConfig"])
                 for item in flows + configs: item.pop("id", None)
                 if variant == "legacy":
@@ -274,6 +308,11 @@ class InstalledImage(unittest.TestCase):
                     return {a: [(e.get("providerId", e.get("displayName")), e["requirement"], e["priority"])
                                 for e in entries] for a, entries in value.items()}
 
+                def browser_snapshot():
+                    return {alias: read("/authentication/flows/" + alias + "/executions")
+                            for alias in ("browser", "forms", "browser-email-otp-conditional")}
+
+                browser_before = browser_snapshot()
                 migrated = False
                 before = snapshot()
                 config_id = next(e["authenticationConfig"] for e in before["email-otp-conditional"]
@@ -285,6 +324,7 @@ class InstalledImage(unittest.TestCase):
                 for _ in range(2):
                     docker("exec", "-i", "-e", "REALM=" + realm, name, "bash", "-s",
                            input=(ROOT / "scripts/keycloak-apply-2fa-flow.sh").read_text())
+                    token = self.operator_admin_token(base)
                     migrated = True
                     after = snapshot()
                     observations[variant] = {"applyCompleted": True,
@@ -300,6 +340,8 @@ class InstalledImage(unittest.TestCase):
                         observations[variant]["verifier"] = operator_verifier_observation(
                             failure.returncode, failure.stdout or "")
                         raise
+                    self.assertTrue(browser_snapshot() == browser_before,
+                                    "Direct-grant repair must preserve the existing browser executions exactly")
                     self.assertTrue(contract(after) == expected, "Actual operator flow must match the shipped realm exactly")
                     self.assertTrue(protected_ids.issubset({e["id"] for entries in after.values() for e in entries}),
                                     "Current Magic Link and OTP execution identities must survive")
@@ -310,7 +352,7 @@ class InstalledImage(unittest.TestCase):
                     first = after
                 observations[variant] = {"exactRealmContract": True, "protectedExecutionIdsPreserved": True,
                     "otpConfigurationPreserved": True, "secondApplyIdentical": True, "shippedVerifierPassed": True,
-                    "applyRuns": 2}
+                    "applyRuns": 2, "browserExecutionStatePreserved": True}
         self.receipt["operatorFlowReconciliation"] = observations
 
     def test_installed_modules_refuse_invalid_shared_key_at_startup(self):

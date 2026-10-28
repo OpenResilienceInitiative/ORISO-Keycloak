@@ -179,6 +179,51 @@ class OperatorAuthenticationFlowTests(unittest.TestCase):
         self.assertEqual({'exit': 0, 'failedChecks': [], 'unclassifiedFailure': False},
                          proof.operator_verifier_observation(0, private))
 
+    def test_native_fixture_preseeds_only_the_declared_existing_browser_contract(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('operator_image_proof', ROOT / 'scripts/ci/scenario-c-image-proof.py')
+        proof = importlib.util.module_from_spec(spec); spec.loader.exec_module(proof)
+        original = json.loads((ROOT / 'realm.json').read_text())['authenticationFlows']
+        before = copy.deepcopy(original)
+        actual = proof.operator_flows_with_existing_browser(original)
+        self.assertEqual(before, original)
+        added = actual[-1]
+        self.assertEqual('browser-email-otp-conditional', added['alias'])
+        self.assertEqual([('conditional-user-configured', 'REQUIRED', 10),
+                          ('email-form-authenticator', 'REQUIRED', 20)],
+                         [(e['authenticator'], e['requirement'], e['priority'])
+                          for e in added['authenticationExecutions']])
+        forms = next(f for f in actual if f['alias'] == 'forms')
+        self.assertEqual({'authenticatorFlow': True, 'flowAlias': added['alias'],
+                          'requirement': 'CONDITIONAL', 'priority': 30}, forms['authenticationExecutions'].pop())
+        self.assertEqual(before, actual[:-1])
+        for mutation in ('missing', 'duplicate', 'unexpected-email'):
+            invalid = copy.deepcopy(before)
+            if mutation == 'missing': invalid = [f for f in invalid if f['alias'] != 'forms']
+            elif mutation == 'duplicate': invalid.append(copy.deepcopy(next(f for f in invalid if f['alias'] == 'forms')))
+            else: invalid.append(copy.deepcopy(added))
+            with self.assertRaises(ValueError): proof.operator_flows_with_existing_browser(invalid)
+
+    def test_native_operator_token_refresh_uses_same_identity_and_never_retries_401(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location('operator_image_proof', ROOT / 'scripts/ci/scenario-c-image-proof.py')
+        proof = importlib.util.module_from_spec(spec); spec.loader.exec_module(proof)
+        case = proof.InstalledImage()
+        with patch.object(proof, 'call', side_effect=[(200, {'access_token': 'first'}),
+                                                     (200, {'access_token': 'second'})]) as transport:
+            self.assertEqual('first', case.operator_admin_token('http://fixture.invalid'))
+            self.assertEqual('second', case.operator_admin_token('http://fixture.invalid'))
+            self.assertEqual(2, transport.call_count)
+            for request in transport.call_args_list:
+                self.assertEqual(('http://fixture.invalid', 'POST', '/realms/master/protocol/openid-connect/token',
+                                  {'client_id': 'admin-cli', 'grant_type': 'password',
+                                   'username': 'synthetic-installer', 'password': proof.PASSWORD}), request.args)
+                self.assertEqual({'form': True}, request.kwargs)
+        with patch.object(proof, 'call', return_value=(401, {})) as transport:
+            with self.assertRaises(AssertionError): case.operator_admin_token('http://fixture.invalid')
+            self.assertEqual(1, transport.call_count)
+
     def test_current_realm_direct_grant_contract_passes_read_only_verifier(self):
         before = self.read(); result = self.run_script('verify')
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
