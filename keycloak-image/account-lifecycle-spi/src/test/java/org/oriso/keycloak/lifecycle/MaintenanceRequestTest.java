@@ -129,6 +129,10 @@ public class MaintenanceRequestTest {
     origin.put("humanAuthority", "ORDINARY_ACCOUNT_OPERATIONS_V1");
     try { assertEquals("read", MaintenanceRequest.parse("read", ID, target).command()); }
     catch (WebApplicationException rejected) { fail("Reviewed ordinary nonsecret factor projection rejected with status " + rejected.getResponse().getStatus()); }
+    var foreignAuthority = target.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) foreignAuthority.path("target").path("origin")).put("humanAuthority", "UNREVIEWED");
+    try { MaintenanceRequest.parse("read", ID, foreignAuthority); fail("Unreviewed authority read projection accepted"); }
+    catch (WebApplicationException rejected) { assertEquals(400, rejected.getResponse().getStatus()); }
     for (var invalid : java.util.List.of(JSON.nullNode(), JSON.getNodeFactory().booleanNode(true), JSON.getNodeFactory().numberNode(1), JSON.getNodeFactory().textNode("OTP_SECRET"))) {
       var foreign = target.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode)foreign).set("include", invalid);
       try { MaintenanceRequest.parse("read", ID, foreign); fail("Unreviewed read projection accepted"); }
