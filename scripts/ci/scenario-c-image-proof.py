@@ -3,6 +3,7 @@
 
 import argparse
 import base64
+import copy
 from contextlib import contextmanager
 import hashlib
 import json
@@ -199,6 +200,85 @@ class InstalledImage(unittest.TestCase):
                                      body={} if method == "PUT" else None)
                     self.assertEqual(401, status)
 
+    def test_operator_scripts_preserve_current_and_migrate_legacy_magic_link_flow(self):
+        source = json.loads((ROOT / "realm.json").read_text())
+        aliases = ("direct-grant-2fa", "oriso-ordinary-password", "app-otp-conditional", "email-otp-conditional")
+        expected = {f["alias"]: [(e.get("authenticator", e.get("flowAlias")), e["requirement"], e["priority"])
+                    for e in sorted(f["authenticationExecutions"], key=lambda e: e["priority"])]
+                    for f in source["authenticationFlows"] if f["alias"] in aliases}
+        observations = {}
+        with self.container() as (name, base):
+            ready, token = self.await_start(name, base)
+            self.assertTrue(ready, "Operator proof requires the actual installed image")
+            docker("exec", "-i", name, "bash", "-s", input=
+                "/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 "
+                "--realm master --user synthetic-installer --password " + PASSWORD + "\n")
+            for variant in ("current", "legacy"):
+                realm = REALM + "-operator-" + variant
+                flows = copy.deepcopy(source["authenticationFlows"])
+                configs = copy.deepcopy(source["authenticatorConfig"])
+                for item in flows + configs: item.pop("id", None)
+                if variant == "legacy":
+                    flows = [f for f in flows if f["alias"] != "oriso-ordinary-password"]
+                    direct = next(f for f in flows if f["alias"] == "direct-grant-2fa")
+                    direct["authenticationExecutions"] = [
+                        {"authenticator": provider, "authenticatorFlow": False,
+                         "requirement": "REQUIRED", "priority": priority}
+                        for priority, provider in [(10, "direct-grant-validate-username"), (20, "direct-grant-validate-password")]
+                    ] + [e for e in direct["authenticationExecutions"]
+                         if e.get("flowAlias") in ("app-otp-conditional", "email-otp-conditional")]
+                status, _ = call(base, "POST", "/admin/realms", {
+                    "realm": realm, "enabled": True, "authenticationFlows": flows,
+                    "authenticatorConfig": configs, "directGrantFlow": "direct-grant-2fa",
+                    "browserFlow": source["browserFlow"], "emailTheme": source["emailTheme"]}, token=token)
+                self.assertEqual(201, status)
+
+                def read(path):
+                    status, body = call(base, "GET", "/admin/realms/" + realm + path, token=token)
+                    self.assertEqual(200, status, "Operator native read must succeed")
+                    return body
+
+                def snapshot():
+                    value = {}
+                    for alias in aliases:
+                        if variant == "legacy" and alias == "oriso-ordinary-password" and not migrated:
+                            continue
+                        entries = read("/authentication/flows/" + alias + "/executions")
+                        value[alias] = [e for e in entries if e.get("level", 0) == 0]
+                    return value
+
+                def contract(value):
+                    return {a: [(e.get("providerId", e.get("displayName")), e["requirement"], e["priority"])
+                                for e in entries] for a, entries in value.items()}
+
+                migrated = False
+                before = snapshot()
+                config_id = next(e["authenticationConfig"] for e in before["email-otp-conditional"]
+                                 if e.get("providerId") == "email-authenticator")
+                config_before = read("/authentication/config/" + config_id)
+                protected_ids = {e["id"] for a, entries in before.items() for e in entries
+                                 if variant == "current" or a in ("app-otp-conditional", "email-otp-conditional")}
+                first = None
+                for _ in range(2):
+                    docker("exec", "-i", "-e", "REALM=" + realm, name, "bash", "-s",
+                           input=(ROOT / "scripts/keycloak-apply-2fa-flow.sh").read_text())
+                    migrated = True
+                    docker("exec", "-e", "REALM=" + realm, name,
+                           "/opt/keycloak/bin/oriso-verify-2fa-flow.sh")
+                    after = snapshot()
+                    self.assertTrue(contract(after) == expected, "Actual operator flow must match the shipped realm exactly")
+                    self.assertTrue(protected_ids.issubset({e["id"] for entries in after.values() for e in entries}),
+                                    "Current Magic Link and OTP execution identities must survive")
+                    self.assertTrue(read("/authentication/config/" + config_id) == config_before,
+                                    "Original OTP configuration must survive")
+                    if first is not None:
+                        self.assertTrue(after == first, "Second apply must preserve all execution identities and settings")
+                    first = after
+                observations[variant] = {"exactRealmContract": True, "protectedExecutionIdsPreserved": True,
+                    "otpConfigurationPreserved": True, "secondApplyIdentical": True, "shippedVerifierPassed": True,
+                    "applyRuns": 2}
+        self.receipt["operatorFlowReconciliation"] = observations
+
     def test_installed_modules_refuse_invalid_shared_key_at_startup(self):
         with self.container(enabled=True, invalid_key=True) as (name, base):
             ready, _ = self.await_start(name, base)
@@ -237,8 +317,8 @@ def main():
     InstalledImage.image, InstalledImage.run_id = args.image, uuid.uuid4().hex
     before = source_manifest()
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(InstalledImage)
-    if suite.countTestCases() != 4:
-        raise SystemExit("Installed image case inventory must contain exactly four cases")
+    if suite.countTestCases() != 5:
+        raise SystemExit("Installed image case inventory must contain exactly five cases")
     result = unittest.TextTestRunner(verbosity=2, resultclass=XmlResult).run(suite)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     result.write_xml(args.report.with_suffix(".xml"), "installed-image")
@@ -249,10 +329,10 @@ def main():
         "errors": len(result.errors), "skipped": len(result.skipped),
         "sourceBefore": before, "sourceAfter": after,
         "installed": InstalledImage.receipt,
-        "scope": "installed image inventory, default-off, native routes and invalid startup only; not full Scenario C",
+        "scope": "installed image inventory, default-off, native routes, invalid startup and actual operator flow reconciliation; not full Scenario C",
     }
     report["accepted"] = (
-        result.wasSuccessful() and result.testsRun == 4 and not result.skipped
+        result.wasSuccessful() and result.testsRun == 5 and not result.skipped
         and before == after and len(InstalledImage.receipt.get("installedJarSha256", {})) == 3
     )
     args.report.write_text(json.dumps(report, indent=2) + "\n")
