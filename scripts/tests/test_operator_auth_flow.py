@@ -166,6 +166,19 @@ class OperatorAuthenticationFlowTests(unittest.TestCase):
                         for r in sorted(state['flows'][alias]['rows'], key=lambda r: r['priority'])]
                 for alias in [FLOW, PASSWORD_FLOW, 'app-otp-conditional', 'email-otp-conditional']}
 
+    def test_verifier_observation_retains_only_fixed_labels_never_native_output(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('operator_image_proof', ROOT / 'scripts/ci/scenario-c-image-proof.py')
+        proof = importlib.util.module_from_spec(spec); spec.loader.exec_module(proof)
+        private = 'bearer-private-secret subject-private-uuid password-private-value'
+        output = '  DRIFT direct-grant-2fa: ' + private + '\n  DRIFT forms: ' + private
+        self.assertEqual({'exit': 1, 'failedChecks': ['browserForms', 'directGrant'], 'unclassifiedFailure': False},
+                         proof.operator_verifier_observation(1, output))
+        self.assertEqual({'exit': 2, 'failedChecks': [], 'unclassifiedFailure': True},
+                         proof.operator_verifier_observation(2, private))
+        self.assertEqual({'exit': 0, 'failedChecks': [], 'unclassifiedFailure': False},
+                         proof.operator_verifier_observation(0, private))
+
     def test_current_realm_direct_grant_contract_passes_read_only_verifier(self):
         before = self.read(); result = self.run_script('verify')
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)

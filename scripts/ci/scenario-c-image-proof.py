@@ -52,6 +52,28 @@ def docker(*args, **kwargs):
     )
 
 
+def operator_verifier_observation(returncode, stdout):
+    # Output may contain private native data: retain only these source-known labels.
+    prefixes = {
+        "directBinding": "DRIFT directGrantFlow =",
+        "emailTheme": "DRIFT emailTheme =",
+        "browserBinding": "DRIFT browserFlow is unset",
+        "directGrant": "DRIFT direct-grant-2fa:",
+        "ordinaryPassword": "DRIFT oriso-ordinary-password:",
+        "appOtp": "DRIFT app-otp-conditional:",
+        "emailOtp": "DRIFT email-otp-conditional:",
+        "emailConfiguration": "DRIFT email-authenticator has no authenticatorConfig",
+        "browserForms": "DRIFT forms:",
+        "browserEmail": "DRIFT browser-email-otp-conditional:",
+        "browserHierarchy": "DRIFT browser does not contain a forms subflow",
+    }
+    lines = [line.lstrip() for line in stdout.splitlines()]
+    checks = sorted(label for label, prefix in prefixes.items()
+                    if any(line.startswith(prefix) for line in lines))
+    return {"exit": returncode, "failedChecks": checks,
+            "unclassifiedFailure": returncode != 0 and not checks}
+
+
 def source_manifest():
     paths = subprocess.run(
         ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True
@@ -207,6 +229,7 @@ class InstalledImage(unittest.TestCase):
                     for e in sorted(f["authenticationExecutions"], key=lambda e: e["priority"])]
                     for f in source["authenticationFlows"] if f["alias"] in aliases}
         observations = {}
+        self.receipt["operatorFlowReconciliation"] = observations
         with self.container() as (name, base):
             ready, token = self.await_start(name, base)
             self.assertTrue(ready, "Operator proof requires the actual installed image")
@@ -263,9 +286,20 @@ class InstalledImage(unittest.TestCase):
                     docker("exec", "-i", "-e", "REALM=" + realm, name, "bash", "-s",
                            input=(ROOT / "scripts/keycloak-apply-2fa-flow.sh").read_text())
                     migrated = True
-                    docker("exec", "-e", "REALM=" + realm, name,
-                           "/opt/keycloak/bin/oriso-verify-2fa-flow.sh")
                     after = snapshot()
+                    observations[variant] = {"applyCompleted": True,
+                        "nativeContractEqualsSource": contract(after) == expected,
+                        "nativeProtectedIdsPreserved": protected_ids.issubset(
+                            {e["id"] for entries in after.values() for e in entries}),
+                        "nativeOtpConfigurationPreserved": read("/authentication/config/" + config_id) == config_before}
+                    try:
+                        verified = docker("exec", "-e", "REALM=" + realm, name,
+                                          "/opt/keycloak/bin/oriso-verify-2fa-flow.sh")
+                        observations[variant]["verifier"] = operator_verifier_observation(0, verified.stdout)
+                    except subprocess.CalledProcessError as failure:
+                        observations[variant]["verifier"] = operator_verifier_observation(
+                            failure.returncode, failure.stdout or "")
+                        raise
                     self.assertTrue(contract(after) == expected, "Actual operator flow must match the shipped realm exactly")
                     self.assertTrue(protected_ids.issubset({e["id"] for entries in after.values() for e in entries}),
                                     "Current Magic Link and OTP execution identities must survive")
