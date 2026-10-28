@@ -119,6 +119,20 @@ public class MaintenanceRequestTest {
   }
 
   @Test
+  public void ordinarySelfConsultantGrantHasOnlyTheExistingGroupTransitionShape() {
+    var body=parse("{" + TARGET + ",\"operationId\":\"22222222-2222-4222-8222-222222222222\",\"expectedState\":\"" + "a".repeat(64) + "\",\"change\":{\"transition\":\"ADD_CONSULTANT_IDENTITY\",\"group\":\"/human-roles/consultant-agency-admin\"}}");
+    var origin=(com.fasterxml.jackson.databind.node.ObjectNode)body.path("target").path("origin");
+    origin.put("kind","HUMAN_ADMIN");origin.put("humanAuthority","ORDINARY_ACCOUNT_OPERATIONS_V1");
+    try { assertEquals("profile-transition",MaintenanceRequest.parse("profile-transition",ID,body).command()); }
+    catch(WebApplicationException refused){fail("Reviewed ordinary own Consultant grant shape refused with status "+refused.getResponse().getStatus());}
+    for(String transition:java.util.List.of("ADD_AGENCY_ADMIN_IDENTITY","REMOVE_ADMINISTRATOR_IDENTITY")){
+      var wrong=body.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("change")).put("transition",transition);
+      try{MaintenanceRequest.parse("profile-transition",ID,wrong);fail("Unreviewed ordinary identity transition accepted");}
+      catch(WebApplicationException refused){assertEquals(403,refused.getResponse().getStatus());}
+    }
+  }
+
+  @Test
   public void nonsecretFactorProjectionIsAnExplicitClosedHumanAdminRead() {
     var target = parse("{" + TARGET + "}");
     var origin = (com.fasterxml.jackson.databind.node.ObjectNode) target.path("target").path("origin");

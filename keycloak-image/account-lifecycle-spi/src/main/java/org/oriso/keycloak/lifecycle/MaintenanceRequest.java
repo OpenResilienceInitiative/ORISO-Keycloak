@@ -121,7 +121,10 @@ record MaintenanceRequest(
         if (!group.matches("/human-roles/[a-z0-9-]{1,80}")) deny();
       }
       case "profile-transition" -> {
-        if(workflow!=null||!"HUMAN_ADMIN".equals(kind)||!"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(authority))deny();
+        if(workflow!=null||!"HUMAN_ADMIN".equals(kind)
+            ||!Set.of("PROTECTED_ACCOUNT_OPERATIONS_V1","ORDINARY_ACCOUNT_OPERATIONS_V1").contains(authority))deny();
+        if("ORDINARY_ACCOUNT_OPERATIONS_V1".equals(authority)&&(!actualId.equals(subject)
+            ||!change.has("group")||!"ADD_CONSULTANT_IDENTITY".equals(change.path("transition").asText())))deny();
         if(change.has("group")){
           fields(change,"transition","group");
           if(!text(change,"group",512,false).matches("/human-roles/[a-z0-9-]{1,80}"))bad();

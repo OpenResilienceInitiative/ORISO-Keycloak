@@ -68,13 +68,27 @@ final class GeneralPolicy {
       fields(value,"sourceProfiles","targetProfiles","operations");
       var sources=operationStrings(value.path("sourceProfiles"),20,100);
       var targets=operationStrings(value.path("targetProfiles"),20,100);
-      var operations=operationStrings(value.path("operations"),2,80);
-      if(!Set.of("account.read","account.deactivate").containsAll(operations))bad();
+      var operations=operationStrings(value.path("operations"),5,80);
       for(String id:sources)if(profiles.stream().noneMatch(p->p.id.equals(id)&&Set.of("AGENCY_ADMIN","CONSULTANT_AGENCY_ADMIN").contains(LifecycleGroups.allowedKind(p.realmRoles))))bad();
-      for(String id:targets)if(profiles.stream().noneMatch(p->p.id.equals(id)&&Set.of("ASKER","CONSULTANT").contains(LifecycleGroups.allowedKind(p.realmRoles))))bad();
+      for(String id:targets){
+        var target=profiles.stream().filter(p->p.id.equals(id)).findFirst().orElse(null);
+        if(target==null||!ordinaryOperations(target).containsAll(operations))bad();
+        if("AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(target.realmRoles))
+            &&!operations.equals(Set.of("account.read","account.profile-transition")))bad();
+      }
       var grant=new OrdinaryGrant(sources,targets,operations);if(!unique.add(grant))bad();result.add(grant);
     }
     return List.copyOf(result);
+  }
+
+  private static Set<String> ordinaryOperations(Profile profile){
+    return switch(LifecycleGroups.allowedKind(profile.realmRoles)){
+      case "ASKER" -> Set.of("account.read","account.deactivate");
+      case "CONSULTANT" -> Set.of("account.read","account.deactivate","account.profile","account.ordinary-profile");
+      case "CONSULTANT_AGENCY_ADMIN" -> Set.of("account.read","account.profile","account.ordinary-profile","account.profile-transition");
+      case "AGENCY_ADMIN" -> Set.of("account.read","account.profile-transition");
+      default -> Set.of();
+    };
   }
 
   private static List<AdminGrant> parseAdminOperations(JsonNode config, Set<String> profileIds) {
@@ -232,8 +246,23 @@ final class GeneralPolicy {
       Profile current, Profile desired) {
     source.targetTenant(request.target().path("tenantId"));
     if(source.ordinaryProfile()!=null){
-      for(String selected:new HashSet<>(List.of(current.id,desired.id)))
-        if(ordinaryAdminOperations.stream().noneMatch(g->g.sources.contains(source.ordinaryProfile())&&g.targets.contains(selected)&&g.operations.contains(operation)))deny();
+      if(!ordinaryOperations(current).contains(operation)||!ordinaryOperations(desired).contains(operation))deny();
+      boolean self=source.subject().equals(request.accountId());
+      if(("AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(current.realmRoles))
+          ||"AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(desired.realmRoles))
+          ||"account.profile-transition".equals(operation))&&!self)deny();
+      if("profile-transition".equals(request.command())){
+        if(!"ADD_CONSULTANT_IDENTITY".equals(request.change().path("transition").asText())
+            ||!"AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(current.realmRoles))
+            ||!"CONSULTANT_AGENCY_ADMIN".equals(LifecycleGroups.allowedKind(desired.realmRoles))
+            ||!current.id.equals(source.ordinaryProfile())
+            ||ordinaryAdminOperations.stream().noneMatch(g->g.sources.containsAll(Set.of(current.id,desired.id))
+                &&g.targets.containsAll(Set.of(current.id,desired.id))
+                &&g.operations.containsAll(Set.of("account.read","account.profile-transition"))))deny();
+      }
+      var needed="account.ordinary-profile".equals(operation)?Set.of(operation,"account.profile"):Set.of(operation);
+      for(String selected:new HashSet<>(List.of(current.id,desired.id)))for(String required:needed)
+        if(ordinaryAdminOperations.stream().noneMatch(g->g.sources.contains(source.ordinaryProfile())&&g.targets.contains(selected)&&g.operations.contains(required)))deny();
       return;
     }
     for (var selected : new HashSet<>(List.of(current.id, desired.id)))

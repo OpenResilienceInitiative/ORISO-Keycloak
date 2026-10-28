@@ -84,6 +84,8 @@ def install_policy(cls, helper, protected):
     install_adopted_self(cls, helper, config)
     from adopted_admin_operations import install as install_adopted_admin
     install_adopted_admin(cls, helper, config)
+    from ordinary_consultant_operations import install as install_consultant_matrix
+    install_consultant_matrix(helper, config)
     # The retained adopted combined-profile extension applies only to its original grants.
     config['adminOperations'].append({'authority':'PLATFORM','selfOnly':False,'targetProfiles':['agency-admin-v1'],'operations':['account.delete']})
     command = cls.command.copy()

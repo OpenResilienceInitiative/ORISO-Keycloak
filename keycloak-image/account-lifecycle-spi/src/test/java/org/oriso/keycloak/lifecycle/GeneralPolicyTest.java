@@ -70,7 +70,7 @@ public class GeneralPolicyTest {
   }
 
   @Test
-  public void ordinaryOperatorsAreDefaultEmptyAndOnlyReviewOrdinaryReadAndDeactivation(){
+  public void ordinaryOperatorsAreDefaultEmptyAndKeepExactProfileVerbPairs(){
     var value=(com.fasterxml.jackson.databind.node.ObjectNode)policy("account.read");
     var source=((com.fasterxml.jackson.databind.node.ObjectNode)value.path("ordinaryProfiles").path(0)).deepCopy();
     source.put("id","agency-v1");source.put("groupId","agency-group");source.put("groupPath","/human-roles/agency-admin");
@@ -80,12 +80,29 @@ public class GeneralPolicyTest {
     var grant=value.putArray("ordinaryAdminOperations").addObject();grant.putArray("sourceProfiles").add("agency-v1");
     grant.putArray("targetProfiles").add("reviewed-consultant-v1");grant.putArray("operations").add("account.read").add("account.deactivate");
     assertNotNull(new GeneralPolicy(value));
-    for(String op:List.of("account.profile","account.delete","account.profile-transition","*")){
+    for(String op:List.of("account.delete","account.email","account.reactivate","otp.delete","account.profile-transition","*")){
       var wrong=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("ordinaryAdminOperations").path(0)).putArray("operations").add(op);rejectAdmin(wrong);
     }
     for(String field:List.of("sourceProfiles","targetProfiles")){
       var wrong=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("ordinaryAdminOperations").path(0)).putArray(field).add(field.equals("sourceProfiles")?"reviewed-consultant-v1":"agency-v1");rejectAdmin(wrong);
     }
+    var editable=value.deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)editable.path("ordinaryAdminOperations").path(0)).putArray("operations")
+        .add("account.read").add("account.profile").add("account.ordinary-profile");
+    try { assertNotNull(new GeneralPolicy(editable)); }
+    catch (WebApplicationException refused) { fail("Reviewed ordinary consultant edits refused with status " + refused.getResponse().getStatus()); }
+    var asker=source.deepCopy();asker.put("id","asker-v1");asker.put("groupId","asker-group");asker.put("groupPath","/human-roles/user");asker.putArray("realmRoles").add("user");
+    ((com.fasterxml.jackson.databind.node.ArrayNode)editable.path("ordinaryProfiles")).add(asker);
+    ((com.fasterxml.jackson.databind.node.ObjectNode)editable.path("ordinaryAdminOperations").path(0)).putArray("targetProfiles").add("asker-v1");
+    rejectAdmin(editable);
+    var combined=source.deepCopy();combined.put("id","combined-v1");combined.put("groupId","combined-group");combined.put("groupPath","/human-roles/consultant-agency-admin");
+    combined.putArray("realmRoles").add("consultant").add("group-chat-consultant").add("restricted-agency-admin").add("user-admin");
+    ((com.fasterxml.jackson.databind.node.ArrayNode)value.path("ordinaryProfiles")).add(combined);
+    var own=(com.fasterxml.jackson.databind.node.ObjectNode)value.path("ordinaryAdminOperations").path(0);
+    own.putArray("sourceProfiles").add("agency-v1").add("combined-v1");own.putArray("targetProfiles").add("agency-v1").add("combined-v1");
+    own.putArray("operations").add("account.read").add("account.profile-transition");
+    try { assertNotNull(new GeneralPolicy(value)); }
+    catch (WebApplicationException refused) { fail("Reviewed ordinary own Consultant grant refused with status " + refused.getResponse().getStatus()); }
     var extra=value.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)extra.path("ordinaryAdminOperations").path(0)).put("authority","PLATFORM");rejectAdmin(extra);
     var duplicate=value.deepCopy();((com.fasterxml.jackson.databind.node.ArrayNode)duplicate.path("ordinaryAdminOperations")).add(grant.deepCopy());rejectAdmin(duplicate);
   }

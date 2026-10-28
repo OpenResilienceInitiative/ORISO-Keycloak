@@ -135,7 +135,7 @@ class ScopedOtpEvidenceTest(unittest.TestCase):
                         protectedSelfAppNativeEffectAndExactRetryVerified=True)
         self.assertEqual('INPUT_OR_FIXTURE_ERROR', classify(complete))
         operations = {'otp.delete': 200, 'otp.email-finish': 201, 'otp.email-start': 202,
-                      'account.read': 200, 'account.profile': 200}
+                      'account.read': 200, 'account.profile': 200, 'account.email': 200}
         red = {operation: {'status': 403, 'expected': status, 'preconditions': True,
                            'unchangedOnDenial': True} for operation, status in operations.items()}
         self.assertEqual('GENUINE_PROTECTED_REMAINING_OPERATIONS403_BATCH_RED',

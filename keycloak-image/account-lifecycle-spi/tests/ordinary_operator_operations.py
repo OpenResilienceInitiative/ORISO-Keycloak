@@ -39,6 +39,7 @@ def exercise(test,helper,primary,observed):
         test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'read',{'target':wrong},human,403)[0])
         body={'target':target,'operationId':str(uuid.uuid4()),'expectedState':current['state'],'change':{}}
         test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'profile',dict(body,change={'firstName':'ungranted','lastName':'name','email':current['email']}),human,403)[0])
+        test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'ordinary-profile',dict(body,change={'group':'/human-roles/user','profile':{'firstName':'ungranted','lastName':'name','email':current['email']}}),human,403)[0])
         status,result=HumanMaintenanceFixture.invoke(helper,'deactivate',body,human,200);test.assertEqual(200,status)
         test.assertEqual('UPDATED',result['result']);test.assertFalse(helper.admin('GET','/users/'+target_account)['enabled'])
         test.assertEqual((status,result),HumanMaintenanceFixture.invoke(helper,'deactivate',body,human,200))

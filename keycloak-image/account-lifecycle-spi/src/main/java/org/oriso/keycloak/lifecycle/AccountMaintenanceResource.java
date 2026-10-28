@@ -329,7 +329,7 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
       boolean inactivity=request.workflow()!=null&&"INACTIVITY".equals(request.workflow().path("kind").asText());
       boolean importing=request.workflow()!=null&&"IMPORT".equals(request.workflow().path("kind").asText());
       boolean humanAdmin = (ProtectedAccountOperations.selected(request.target())
-          ||OrdinaryAdminSource.selected(request.target())&&"deactivate".equals(command))
+          ||OrdinaryAdminSource.selected(request.target())&&Set.of("deactivate","profile","ordinary-profile","profile-transition").contains(command))
           && "HUMAN_ADMIN".equals(request.target().path("origin").path("kind").asText())
           && Set.of("profile", "email", "ordinary-profile", "deactivate", "reactivate", "reassign-tenant", "profile-transition").contains(command);
       if (!("SELF".equals(request.target().path("origin").path("kind").asText()) || humanAdmin || inactivity || importing)) deny();

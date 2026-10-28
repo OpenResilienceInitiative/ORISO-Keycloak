@@ -335,6 +335,8 @@ class ProtectedOperationRead(PeerReadiness):
         pure_deletion(self,helper,primary,o)
         from ordinary_operator_operations import exercise as ordinary_operator
         ordinary_operator(self,helper,primary,o)
+        from ordinary_consultant_operations import exercise as ordinary_consultant
+        ordinary_consultant(self,helper,primary,o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 
@@ -604,7 +606,7 @@ def classify(observed):
             if observed.get('protectedSelfAppSetupStatus') == 201 and observed.get('protectedSelfAppNativeEffectAndExactRetryVerified') is True:
                 remaining = observed.get('remainingOperations')
                 operations = {'otp.delete': 200, 'otp.email-finish': 201, 'otp.email-start': 202,
-                              'account.read': 200, 'account.profile': 200}
+                              'account.read': 200, 'account.profile': 200, 'account.email': 200}
                 if not isinstance(remaining, dict) or set(remaining) != set(operations):
                     return 'INPUT_OR_FIXTURE_ERROR'
                 if any(row.get('preconditions') is not True for row in remaining.values()):

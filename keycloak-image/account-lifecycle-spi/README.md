@@ -89,12 +89,30 @@ unchanged. Null, malformed or mismatched original capsules are never backfilled
 or rebound. A protected adoption keeps its authenticated adoption birth.
 
 `ordinaryAdminOperations` is optional and empty by default. Each entry names exact
-`sourceProfiles`, `targetProfiles`, and `operations`. Only native ordinary
-AGENCY_ADMIN/CONSULTANT_AGENCY_ADMIN sources, positive same tenant, and
-ASKER/CONSULTANT targets may receive `account.read` or `account.deactivate`.
+`sourceProfiles`, `targetProfiles`, and `operations`; profile IDs resolve their
+reviewed installed versions. Only current ordinary AGENCY_ADMIN or combined
+Consultant/Agency Admin sources with positive same tenant are eligible.
+ASKER targets permit read/deactivate only. Consultant targets additionally permit
+full `account.profile` and preserving `account.ordinary-profile`; the latter also
+requires `account.profile` on both current and desired profiles. Combined targets
+permit Consultant read/profile/group-chat edits but never whole-account deactivate.
+Profile/operation cross-products cannot grant Consultant edits to an ASKER.
 `HUMAN_ADMIN` selects `ORDINARY_ACCOUNT_OPERATIONS_V1`; current native human/session,
-full grants, original birth and immutable lineage are checked again on retry.
-UserService still independently checks its current SQL agency relationship.
+full grants, original source/target birth and immutable lineage are rechecked on
+retry. The same read grant may request only `TWO_FACTOR_STATUS_V1` booleans, not OTP
+material or administrative OTP mutation. UserService independently checks its
+current SQL agency relationship.
+
+The only ordinary-source identity transition is same-account
+`ADD_CONSULTANT_IDENTITY` with an existing reviewed ordinary `group`. Its grant must
+explicitly include both original Agency Admin and exact desired combined profile
+in `sourceProfiles` and `targetProfiles`, with `account.read` and
+`account.profile-transition`. Declare each legitimate group-chat/non-group-chat
+variant. Missing destination acknowledgement refuses before effect. Pure Agency
+Admin read is restricted to the caller's own identity; peer Admin CRUD, arbitrary
+roles, tenant/family changes, ADD_AGENCY_ADMIN and Administrator removal are not
+conferred. A fresh native token after the acknowledged addition can replay the
+original exact operation; stale or unrelated grant drift remains refused.
 
 `profile-transition` accepts `REMOVE_ADMINISTRATOR_IDENTITY` only with a reviewed
 ordinary Consultant `group`. It preserves precisely the current Consultant role
