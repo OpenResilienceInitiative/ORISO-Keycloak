@@ -216,7 +216,7 @@ def exercise(test, helper, primary, peer, observed):
         current_native = helper.admin('GET', '/users/' + account)
         login_status, login = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
             {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': current_native['username'],
-             'password': 'Finite-reactivation-fixture-937451', 'scope': 'openid'}, form=True)
+             'password': opaque_password, 'scope': 'openid'}, form=True)
         test.assertEqual(200, login_status)
         encoded = login['access_token'].split('.')[1]
         claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
