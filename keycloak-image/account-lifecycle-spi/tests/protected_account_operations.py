@@ -296,6 +296,9 @@ class ProtectedOperationRead(PeerReadiness):
         from protected_adoption_operations import exercise as adoption
         terminal(self, helper, primary, admin_target, o)
         ordinary(self, helper, primary, (account, human), o)
+        # Read the pinned adopted accounts before the original suite replaces one UUID.
+        from ordinary_consultant_operations import exercise as ordinary_consultant
+        ordinary_consultant(self,helper,primary,o)
         from adopted_admin_operations import exercise as adopted_admin
         adopted_admin(self, helper, (account, human), o)
         from causal_password_operations import exercise as adopted_causal
@@ -335,8 +338,6 @@ class ProtectedOperationRead(PeerReadiness):
         pure_deletion(self,helper,primary,o)
         from ordinary_operator_operations import exercise as ordinary_operator
         ordinary_operator(self,helper,primary,o)
-        from ordinary_consultant_operations import exercise as ordinary_consultant
-        ordinary_consultant(self,helper,primary,o)
         from profile_transition_operations import self_source_policy_boundary
         self_source_policy_boundary(self, helper, o)
 
