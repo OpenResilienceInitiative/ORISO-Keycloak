@@ -8,19 +8,11 @@ from profile_transition_operations import committed_kind, human_target
 
 
 def install(helper, config):
-    parent=helper.group_id('/protected-admins')
-    helper.admin('POST','/groups/'+parent+'/children',{'name':'platform-consultants'})
-    source=next(p for p in config['profiles'] if p['id']=='platform-v1')
-    profile=copy.deepcopy(source);profile.update(id='platform-consultant-v2',version=2,
-        groupId=helper.group_id('/protected-admins/platform-consultants'),groupPath='/protected-admins/platform-consultants',
-        realmRoles=sorted(set(source['realmRoles'])|{'consultant','group-chat-consultant'}))
-    helper.admin('POST','/groups/'+profile['groupId']+'/role-mappings/realm',
-        [helper.admin('GET','/roles/'+role) for role in profile['realmRoles']])
-    config['bindings'][0]['accountOperations'].append({'authority':'PLATFORM','selfOnly':False,'targetProfiles':sorted(['platform-v1', next(p['id'] for p in config['profiles'] if p['kind']=='TENANT_ADMIN' and 'consultant' not in p['realmRoles'])]),'operations':['account.delete']})
-    config['profiles'].append(profile)
-    config['bindings'][0]['protectedProfileIds']=sorted(config['bindings'][0]['protectedProfileIds']+[profile['id']])
+    # install_self_source already installs the reviewed platform combined profile.
     config['bindings'][0]['accountOperations'].append({'authority':'PLATFORM','selfOnly':False,
-        'targetProfiles':sorted(['platform-v1',profile['id']]),'operations':['account.profile-transition','account.read']})
+        'targetProfiles':sorted(['platform-v1', next(p['id'] for p in config['profiles']
+            if p['kind']=='TENANT_ADMIN' and 'consultant' not in p['realmRoles'])]),
+        'operations':['account.delete']})
     return config
 
 

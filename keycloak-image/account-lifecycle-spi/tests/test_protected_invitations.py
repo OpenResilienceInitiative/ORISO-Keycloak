@@ -276,9 +276,9 @@ class ProtectedInvitations(
         setup_audiences = [
             "agencyservice",
             "consultingtypeservice",
+            "oriso-task-commands",
             "tenantservice",
             "userservice",
-            "oriso-task-commands",
         ]
         setup_mapper_base = (
             "/clients/" + helper.client_ids["SETUP"] + "/protocol-mappers/models"
