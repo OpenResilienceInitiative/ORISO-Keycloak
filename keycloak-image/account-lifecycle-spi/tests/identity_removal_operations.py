@@ -117,7 +117,7 @@ def consultant_removal(test, helper, primary, observed):
             if family == 'ORDINARY':
                 account, creation = committed_kind(test, helper, 'CONSULTANT_AGENCY_ADMIN', 'consultant-agency-admin')
             elif family == 'ADOPTED_ORDINARY':
-                account = type(helper).adopted_admin_cases['consultant-agency-admin'][0]
+                account = type(helper).adopted_admin_cases['INVERSE.consultant-agency-admin'][0]
                 creation = {'account': {'username': helper.admin('GET', '/users/' + account)['username']}}
             else:
                 account, creation = protected_created(test, helper, family == 'PLATFORM_ADMIN')

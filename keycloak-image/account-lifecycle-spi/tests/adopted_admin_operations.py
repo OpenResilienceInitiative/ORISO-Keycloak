@@ -36,6 +36,8 @@ def install(cls, helper, config):
     cases += [('IMPORT.' + group + '.' + source, group) for group in ['consultant', 'consultant-agency-admin']
         for source in ['HUMAN_ADMIN', 'IMPORT']]
     cases += [('IMPORT.ungranted', 'consultant-basic'), ('IMPORT.unreviewed', 'consultant'), ('INACTIVITY.incarnation', 'user')]
+    # Separate adopted incarnation: the original combined case is deliberately recreated below.
+    cases += [('INVERSE.consultant-agency-admin', 'consultant-agency-admin')]
     for label, group in cases:
         username = 'legacy-admin-' + uuid.uuid4().hex
         password = LifecycleFixture.creation(helper)['account']['password']
