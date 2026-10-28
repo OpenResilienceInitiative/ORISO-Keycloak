@@ -26,9 +26,15 @@ import os
 from pathlib import Path
 import uuid
 from lifecycle_fixture import LifecycleFixture
+from installed_key_guards import lifecycle_encoding_guard_names
 
 
 class LifecyclePermissions(LifecycleFixture, unittest.TestCase):
+    def setUp(self):
+        # Match the existing Maria fixture: use a current master installer grant.
+        type(self).ready()
+        super().setUp()
+
     def test_disabled_create_then_atomic_first_commit_and_no_enable_replay(self):
         attempt = str(uuid.uuid4())
         create = self.creation()
@@ -1273,8 +1279,14 @@ class InvalidLifecycleConfiguration(unittest.TestCase):
                     output = subprocess.run(
                         ["docker", "logs", name], capture_output=True, text=True
                     )
+                    guards = lifecycle_encoding_guard_names(output.stdout + output.stderr)
+                    type(self).invalid_key_startup = {
+                        "containerExited": state["Running"] is False,
+                        "nonzeroExitVerified": state["ExitCode"] != 0,
+                        "guardNames": guards,
+                    }
                     self.assertTrue(
-                        "Lifecycle key must be base64" in output.stdout + output.stderr,
+                        guards,
                         "Startup must fail for the deliberately invalid context key",
                     )
                     break

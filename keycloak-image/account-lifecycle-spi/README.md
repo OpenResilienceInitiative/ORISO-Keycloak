@@ -69,3 +69,84 @@ Image installation, chart activation, current UserService outbox/domain adapters
 protected onboarding, scoped maintenance/OTP, native grant reconciliation, human
 review and deployed browser/mail acceptance must be coordinated. This isolated
 receiver does not declare those other parts complete or activate production.
+
+### Explicit activation and retained native provenance
+
+The existing lifecycle receiver exposes a fixed `POST v1/installation-status` with
+body `{}`. It requires the current ACCOUNT_ADMIN bearer and the ordinary common-key
+proof (`ACCOUNT_MAINTENANCE`, `installation.status`, target
+`realm/<native-realm-id>/installation`). It reports the loaded ordinary/protected
+policy, actor bindings, ordinary group fingerprints, context-key version and the
+three actually loaded provider JAR fingerprints. It neither queries accounts nor
+changes authority. Deployment activation must compare the runtime result and run
+behavioral probes; supplied build metadata is not runtime evidence.
+
+All new lifecycle creations pin the positive native `CREATED_TIMESTAMP` in one
+nullable `ORIGINAL_NATIVE_JSON` capsule on the existing attempt row. The original
+`ordinary-creation-native-birth/v1` MAC domain and common key are retained for both
+ordinary and protected creations. Existing external creation/receipt bytes are
+unchanged. Null, malformed or mismatched original capsules are never backfilled
+or rebound. A protected adoption keeps its authenticated adoption birth.
+
+`ordinaryAdminOperations` is optional and empty by default. Each entry names exact
+`sourceProfiles`, `targetProfiles`, and `operations`; profile IDs resolve their
+reviewed installed versions. Only current ordinary AGENCY_ADMIN or combined
+Consultant/Agency Admin sources with positive same tenant are eligible.
+ASKER targets permit read/deactivate only. Consultant targets additionally permit
+full `account.profile` and preserving `account.ordinary-profile`; the latter also
+requires `account.profile` on both current and desired profiles. Combined targets
+permit Consultant read/profile/group-chat edits but never whole-account deactivate.
+Profile/operation cross-products cannot grant Consultant edits to an ASKER.
+`HUMAN_ADMIN` selects `ORDINARY_ACCOUNT_OPERATIONS_V1`; current native human/session,
+full grants, original source/target birth and immutable lineage are rechecked on
+retry. The same read grant may request only `TWO_FACTOR_STATUS_V1` booleans, not OTP
+material or administrative OTP mutation. UserService independently checks its
+current SQL agency relationship.
+
+The only ordinary-source identity transition is same-account
+`ADD_CONSULTANT_IDENTITY` with an existing reviewed ordinary `group`. Its grant must
+explicitly include both original Agency Admin and exact desired combined profile
+in `sourceProfiles` and `targetProfiles`, with `account.read` and
+`account.profile-transition`. Declare each legitimate group-chat/non-group-chat
+variant. Missing destination acknowledgement refuses before effect. Pure Agency
+Admin read is restricted to the caller's own identity; peer Admin CRUD, arbitrary
+roles, tenant/family changes, ADD_AGENCY_ADMIN and Administrator removal are not
+conferred. A fresh native token after the acknowledged addition can replay the
+original exact operation; stale or unrelated grant drift remains refused.
+
+`profile-transition` accepts `REMOVE_ADMINISTRATOR_IDENTITY` only with a reviewed
+ordinary Consultant `group`. It preserves precisely the current Consultant role
+subset and complete client roles, native UUID, tenant, credentials, enabled state
+and profile fields. Protected-to-ordinary transfer appends an authenticated step
+to the existing lineage and retains the original protected creation/adoption
+anchor. Both original and destination operation grants are required on first
+execution and saved replay. Tenant zero remains eligible for ordinary SELF only
+when the original PLATFORM_ADMIN anchor and that preserving transfer authenticate;
+it is not an ordinary creation/adoption or restricted-operator exception.
+
+Pure Administrators use the existing `delete` command, unchanged body4/change `{}`
+and DELETED receipt11, with `HUMAN_ADMIN` and explicit `account.delete` grants over
+exact pure profiles. Consultant-bearing profiles are refused. A retry rechecks
+current human authority and historical native provenance after account removal;
+a recreated native UUID is refused and preserved. No generic native deletion
+power is granted. Deployment defaults do not install either new operation grant.
+
+### Consultant-only identity removal
+
+The existing `profile-transition` command accepts the fixed
+`REMOVE_CONSULTANT_IDENTITY` transition. Ordinary combined accounts select their
+reviewed pure Administrator group; protected combined accounts select the exact
+pure Administrator profile id/version. The transition removes only `consultant`
+and `group-chat-consultant`, preserves every other realm/client role, and keeps
+the original UUID, tenant, enabled state, credentials, profile and complete
+creation/adoption lineage.
+
+A restricted ordinary Administrator needs the existing explicit read/transition
+grants for both source and destination profiles and current target-tenant reach.
+Its stored removal replay verifies the remaining Administrator through a private
+original-operation frame; general peer Administrator reads and CRUD remain
+closed. Own removal requires declared current/destination source variants and a
+fresh same-human JWT after the role change. A later Consultant re-addition cannot
+borrow an old removal receipt: replay verifies the original removal is still the
+current role-lineage head. UserService must separately preserve Administrator SQL
+and prevent scheduled Consultant cleanup from deleting the remaining native user.

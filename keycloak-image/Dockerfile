@@ -11,7 +11,13 @@ FROM ${MAVEN_IMAGE} AS maven-build
 ENV MAVEN_OPTS="-Xmx512m -XX:MaxMetaspaceSize=256m -XX:ActiveProcessorCount=2"
 WORKDIR /build
 
-FROM maven-build AS spi-build
+FROM maven-build AS lifecycle-build
+COPY account-lifecycle-spi/pom.xml .
+COPY account-lifecycle-spi/src ./src
+RUN mvn -q -B install -DskipTests
+
+FROM lifecycle-build AS spi-build
+WORKDIR /build/otp
 COPY otp-config-spi/pom.xml .
 COPY otp-config-spi/api ./api
 COPY otp-config-spi/src ./src
@@ -22,13 +28,8 @@ COPY smtp-control-spi/pom.xml .
 COPY smtp-control-spi/src ./src
 RUN mvn -q -B package -DskipTests
 
-FROM maven-build AS lifecycle-build
-COPY account-lifecycle-spi/pom.xml .
-COPY account-lifecycle-spi/src ./src
-RUN mvn -q -B package -DskipTests
-
 FROM ${KEYCLOAK_IMAGE} AS builder
-COPY --from=spi-build /build/target/keycloak-otp-config-spi-*-keycloak.jar /opt/keycloak/providers/
+COPY --from=spi-build /build/otp/target/keycloak-otp-config-spi-*-keycloak.jar /opt/keycloak/providers/
 COPY --from=smtp-build /build/target/smtp-control-spi-1.0-SNAPSHOT.jar /opt/keycloak/providers/
 COPY --from=lifecycle-build /build/target/account-lifecycle-spi-1.0-SNAPSHOT.jar /opt/keycloak/providers/
 COPY themes/ /opt/keycloak/themes/
