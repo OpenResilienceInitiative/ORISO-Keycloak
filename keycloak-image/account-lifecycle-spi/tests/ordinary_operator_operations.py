@@ -49,6 +49,25 @@ def exercise(test,helper,primary,observed):
             test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'read',factor_body,human,403)[0])
         finally:helper.admin('POST','/groups/'+source_group+'/role-mappings/realm',[role])
         records['currentOrdinarySource']={'readAndDeactivate':True,'nonsecretFactorProjectionSameGrantAndState':True,'crossTenantAndUnreviewedOperationDenied':True,'exactRetry':True,'withdrawnSourceGrantReplayDenied':True}
+        # A replacement source logs in with a fresh, valid native session; old-token rejection
+        # alone would not prove that original ordinary source birth remains pinned.
+        source_target,source_target_creation=committed_kind(test,helper,'ASKER','user')
+        helper.account_id=source_target;helper.creation_input=source_target_creation
+        source_target_ref=human_target(helper,source_target,helper.admin('GET','/users/'+source_target))
+        status,before_source=HumanMaintenanceFixture.invoke(helper,'read',{'target':source_target_ref},primary,200)
+        test.assertEqual(200,status)
+        replace_native(test,helper,source)
+        helper.admin('PUT','/users/'+source+'/reset-password',{'type':'password','value':source_creation['account']['password'],'temporary':False})
+        fresh_status,fresh=call(helper.base,'POST','/realms/'+REALM+'/protocol/openid-connect/token',
+            {'grant_type':'password','client_id':'protected-human-web','username':source_native['username'],
+             'password':source_creation['account']['password'],'scope':'openid'},form=True)
+        test.assertEqual(200,fresh_status)
+        source_target_ref['origin'].update(humanSubject=source,humanAuthority='ORDINARY_ACCOUNT_OPERATIONS_V1')
+        test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'read',{'target':source_target_ref},fresh['access_token'],403)[0])
+        source_mutation={'target':source_target_ref,'operationId':str(uuid.uuid4()),'expectedState':before_source['state'],'change':{}}
+        test.assertEqual(403,HumanMaintenanceFixture.invoke(helper,'deactivate',source_mutation,fresh['access_token'],403)[0])
+        test.assertTrue(helper.admin('GET','/users/'+source_target)['enabled'])
+        records['recreatedSource']={'sameUuidFreshNativeLoginVerified':True,'readAndMutationDenied':True,'targetUnchanged':True}
         for phase in ('before-first-read','between-read-and-effect'):
             account,creation=committed_kind(test,helper,'ASKER','user');helper.account_id=account;helper.creation_input=creation
             target=human_target(helper,account,helper.admin('GET','/users/'+account))
