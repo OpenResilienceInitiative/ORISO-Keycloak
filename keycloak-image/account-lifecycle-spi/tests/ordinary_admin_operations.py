@@ -182,8 +182,16 @@ def exercise(test, helper, primary, peer, observed):
             fresh = helper.admin('GET', '/users/' + account); fresh['enabled'] = False
             helper.admin('PUT', '/users/' + account, fresh)
         native = helper.admin('GET', '/users/' + account)
+        opaque_password = 'Finite-reactivation-\n\t fixture-937451'
         invoke('reactivate', {'expectedUsername': native['username'], 'expectedEmail': native['email'],
-                              'password': 'Finite-reactivation-fixture-937451'})
+                              'password': opaque_password})
+        login_status, login = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
+            {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': native['username'],
+             'password': opaque_password, 'scope': 'openid'}, form=True)
+        test.assertEqual(200, login_status)
+        claims = login['access_token'].split('.')[1]
+        test.assertEqual(account, json.loads(base64.urlsafe_b64decode(claims + '=' * (-len(claims) % 4)))['sub'])
+        records['account.reactivate']['opaqueChosenPasswordExactNativeLogin'] = True
         # An actual independently committed peer from tenant17 cannot touch tenant11.
         cross = copy.deepcopy(target); cross['origin']['humanSubject'] = peer[0]
         status, _ = HumanMaintenanceFixture.invoke(helper, 'read', {'target': cross}, peer[1], 403)

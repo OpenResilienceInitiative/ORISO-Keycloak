@@ -97,13 +97,13 @@ record MaintenanceRequest(
       }
       case "password" -> {
         fields(change, "password", "temporary");
-        text(change, "password", 4096, false);
+        password(change, "password");
         if (!change.path("temporary").isBoolean()) bad();
       }
       case "self-password" -> {
         fields(change, "currentPassword", "password", "temporary");
-        text(change, "currentPassword", 4096, false);
-        text(change, "password", 4096, false);
+        password(change, "currentPassword");
+        password(change, "password");
         if (!change.path("temporary").isBoolean() || change.path("temporary").asBoolean()) bad();
         if (change.path("currentPassword").equals(change.path("password")))
           throw new jakarta.ws.rs.ClientErrorException("The new password must differ", 409);
@@ -141,7 +141,7 @@ record MaintenanceRequest(
         fields(change, "expectedUsername", "expectedEmail", "password");
         text(change, "expectedUsername", 255, false);
         text(change, "expectedEmail", 255, false);
-        text(change, "password", 4096, false);
+        password(change, "password");
       }
       case "reassign-tenant" -> {
         fields(change, "tenantId"); String desired = text(change,"tenantId",19,false);
@@ -152,6 +152,11 @@ record MaintenanceRequest(
       default -> bad();
     }
     return new MaintenanceRequest(command, accountId, target.deepCopy(), operationId, state, change.deepCopy(), deadline, null, workflow);
+  }
+
+  private static void password(JsonNode change, String field) {
+    JsonNode secret = change.path(field);
+    if (!secret.isTextual() || secret.textValue().isEmpty() || secret.textValue().length() > 4096) bad();
   }
 
   void requireEffectDeadline() {

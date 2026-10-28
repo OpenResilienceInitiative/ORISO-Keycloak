@@ -41,7 +41,7 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         self.units()
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertTrue(result["accepted"])
-        self.assertEqual(71, result["tests"])
+        self.assertEqual(73, result["tests"])
 
     def test_missing_reports_cannot_pass(self):
         self.assertFalse(sanitize_units(self.reports, self.root / "safe.xml")["accepted"])
@@ -57,7 +57,7 @@ class MaintenanceEvidenceGate(unittest.TestCase):
         result = sanitize_units(self.reports, self.root / "safe.xml")
         self.assertFalse(result["accepted"])
         self.assertNotIn("private-do-not-copy", (self.root / "safe.xml").read_text())
-        self.assertEqual(71, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
+        self.assertEqual(73, len(ET.parse(self.root / "safe.xml").findall(".//testcase")))
 
     def test_suite_counters_cannot_hide_a_failure_without_a_method_node(self):
         self.units()

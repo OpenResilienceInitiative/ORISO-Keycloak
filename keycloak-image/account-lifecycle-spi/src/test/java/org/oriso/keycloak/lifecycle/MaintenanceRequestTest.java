@@ -236,6 +236,37 @@ public class MaintenanceRequestTest {
     }
   }
 
+  @Test
+  public void actualSecretFieldsPreserveOpaqueControlsAndWhitespace() {
+    for (String secret : java.util.List.of("opaque\nvalue", "\t", "   ")) {
+      for (String operation : java.util.List.of("password", "self-password", "reactivate")) {
+        var change = JSON.createObjectNode().put("password", secret);
+        if (operation.equals("reactivate")) change.put("expectedUsername", "original").put("expectedEmail", "original@example.invalid");
+        else change.put("temporary", false);
+        if (operation.equals("self-password")) change.put("currentPassword", "original-" + secret);
+        var result = accepted(operation, canonical(change));
+        assertEquals(secret, result.change().path("password").textValue());
+        if (operation.equals("self-password")) assertEquals("original-" + secret, result.change().path("currentPassword").textValue());
+        assertFalse(result.toString().contains("opaque"));
+      }
+    }
+  }
+
+  @Test
+  public void opaqueSecretBoundsDoNotRelaxAnyIdentifierOrSecretType() {
+    for (String operation : java.util.List.of("password", "self-password", "reactivate")) {
+      for (var bad : java.util.List.of(JSON.nullNode(), JSON.valueToTree(7), JSON.valueToTree(""), JSON.valueToTree("x".repeat(4097)))) {
+        var change = JSON.createObjectNode(); change.set("password", bad);
+        if (operation.equals("reactivate")) change.put("expectedUsername", "original").put("expectedEmail", "original@example.invalid");
+        else change.put("temporary", false);
+        if (operation.equals("self-password")) change.put("currentPassword", "original");
+        rejected(operation, canonical(change));
+      }
+    }
+    rejected("reactivate", canonical(JSON.createObjectNode().put("expectedUsername", "invalid\nname").put("expectedEmail", "original@example.invalid").put("password", "valid")));
+    rejected("locale", canonical(JSON.createObjectNode().put("locale", "\t")));
+  }
+
   private static MaintenanceRequest accepted(String operation, String change) {
     try {
       return MaintenanceRequest.parse(operation, ID, parse(command(change)));

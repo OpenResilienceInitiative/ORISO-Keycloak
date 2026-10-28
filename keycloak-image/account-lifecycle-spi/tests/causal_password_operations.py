@@ -71,7 +71,7 @@ def exercise(test, helper, observed, adopted=False):
         extra = copy.deepcopy(read); extra['workflow']['humanAuthority'] = 'PLATFORM'
         test.assertEqual(400, invoke(helper, account, 'account.password-reset.read', extra)[0])
         body = {**read, 'operationId': str(uuid.uuid4()), 'expectedState': current['state'],
-                'change': {'password': 'Native-causal-fixture-' + uuid.uuid4().hex, 'temporary': False}}
+                'change': {'password': 'Native-causal-fixture-\n\t ' + uuid.uuid4().hex, 'temporary': False}}
         before_events = {event['id'] for event in helper.admin('GET', '/admin-events?max=100')
             if event.get('resourcePath') == 'accounts/' + account}
         status, result = invoke(helper, account, 'account.password-reset', body)
@@ -97,6 +97,7 @@ def exercise(test, helper, observed, adopted=False):
             conflict_status, conflict = invoke(helper, account, 'account.password-reset.read', changed_workflow)
             test.assertEqual(409, conflict_status); test.assertNotIn('receipt', conflict)
             records[label]['effectAndExactRetryVerified'] = True
+            records[label]['opaqueChosenPasswordExactNativeLogin'] = True
             records[label]['exactSavedReadAndClaimReservationVerified'] = True
         if status == 200:
             added = [event for event in helper.admin('GET', '/admin-events?max=100')

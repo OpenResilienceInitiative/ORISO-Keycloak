@@ -35,6 +35,21 @@ def exercise(test, helper, tenant, observed):
                          ('AGENCY_ADMIN', 'agency-admin'), ('CONSULTANT_AGENCY_ADMIN', 'consultant-agency-admin')]:
         account, creation = committed_kind(test, helper, kind, group)
         cases.append(('ORDINARY.' + ('USER' if kind == 'ASKER' else kind), account, creation['account']['password']))
+    opaque_chosen = {}
+    for label, original, chosen in [('LF', 'Original\nopaque', 'Chosen\nopaque'),
+                                     ('TAB', '\t', '\t\t'), ('SPACE', '   ', '    ')]:
+        creation = LifecycleFixture.creation(helper, kind='ASKER', group='user')
+        creation['account']['password'] = original
+        creation['identity']['creationFingerprint'] = mac('creation-payload', {
+            'scope': creation['identity']['scope'], 'account': creation['account']})
+        attempt = str(uuid.uuid4())
+        status, opened = LifecycleFixture.request(helper, 'create', attempt, creation)
+        test.assertEqual(201, status)
+        status, committed = LifecycleFixture.request(helper, 'commit', attempt,
+            LifecycleFixture.finish(helper, creation, opened))
+        test.assertEqual(200, status); test.assertEqual('COMMITTED', committed['state'])
+        cases.append(('OPAQUE.' + label, opened['accountId'], original))
+        opaque_chosen[opened['accountId']] = chosen
     initial = LifecycleFixture.creation(helper)['account']['password']
     cases += [('PROTECTED.TENANT_ADMIN_DUAL', tenant[0], initial),
               ('PROTECTED.PLATFORM_ADMIN', type(helper).new_platform_account, initial)]
@@ -69,7 +84,7 @@ def exercise(test, helper, tenant, observed):
                 test.assertEqual(200, read_status); test.assertEqual(account, current['id']); test.assertTrue(current['enabled'])
                 test.assertEqual(roles, set(current['effectiveRoles']))
                 deadline = int(time.time()) + (5 if label == 'ORDINARY.CONSULTANT' else 180)
-                password = 'Actual-Self-Password-' + uuid.uuid4().hex
+                password = opaque_chosen.get(account, 'Actual-Self-Password-' + uuid.uuid4().hex)
                 body = {'target': target, 'operationId': work, 'expectedState': current['state'],
                     'authorityValidUntil': deadline, 'change': {'currentPassword': old_password, 'password': password, 'temporary': False}}
                 status, result = HumanMaintenanceFixture.invoke(helper, 'self-password', body, human, 200)
@@ -91,6 +106,8 @@ def exercise(test, helper, tenant, observed):
                 test.assertEqual((200, result), HumanMaintenanceFixture.invoke(helper, 'self-password', body, fresh, 200))
                 test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
                 record['durableChosenPasswordAndExactReplayWithoutSecondEffect'] = True
+                if account in opaque_chosen:
+                    record['opaqueOriginalCreationVerificationAndChosenPasswordExactNativeLogin'] = True
                 if hash_boundary: record['oldHashPolicyCannotOverwriteNewPasswordAfterCommit'] = True
                 wrong = copy.deepcopy(body); wrong['operationId'] = str(uuid.uuid4()); wrong['change']['currentPassword'] = 'wrong-current-password'
                 read_status, now = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, fresh, 200)
