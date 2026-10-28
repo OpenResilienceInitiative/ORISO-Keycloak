@@ -61,6 +61,34 @@ public final class AccountMaintenanceResource implements RealmResourceProvider {
   }
 
   @POST
+  @Path("v1/availability/invitation-email")
+  public Response invitationEmailAvailability(byte[] raw,
+      @HeaderParam("X-ORISO-Task-Context") String proof,
+      @HeaderParam("X-ORISO-Human-Authorization") String rawHumanBearer) {
+    return guarded(() -> {
+      var machine=auth.requireMachine(session,"ACCOUNT_ADMIN");
+      var body=parse(raw);
+      var realm=session.getContext().getRealm();
+      auth.verifyCommand(proof,machine,"oriso-account-maintenance","ACCOUNT_MAINTENANCE",
+          "account.invitation-email-availability","POST","realm/"+realm.getId()+"/availability/invitation-email",body);
+      var request=InvitationEmailAvailability.parse(body);
+      var tenant=request.tenantId()==null?JSON.getNodeFactory().nullNode():JSON.valueToTree(request.tenantId());
+      var source=HumanAdminSource.require(session,auth,request.origin(),tenant,rawHumanBearer);
+      request.requireTenant(source);
+      if("PROTECTED".equals(request.family()))source.requireProtectedInvitationProfile(session,request);
+      else {
+        var policy=humanPolicies.get();
+        var profile=policy.profile(request.profileId(),request.profileVersion());
+        if(!request.kind().equals(LifecycleGroups.allowedKind(profile.realmRoles)))deny();
+        policy.requireInvitationRead(source,profile);
+        policy.validateProfile(session,profile);
+      }
+      return Response.ok(Map.of("available",session.users().getUserByEmail(realm,request.email())==null))
+          .header("Cache-Control","no-store").build();
+    });
+  }
+
+  @POST
   @Path("v1/accounts/{account}/read")
   public Response read(@PathParam("account") String account, byte[] raw,
       @HeaderParam("X-ORISO-Task-Context") String proof,

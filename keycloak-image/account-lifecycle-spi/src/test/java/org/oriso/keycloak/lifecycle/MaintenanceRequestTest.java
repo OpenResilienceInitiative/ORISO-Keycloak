@@ -17,6 +17,78 @@ public class MaintenanceRequestTest {
           + "\"humanClient\":\"app\",\"humanAuthority\":null}}";
 
   @Test
+  public void invitationEmailReadHasClosedNormalizedSelectorsWithoutAccountDisclosure() {
+    var value = invitationEmail();
+    assertEquals("recipient@example.invalid", InvitationEmailAvailability.parse(value).email());
+    for (String field : java.util.List.of("email", "profile", "tenantId", "tenantMode", "origin")) {
+      var missing = value.deepCopy(); missing.remove(field);
+      assertThrows(WebApplicationException.class, () -> InvitationEmailAvailability.parse(missing));
+    }
+    for (String field : java.util.List.of("accountId", "excludedAccountId", "username", "emailVerified")) {
+      var extra = value.deepCopy(); extra.put(field, ID);
+      assertThrows(WebApplicationException.class, () -> InvitationEmailAvailability.parse(extra));
+    }
+    for (String email : java.util.List.of("Recipient@example.invalid", " recipient@example.invalid", "bad", "a\nb@example.invalid")) {
+      var wrong = value.deepCopy(); wrong.put("email", email);
+      assertThrows(WebApplicationException.class, () -> InvitationEmailAvailability.parse(wrong));
+    }
+    var secret = value.deepCopy(); secret.put("email", "recipient@example.invalid");
+    assertFalse(InvitationEmailAvailability.parse(secret).toString().contains("recipient"));
+    // A real receiver infrastructure failure cannot become an available recipient or reach user lookup.
+    var rolledBack = new java.util.concurrent.atomic.AtomicBoolean();
+    var transactions = (org.keycloak.models.KeycloakTransactionManager) java.lang.reflect.Proxy.newProxyInstance(
+        getClass().getClassLoader(), new Class<?>[] {org.keycloak.models.KeycloakTransactionManager.class},
+        (proxy, method, args) -> { if (method.getName().equals("setRollbackOnly")) { rolledBack.set(true); return null; }
+          throw new AssertionError("Unexpected transaction call"); });
+    var session = (org.keycloak.models.KeycloakSession) java.lang.reflect.Proxy.newProxyInstance(
+        getClass().getClassLoader(), new Class<?>[] {org.keycloak.models.KeycloakSession.class},
+        (proxy, method, args) -> {
+          if (method.getName().equals("getTransactionManager")) return transactions;
+          if (method.getName().equals("getContext")) throw new IllegalStateException("fixture unavailable");
+          throw new AssertionError("No user lookup or other native call before authentication");
+        });
+    var auth = new LifecycleAuthorization("r", ID, OPERATION, new byte[32], "fixture-key");
+    var receiver = new AccountMaintenanceResource(session, auth, java.util.Map.of(), () -> { throw new AssertionError("No policy bypass"); });
+    var unavailable = assertThrows(WebApplicationException.class,
+        () -> receiver.invitationEmailAvailability(canonical(value).getBytes(java.nio.charset.StandardCharsets.UTF_8), "invalid", null));
+    assertEquals(503, unavailable.getResponse().getStatus());
+    assertEquals("no-store", unavailable.getResponse().getHeaderString("Cache-Control"));
+    assertTrue(rolledBack.get());
+    assertFalse(((java.util.Map<?, ?>) unavailable.getResponse().getEntity()).containsKey("available"));
+  }
+
+  @Test
+  public void invitationEmailReadKeepsExactProfileTenantAndHumanShape() {
+    var value = invitationEmail();
+    for (String mode : java.util.List.of("RESERVED_NEW", "UNASSIGNED")) {
+      var waiting = value.deepCopy(); waiting.putNull("tenantId"); waiting.put("tenantMode", mode);
+      assertNull(InvitationEmailAvailability.parse(waiting).tenantId());
+    }
+    for (String tenant : java.util.List.of("", "01", "-1", "9223372036854775808")) {
+      var wrong = value.deepCopy(); wrong.put("tenantId", tenant);
+      assertThrows(WebApplicationException.class, () -> InvitationEmailAvailability.parse(wrong));
+    }
+    var nullExisting = value.deepCopy(); nullExisting.putNull("tenantId");
+    assertThrows(WebApplicationException.class, () -> InvitationEmailAvailability.parse(nullExisting));
+    for (String kind : java.util.List.of("SELF", "INVITATION", "IMPORT")) {
+      var wrong = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) wrong.path("origin")).put("kind", kind);
+      assertThrows(WebApplicationException.class, () -> InvitationEmailAvailability.parse(wrong));
+    }
+    var foreign = value.deepCopy(); ((com.fasterxml.jackson.databind.node.ObjectNode) foreign.path("profile")).put("kind", "PLATFORM_ADMIN");
+    assertThrows(WebApplicationException.class, () -> InvitationEmailAvailability.parse(foreign));
+  }
+
+  private static com.fasterxml.jackson.databind.node.ObjectNode invitationEmail() {
+    var body = JSON.createObjectNode(); body.put("email", "recipient@example.invalid");
+    body.put("tenantId", "17"); body.put("tenantMode", "EXISTING");
+    body.putObject("profile").put("family", "ORDINARY").put("id", "consultant-v1").put("version", 1).put("kind", "CONSULTANT");
+    body.putObject("origin").put("kind", "HUMAN_ADMIN").put("workflowId", "invitation-email-preflight")
+        .put("humanSubject", ID).put("humanIssuer", "https://auth.test/realms/r").put("humanClient", "admin")
+        .put("humanAuthority", "PROTECTED_ACCOUNT_OPERATIONS_V1");
+    return body;
+  }
+
+  @Test
   public void parsesOnlyTheSpecificLocaleFields() {
     var request = accepted("locale", "{\"locale\":\"de\"}");
     assertEquals(ID, request.accountId());

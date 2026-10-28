@@ -220,6 +220,8 @@ class ProtectedOperationRead(PeerReadiness):
             self.test_committed_tenant_admin_approves_own_tenant_peer_without_person_config()
         o = type(self).observation
         helper, account, human, _, _, _ = self.peer_case
+        from invitation_email_availability import exercise as invitation_email
+        invitation_email(self, helper, helper.human(record=False), (account, human), o)
         native = helper.admin('GET', '/users/' + account)
         self.assertTrue(native['enabled'])
         self.assertEqual([str(TENANT)], native['attributes']['tenantId'])

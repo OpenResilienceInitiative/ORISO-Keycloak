@@ -123,9 +123,14 @@ public final class AccountLifecycleFactory implements RealmResourceProviderFacto
   }
 
   static OrdinaryAdminSource checkedOrdinarySource(KeycloakSession session,LifecycleAuthorization crypto,MaintenanceRequest request,String header){
+    return checkedOrdinarySource(session,crypto,request.target().path("origin"),request.target().path("tenantId"),header);
+  }
+
+  static OrdinaryAdminSource checkedOrdinarySource(KeycloakSession session,LifecycleAuthorization crypto,
+      com.fasterxml.jackson.databind.JsonNode origin,com.fasterxml.jackson.databind.JsonNode tenant,String header){
     var factory=session.getKeycloakSessionFactory().getProviderFactory(RealmResourceProvider.class,"oriso-account-lifecycle");
     if(!(factory instanceof AccountLifecycleFactory))LifecycleJson.deny();var actual=(AccountLifecycleFactory)factory;
-    return OrdinaryAdminSource.require(session,crypto,actual.checkedHumanPolicy(session),actual.groups,request,header);
+    return OrdinaryAdminSource.require(session,crypto,actual.checkedHumanPolicy(session),actual.groups,origin,tenant,header);
   }
 
   static boolean transferredPlatformSelf(KeycloakSession session,MaintenanceRequest request){

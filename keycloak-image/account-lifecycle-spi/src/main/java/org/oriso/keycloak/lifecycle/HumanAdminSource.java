@@ -18,9 +18,12 @@ final class HumanAdminSource {
   }
   static HumanAdminSource require(KeycloakSession session, LifecycleAuthorization crypto,
       MaintenanceRequest request, String header) {
-    var origin = request.target().path("origin");
+    return require(session,crypto,request.target().path("origin"),request.target().path("tenantId"),header);
+  }
+  static HumanAdminSource require(KeycloakSession session,LifecycleAuthorization crypto,
+      com.fasterxml.jackson.databind.JsonNode origin,com.fasterxml.jackson.databind.JsonNode tenant,String header) {
     if("HUMAN_ADMIN".equals(origin.path("kind").asText())&&"ORDINARY_ACCOUNT_OPERATIONS_V1".equals(origin.path("humanAuthority").asText()))
-      return new HumanAdminSource(AccountLifecycleFactory.checkedOrdinarySource(session,crypto,request,header));
+      return new HumanAdminSource(AccountLifecycleFactory.checkedOrdinarySource(session,crypto,origin,tenant,header));
     if (!"HUMAN_ADMIN".equals(origin.path("kind").asText())
         || !"PROTECTED_ACCOUNT_OPERATIONS_V1".equals(origin.path("humanAuthority").asText())) deny();
     if (header == null || header.length() > 32775 || !header.regionMatches(true, 0, "Bearer ", 0, 7))
@@ -37,6 +40,14 @@ final class HumanAdminSource {
         || "PLATFORM".equals(resolved.binding().authority()) && human.tenantId() != 0
         || "TENANT_PEER".equals(resolved.binding().authority()) && human.tenantId() <= 0) deny();
     return new HumanAdminSource(config, resolved, human);
+  }
+  void requireProtectedInvitationProfile(KeycloakSession session,InvitationEmailAvailability request) {
+    if(ordinary!=null)deny();
+    var profile=config.profiles.get(request.profileId());
+    if(profile==null||profile.version()!=request.profileVersion()||!profile.kind().equals(request.kind())
+        ||!resolved.binding().profiles().contains(profile.id())||!profile.modes().contains(request.tenantMode())
+        ||"TENANT_PEER".equals(authority())&&(!"TENANT_ADMIN".equals(request.kind())||!"EXISTING".equals(request.tenantMode())))deny();
+    config.validateProfile(session,profile);
   }
   String authority() { return ordinary==null?resolved.binding().authority():"ORDINARY"; }
   String ordinaryProfile(){return ordinary==null?null:ordinary.profile.id;}

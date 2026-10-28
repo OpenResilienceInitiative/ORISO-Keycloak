@@ -16,8 +16,12 @@ final class OrdinaryAdminSource {
   }
   static OrdinaryAdminSource require(KeycloakSession session,LifecycleAuthorization crypto,GeneralPolicy policy,
       Map<String,Set<String>> mappings,MaintenanceRequest request,String header){
+    return require(session,crypto,policy,mappings,request.target().path("origin"),request.target().path("tenantId"),header);
+  }
+  static OrdinaryAdminSource require(KeycloakSession session,LifecycleAuthorization crypto,GeneralPolicy policy,
+      Map<String,Set<String>> mappings,com.fasterxml.jackson.databind.JsonNode origin,
+      com.fasterxml.jackson.databind.JsonNode targetTenant,String header){
     if(header==null||header.length()>32775||!header.regionMatches(true,0,"Bearer ",0,7))throw new jakarta.ws.rs.NotAuthorizedException("Bearer");
-    var origin=request.target().path("origin");
     if(!"HUMAN_ADMIN".equals(origin.path("kind").asText())||!"ORDINARY_ACCOUNT_OPERATIONS_V1".equals(origin.path("humanAuthority").asText()))deny();
     var realm=session.getContext().getRealm();var em=CurrentNativeHumanIdentity.entityManager(session);
     var locked=em.find(org.keycloak.models.jpa.entities.RealmEntity.class,realm.getId(),LockModeType.PESSIMISTIC_WRITE);
@@ -25,7 +29,7 @@ final class OrdinaryAdminSource {
     var human=CurrentNativeHumanIdentity.require(session,policy.nativePolicy,header.substring(7));
     if(!human.subject().equals(origin.path("humanSubject").asText())||!human.issuer().equals(origin.path("humanIssuer").asText())
         ||!human.clientId().equals(origin.path("humanClient").asText())||human.tenantId()==null||human.tenantId()<=0
-        ||!Long.toString(human.tenantId()).equals(request.target().path("tenantId").asText()))deny();
+        ||!Long.toString(human.tenantId()).equals(targetTenant.asText()))deny();
     if(!em.createNativeQuery("select ID from ORISO_ACCOUNT_MAINTENANCE_OP where REALM_ID=:realm and ACCOUNT_ID=:account and COMMAND='delete' for update")
         .setParameter("realm",realm.getId()).setParameter("account",human.subject()).getResultList().isEmpty())deny();
     var rows=em.createQuery("select a from AccountLifecycleAttempt a where a.realmId=:realm and a.accountId=:account",AccountLifecycleAttempt.class)

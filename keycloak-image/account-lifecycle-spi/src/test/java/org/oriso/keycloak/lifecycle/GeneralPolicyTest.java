@@ -15,6 +15,18 @@ public class GeneralPolicyTest {
     accepted("account.read", "account.locale", "account.profile", "account.password");
     accepted("account.read", "account.locale", "account.profile", "account.password", "account.email", "otp.read", "otp.app-setup",
         "otp.delete", "otp.email-start", "otp.email-finish");
+    String[] complete = {"account.read", "account.locale", "account.profile", "account.email", "account.password",
+        "account.deactivate", "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish"};
+    accepted(complete);
+    String[] duplicate = complete.clone();
+    duplicate[10] = "account.read";
+    rejected(duplicate);
+    String[] unknown = complete.clone();
+    unknown[10] = "account.unreviewed";
+    rejected(unknown);
+    String[] extra = java.util.Arrays.copyOf(complete, 12);
+    extra[11] = "account.read";
+    rejected(extra);
     rejected("account.email", "account.email");
     rejected("account.email", "account.profile-transition");
     rejected("account.email", "account.ordinary-profile");

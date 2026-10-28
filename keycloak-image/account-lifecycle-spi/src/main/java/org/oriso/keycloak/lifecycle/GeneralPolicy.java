@@ -242,6 +242,15 @@ final class GeneralPolicy {
     return found.get(0);
   }
 
+  void requireInvitationRead(HumanAdminSource source,Profile desired) {
+    if(source.ordinaryProfile()!=null) {
+      if(!"CONSULTANT".equals(LifecycleGroups.allowedKind(desired.realmRoles))
+          ||ordinaryAdminOperations.stream().noneMatch(grant->grant.sources.contains(source.ordinaryProfile())
+              &&grant.targets.contains(desired.id)&&grant.operations.contains("account.read")))deny();
+    } else if(adminOperations.stream().noneMatch(grant->grant.authority.equals(source.authority())
+        &&grant.profiles.contains(desired.id)&&grant.operations.contains("account.read")))deny();
+  }
+
   void requireAdmin(HumanAdminSource source, MaintenanceRequest request, String operation,
       Profile current, Profile desired) {
     source.targetTenant(request.target().path("tenantId"));
@@ -334,10 +343,11 @@ final class GeneralPolicy {
       if (!value.path("allowUnassignedTenant").isBoolean()) bad();
       allowUnassignedTenant = value.path("allowUnassignedTenant").asBoolean();
       var operations = value.path("selfOperations");
-      if (!operations.isArray() || operations.isEmpty() || operations.size() > 10) bad();
+      var allowedSelfOperations = Set.of("account.read", "account.locale", "account.profile", "account.email", "account.password", "account.deactivate", "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish");
+      if (!operations.isArray() || operations.isEmpty() || operations.size() > allowedSelfOperations.size()) bad();
       var selected = new HashSet<String>();
       for (var operation : operations) {
-        if (!operation.isTextual() || !Set.of("account.read", "account.locale", "account.profile", "account.email", "account.password", "account.deactivate", "otp.read", "otp.app-setup", "otp.delete", "otp.email-start", "otp.email-finish").contains(operation.asText())
+        if (!operation.isTextual() || !allowedSelfOperations.contains(operation.asText())
             || !selected.add(operation.asText())) bad();
       }
       selfOperations = Set.copyOf(selected);

@@ -23,7 +23,7 @@ class ProtectedUnitCatalog(unittest.TestCase):
             ET.ElementTree(suite).write(self.root / f"TEST-{name}.xml")
 
     def test_all_composed_units_are_required_and_accepted(self):
-        self.assertEqual(73, unit_evidence(self.root)["totals"]["tests"])
+        self.assertEqual(75, unit_evidence(self.root)["totals"]["tests"])
 
     def test_missing_peer_suite_cannot_pass_the_composed_catalogue(self):
         path = self.root / "TEST-org.oriso.keycloak.lifecycle.ProtectedPeerPolicyTest.xml"
