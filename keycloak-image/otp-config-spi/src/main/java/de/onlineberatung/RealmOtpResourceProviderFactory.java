@@ -3,6 +3,7 @@ package de.onlineberatung;
 import static de.onlineberatung.authenticator.OtpMailAuthenticatorFactory.OTP_CONFIG_ALIAS;
 
 import de.onlineberatung.authenticator.BearerTokenSessionAuthenticator;
+import de.onlineberatung.authenticator.ScenarioCOtpPolicy;
 import de.onlineberatung.config.AppBaseUrl;
 import de.onlineberatung.config.EmailIdentity;
 import de.onlineberatung.credential.AppOtpCredentialService;
@@ -21,6 +22,7 @@ import org.keycloak.services.resource.RealmResourceProviderFactory;
 public class RealmOtpResourceProviderFactory implements RealmResourceProviderFactory {
 
   public static final String ID = "otp-config";
+  private ScenarioCOtpPolicy policy;
 
   @Override
   public RealmResourceProvider create(KeycloakSession keycloakSession) {
@@ -35,13 +37,14 @@ public class RealmOtpResourceProviderFactory implements RealmResourceProviderFac
         systemClock);
     var appCredentialService = new AppOtpCredentialService();
     return new RealmOtpResourceProvider(keycloakSession, otpMailService, mailSender,
-        new BearerTokenSessionAuthenticator(), appCredentialService, mailOtpCredentialService);
+        new BearerTokenSessionAuthenticator(policy), appCredentialService, mailOtpCredentialService);
   }
 
   @Override
   public void init(Scope scope) {
     // Factory init runs at server start, so a missing mail-link origin stops Keycloak here
     // instead of sending mails with broken links. Not the Docker ENTRYPOINT: Helm overrides it.
+    policy = ScenarioCOtpPolicy.fromEnvironment(System::getenv);
     AppBaseUrl.requireFromEnvironment(System::getenv);
     EmailIdentity.requireFromEnvironment(System::getenv);
   }

@@ -1,0 +1,73 @@
+name: Scenario C installed image diagnostic proof
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - keycloak-image/**
+      - scripts/ci/scenario-c-image-proof.py
+      - .github/workflows/scenario-c-image-proof.yml
+  push:
+    branches: [dev, feat/367-scenario-c-integration, codex/367-c-receiver-finish-20261021, codex/367-c-foundation-review-20261022]
+    paths:
+      - keycloak-image/**
+      - scripts/ci/scenario-c-image-proof.py
+      - .github/workflows/scenario-c-image-proof.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenario-c-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Build the current production Dockerfile without publishing an image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info > /dev/null
+          git diff --exit-code
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "oriso-keycloak-c-proof:$GITHUB_SHA" keycloak-image
+          docker image inspect --format '{{.Id}}' "oriso-keycloak-c-proof:$GITHUB_SHA" \
+            > "$RUNNER_TEMP/oriso-c-image-id"
+          git diff --exit-code
+      - name: Prove installed provider inventory and actual native startup and routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_id=$(cat "$RUNNER_TEMP/oriso-c-image-id")
+          python scripts/ci/scenario-c-image-proof.py "$image_id" \
+            --report proof-reports/installed-image.json
+      - name: Remove only containers labelled by this diagnostic on its fresh runner
+        if: always()
+        run: |
+          python - <<'PY'
+          import subprocess
+          names = subprocess.run([
+              "docker", "ps", "-aq", "--filter", "label=oriso-c-image-proof-run"
+          ], check=True, capture_output=True, text=True).stdout.split()
+          if names:
+              subprocess.run(["docker", "rm", "-fv", *names], check=True, capture_output=True)
+          PY
+      - name: Retain only nonsecret image, JAR, source and case receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scenario-c-installed-image-diagnostic
+          path: proof-reports/*
+          if-no-files-found: error
+          retention-days: 14

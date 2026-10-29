@@ -68,3 +68,59 @@ Direct-grant answers to a request without a code:
   plus `Retry-After: 745` once the cap is used up (no mail).
 - A wrong code still answers `401`; the fourth try on a dead code answers `429`
   with `"Maximal number of failed attempts reached"` (unchanged).
+
+
+## Scenario C ordinary-target receiver proposal (default off)
+
+This source proposal adds a target check before every OTP setup-information,
+credential or email operation. Existing behavior remains active when the task
+identity model is absent or blank. Nothing in this change installs SMTP,
+activates Scenario C in a chart, or changes the UserService caller.
+
+Explicit `TASK_IDENTITY_MODEL=FIVE_ACTORS` requires canonical
+`IDENTITY_ACCOUNT_ADMIN_CLIENT_ID=backend-account-admin` and an explicit UUID
+`IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT`; invalid opted-in configuration stops
+startup. The signed bearer must match the current realm issuer, exact client,
+subject and native service-account ownership; the client must be confidential,
+service-account-only and without full scope. Current direct/effective realm roles
+must be exactly `account-maintenance`, `account-read`, `otp-config-admin`,
+`session-exchange`, with no composites or client roles. The actor must belong only
+to the empty `/protected-admins/technical-identities` group beneath an empty root.
+
+The isolated receiving proposal requires audience `oriso-otp` and permits only
+`userservice` as an additional audience. This pair is the existing fixture dialect,
+not the final production ACCOUNT_ADMIN audience union. Account/session recipient
+coordination and production issuance remain open.
+
+Each of the five routes requires actual Keycloak26.6.3 native `canManage(target)`.
+The receiver independently denies missing, unclassified, protected-group,
+protected platform/Träger role and service-account targets. The reviewed ordinary
+centre combination `restricted-agency-admin` plus `user-admin` remains supported.
+The actual FGAP2 engine also evaluates the actor's permission inventory: only
+ordinary Groups member scopes may be granted. Global, Users, Clients, Roles and
+nonordinary Groups powers invalidate access even when no token role reveals them;
+unknown permission models fail closed. A view-only target grant cannot expose
+setup material. Denied operations change neither credentials nor email state.
+
+**Activation still requires review:** this is a receiving fence, not proof of the
+originating human's tenant/workflow authority. Checked-origin/shared-key context,
+actual UserService caller selection, human self OTP, protected pre-login invitations
+and coordinated chart/full C activation remain open. C mode deliberately rejects
+human and legacy backend tokens; default-off mode preserves their existing mediated
+flows. Do not enable C mode for those callers until their coordinated acceptance
+is complete. No extra runtime identity, key or account-command provider is added.
+
+Local source proof uses the digest-pinned native Keycloak26.6.3 HTTP matrix:
+
+```sh
+mvn -B -q -f keycloak-image/otp-config-spi/pom.xml clean package
+OTP_C_TEST_JAR="$PWD/keycloak-image/otp-config-spi/target/keycloak-otp-config-spi-1.0-SNAPSHOT-keycloak.jar" \
+  python3 keycloak-image/otp-config-spi/tests/test_scenario_c_otp_permissions.py -v
+```
+
+The isolated proposal CI workflow separately builds the uninstalled standalone
+SMTP JAR and runs its unchanged 19-case HTTP script; OTP has a 24-case floor covering
+all five routes, native privileges, signed-token denial and legacy protected-human
+protocols. Missing fixtures/JARs, reduced case counts, errors and skips fail the job.
+Only nonsecret counts and source/JAR hashes are uploaded. Production image
+packaging and deployed acceptance remain separate.

@@ -17,13 +17,33 @@ public class BearerTokenSessionAuthenticator implements SessionAuthenticator {
 
   private static final Set<String> ALLOWED_ROLES = Set.of(OTP_CONFIG_ADMIN_ROLE);
 
+  private final ScenarioCOtpPolicy policy;
+
+  public BearerTokenSessionAuthenticator() {
+    this(null);
+  }
+
+  public BearerTokenSessionAuthenticator(ScenarioCOtpPolicy policy) {
+    this.policy = policy;
+  }
+
+  @Override
+  public void authorizeTarget(KeycloakSession session, UserModel target) {
+    if (policy == null) return;
+    var auth = new BearerTokenAuthenticator(session).authenticate();
+    if (auth == null) throw new NotAuthorizedException("Bearer");
+    policy.requireActor(session, auth);
+    policy.requireTarget(session, auth, target);
+  }
+
   @Override
   public void authenticate(KeycloakSession session) {
     var auth = new BearerTokenAuthenticator(session).authenticate();
     if (auth == null) {
       throw new NotAuthorizedException("Bearer");
     }
-    requireAllowedRole(auth.getUser());
+    if (policy == null) requireAllowedRole(auth.getUser());
+    else policy.requireActor(session, auth);
   }
 
   /** Direct realm-role mappings only, so a composite or group cannot grant this by accident. */
