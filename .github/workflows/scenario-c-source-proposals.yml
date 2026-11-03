@@ -1,0 +1,134 @@
+name: Scenario C source proposal proof
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - keycloak-image/otp-config-spi/**
+      - keycloak-image/smtp-control-spi/**
+      - keycloak-image/themes/oriso/email/**
+      - scripts/test-smtp-control-permissions.py
+      - .github/workflows/scenario-c-source-proposals.yml
+  push:
+    branches-ignore: [main, dev, pre-dev]
+    paths:
+      - keycloak-image/otp-config-spi/**
+      - keycloak-image/smtp-control-spi/**
+      - keycloak-image/themes/oriso/email/**
+      - scripts/test-smtp-control-permissions.py
+      - .github/workflows/scenario-c-source-proposals.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-proposals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - proposal: smtp
+            module: keycloak-image/smtp-control-spi
+            script: scripts/test-smtp-control-permissions.py
+            jar: keycloak-image/smtp-control-spi/target/smtp-control-spi-1.0-SNAPSHOT.jar
+            jar_env: SMTP_CONTROL_TEST_JAR
+            floor: 20
+          - proposal: otp
+            module: keycloak-image/otp-config-spi
+            script: keycloak-image/otp-config-spi/tests/test_scenario_c_otp_permissions.py
+            jar: keycloak-image/otp-config-spi/target/keycloak-otp-config-spi-1.0-SNAPSHOT-keycloak.jar
+            jar_env: OTP_C_TEST_JAR
+            floor: 24
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Install verified Maven 3.9.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://archive.apache.org/dist/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.tar.gz \
+            --output "$RUNNER_TEMP/maven.tar.gz"
+          printf '%s  %s\n' \
+            d50af8ab5e6005b46a07f0ce9d3719e67cfdf898da988a84871304cd59fb1af0fef2f99dea709e6e66f21f732f905979b5c2dce6b6860406f60a70e84d9cf0b8 \
+            "$RUNNER_TEMP/maven.tar.gz" | sha512sum --check
+          tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
+      - name: Package standalone proposal without image activation
+        working-directory: ${{ matrix.module }}
+        run: mvn -B -q clean package
+      - name: Run real public HTTP matrix with fail-closed case floor
+        env:
+          PROOF_SCRIPT: ${{ matrix.script }}
+          PROOF_JAR: ${{ matrix.jar }}
+          PROOF_JAR_ENV: ${{ matrix.jar_env }}
+          PROOF_FLOOR: ${{ matrix.floor }}
+          PROOF_NAME: ${{ matrix.proposal }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info > /dev/null
+          docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
+          python - <<'PY'
+          import contextlib, hashlib, importlib.util, io, json, os, pathlib, unittest
+          script, jar = pathlib.Path(os.environ["PROOF_SCRIPT"]), pathlib.Path(os.environ["PROOF_JAR"])
+          if not script.is_file() or not jar.is_file():
+              raise SystemExit("Missing standalone fixture or JAR; native proof cannot be skipped")
+          os.environ[os.environ["PROOF_JAR_ENV"]] = str(jar.resolve())
+          spec = importlib.util.spec_from_file_location("source_proposal_proof", script)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          suite = unittest.defaultTestLoader.loadTestsFromModule(module)
+          floor, count = int(os.environ["PROOF_FLOOR"]), suite.countTestCases()
+          if count < floor:
+              raise SystemExit("Native matrix has fewer cases than its required floor")
+          output = io.StringIO()
+          with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+              result = unittest.TextTestRunner(stream=output, verbosity=2).run(suite)
+          report = {"proposal": os.environ["PROOF_NAME"], "discovered": count,
+                    "executed": result.testsRun, "required_floor": floor,
+                    "failures": len(result.failures), "errors": len(result.errors), "skipped": len(result.skipped),
+                    "fixture_sha256": hashlib.sha256(script.read_bytes()).hexdigest(),
+                    "jar_sha256": hashlib.sha256(jar.read_bytes()).hexdigest(),
+                    "fixture_support_sha256": {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
+                        for f in script.parent.glob("scenario_c_otp_fixture.py")},
+                    "failed_cases": [case.id() for case, _ in result.failures + result.errors]}
+          pathlib.Path("proof-reports").mkdir(exist_ok=True)
+          pathlib.Path("proof-reports/" + report["proposal"] + ".json").write_text(json.dumps(report, indent=2) + "\n")
+          print(json.dumps(report, sort_keys=True))
+          if result.testsRun != count or result.testsRun < floor or result.skipped or not result.wasSuccessful():
+              raise SystemExit("Real native proof did not pass every required case with zero skips")
+          PY
+      - name: Clean up this job's isolated fixture containers
+        if: always()
+        env:
+          PROOF_LABEL: ${{ matrix.proposal == 'smtp' && 'oriso-smtp-control-test=true' || 'oriso-c-otp-test=true' }}
+        run: |
+          python - <<'PY'
+          import os, subprocess
+          inventory = subprocess.run(["docker", "ps", "-aq", "--filter", "label=" + os.environ["PROOF_LABEL"]],
+                                     check=True, capture_output=True, text=True).stdout.split()
+          if inventory:
+              subprocess.run(["docker", "rm", "-f", *inventory], check=True, capture_output=True)
+          PY
+      - name: Upload nonsecret proof counts and hashes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-proposal-${{ matrix.proposal }}
+          path: proof-reports/*.json
+          if-no-files-found: error
+          retention-days: 14

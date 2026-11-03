@@ -47,6 +47,20 @@ updates:
       directories:
           - '/'
           - '/.github/actions/*'
+      schedule:
+          interval: 'monthly'
+      # Version updates live in the dev entry below; this entry configures
+      # security updates, which Dependabot always opens against main.
+      open-pull-requests-limit: 0
+      groups:
+          github-actions-security:
+              applies-to: security-updates
+              patterns: ['*']
+
+    - package-ecosystem: 'github-actions'
+      directories:
+          - '/'
+          - '/.github/actions/*'
       target-branch: 'dev'
       schedule:
           interval: 'monthly'
@@ -59,6 +73,18 @@ updates:
       ignore:
           - dependency-name: '*'
             update-types: ['version-update:semver-major']
+
+    - package-ecosystem: 'docker'
+      directory: '/keycloak-image'
+      schedule:
+          interval: 'monthly'
+      # Version updates live in the dev entry below; this entry configures
+      # security updates, which Dependabot always opens against main.
+      open-pull-requests-limit: 0
+      groups:
+          docker-security:
+              applies-to: security-updates
+              patterns: ['*']
 
     - package-ecosystem: 'docker'
       directory: '/keycloak-image'
