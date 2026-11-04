@@ -28,11 +28,6 @@ public class BearerTokenSessionAuthenticator implements SessionAuthenticator {
   }
 
   @Override
-  public boolean isScopedMode() {
-    return policy != null;
-  }
-
-  @Override
   public void authorizeTarget(KeycloakSession session, UserModel target) {
     if (policy == null) return;
     var auth = new BearerTokenAuthenticator(session).authenticate();

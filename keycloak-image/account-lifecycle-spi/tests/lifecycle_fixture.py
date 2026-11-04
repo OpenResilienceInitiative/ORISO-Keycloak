@@ -21,7 +21,7 @@ CONTEXT_KEY = bytes(range(32))
 ACTORS = {
     "SETUP": (
         "backend-setup",
-        ["config-wizard", "invitation-reservations", "consultant-import", "smtp-sync"],
+        ["config-wizard", "invitation-reservations", "consultant-import"],
     ),
     "ACCOUNT_CREATE": (
         "backend-account-create",
@@ -34,6 +34,7 @@ ACTORS = {
     "MAIL": (
         "backend-mail",
         [
+            "smtp-sync",
             "system-email-delivery",
             "notification-dispatch",
             "notifications-technical",

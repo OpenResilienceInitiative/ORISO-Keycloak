@@ -1012,15 +1012,6 @@
       },
       "protocolMappers": [
         {
-          "name": "subject",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-sub-mapper",
-          "consentRequired": false,
-          "config": {
-            "access.token.claim": "true"
-          }
-        },
-        {
           "id": "d727edf5-2881-4321-9be9-5c7c9201a4fe",
           "name": "username",
           "protocol": "openid-connect",
@@ -2284,16 +2275,20 @@
       "builtIn": false,
       "authenticationExecutions": [
         {
-          "authenticator": "oriso-claimed-magic-link",
           "authenticatorFlow": false,
           "requirement": "REQUIRED",
-          "priority": 0
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-username"
         },
         {
-          "flowAlias": "oriso-ordinary-password",
-          "authenticatorFlow": true,
-          "requirement": "CONDITIONAL",
-          "priority": 10
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "direct-grant-validate-password"
         },
         {
           "authenticatorFlow": true,
@@ -2310,42 +2305,6 @@
           "autheticatorFlow": true,
           "userSetupAllowed": false,
           "flowAlias": "email-otp-conditional"
-        },
-        {
-          "authenticator": "oriso-claimed-magic-link-attach",
-          "authenticatorFlow": false,
-          "requirement": "REQUIRED",
-          "priority": 50
-        }
-      ]
-    },
-    {
-      "alias": "oriso-ordinary-password",
-      "providerId": "basic-flow",
-      "topLevel": false,
-      "builtIn": false,
-      "authenticationExecutions": [
-        {
-          "authenticator": "oriso-magic-link-ordinary-password",
-          "authenticatorFlow": false,
-          "requirement": "REQUIRED",
-          "priority": 0
-        },
-        {
-          "authenticatorFlow": false,
-          "requirement": "REQUIRED",
-          "priority": 10,
-          "autheticatorFlow": false,
-          "userSetupAllowed": false,
-          "authenticator": "direct-grant-validate-username"
-        },
-        {
-          "authenticatorFlow": false,
-          "requirement": "REQUIRED",
-          "priority": 20,
-          "autheticatorFlow": false,
-          "userSetupAllowed": false,
-          "authenticator": "direct-grant-validate-password"
         }
       ]
     },
