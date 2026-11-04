@@ -1,0 +1,124 @@
+name: Scenario C scoped OTP diagnostic proof
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - keycloak-image/**
+      - keycloak-image/otp-config-spi/**
+      - .github/workflows/scenario-c-scoped-otp-proof.yml
+  push:
+    branches: [codex/367-c-maintenance-keycloak-20261021, codex/367-c-receiver-finish-20261021, codex/367-c-contact-email-native-20261025, dev]
+    paths:
+      - keycloak-image/**
+      - keycloak-image/otp-config-spi/**
+      - .github/workflows/scenario-c-scoped-otp-proof.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scoped-otp-proof-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scoped-otp-h2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+          cache-dependency-path: |
+            keycloak-image/account-lifecycle-spi/pom.xml
+            keycloak-image/otp-config-spi/pom.xml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Install checksum-verified Maven 3.9.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://archive.apache.org/dist/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.tar.gz \
+            --output "$RUNNER_TEMP/maven.tar.gz"
+          printf '%s  %s\n' \
+            d50af8ab5e6005b46a07f0ce9d3719e67cfdf898da988a84871304cd59fb1af0fef2f99dea709e6e66f21f732f905979b5c2dce6b6860406f60a70e84d9cf0b8 \
+            "$RUNNER_TEMP/maven.tar.gz" | sha512sum --check
+          tar -xzf "$RUNNER_TEMP/maven.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
+      - name: Check evidence gates without starting a native fixture
+        run: |
+          python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_maintenance_ci.py -v
+          python -m unittest discover -s keycloak-image/account-lifecycle-spi/tests -p test_scoped_otp_ci.py -v
+      - name: Package default-off source and run all forty-seven composed lifecycle Java units
+        working-directory: keycloak-image/account-lifecycle-spi
+        env:
+          MAVEN_OPTS: -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ActiveProcessorCount=2
+        run: mvn -B -q clean install '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2'
+      - name: Check every Java unit and retain only sanitized method XML
+        if: always()
+        run: python keycloak-image/account-lifecycle-spi/tests/run_maintenance.py units --report proof-reports/scoped-otp-lifecycle-units.json
+      - name: Package actual OTP source and run all its Java units
+        working-directory: keycloak-image/otp-config-spi
+        env:
+          MAVEN_OPTS: -Xmx512m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2
+        run: mvn -B -q clean package '-DargLine=-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2'
+      - name: Require every source OTP unit suite with zero skips
+        if: always()
+        run: python keycloak-image/account-lifecycle-spi/tests/run_scoped_otp.py units --report proof-reports/scoped-otp-units.json
+      - name: Package only the isolated test completion observer
+        working-directory: keycloak-image/account-lifecycle-spi
+        run: |
+          jar --create --file target/scoped-otp-ready-fixture.jar \
+            -C target/test-classes org/oriso/keycloak/lifecycle/ScopedOtpReadyCompletionFixture.class \
+            -C tests/ready-fixture-resources META-INF/beans.xml
+      - name: Run retained scoped cases and actual committed protected self OTP
+        env:
+          PROTECTED_PROOF_RESOURCE_PROFILE: github-ubuntu-24-amd64-v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info > /dev/null
+          docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
+          export LIFECYCLE_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/account-lifecycle-spi-1.0-SNAPSHOT.jar"
+          export OTP_C_TEST_JAR="$GITHUB_WORKSPACE/keycloak-image/otp-config-spi/target/keycloak-otp-config-spi-1.0-SNAPSHOT-keycloak.jar"
+          export SCOPED_OTP_READY_FIXTURE_JAR="$GITHUB_WORKSPACE/keycloak-image/account-lifecycle-spi/target/scoped-otp-ready-fixture.jar"
+          python keycloak-image/account-lifecycle-spi/tests/run_scoped_otp.py native --report proof-reports/scoped-otp-native.json
+      - name: Record an absent native run as setup failure and never RED
+        if: always()
+        run: python keycloak-image/account-lifecycle-spi/tests/run_scoped_otp.py finalize --report proof-reports/scoped-otp-native.json
+      - name: Clean up only this fresh job's labelled native fixture resources
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import subprocess
+          for label in ["oriso-c-lifecycle-test=true", "oriso-c-otp-test=true", "oriso-protected-receiver-test=true"]:
+              names = subprocess.run(
+                  ["docker", "ps", "-aq", "--filter", "label=" + label],
+                  capture_output=True, text=True, check=True).stdout.split()
+              if names:
+                  subprocess.run(["docker", "rm", "-fv", *names], check=True, capture_output=True)
+          for label in ["oriso-c-maintenance-human-test=true", "oriso-protected-receiver-test=true"]:
+              volumes = subprocess.run(
+                  ["docker", "volume", "ls", "-q", "--filter", "label=" + label],
+                  capture_output=True, text=True, check=True).stdout.split()
+              if volumes:
+                  subprocess.run(["docker", "volume", "rm", *volumes], check=True, capture_output=True)
+          PYCODE
+      - name: Upload only nonsecret diagnostic XML, JSON and source hashes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scenario-c-scoped-otp-diagnostic
+          path: |
+            proof-reports/scoped-otp-*.json
+            proof-reports/scoped-otp-*.xml
+          if-no-files-found: error
+          retention-days: 14

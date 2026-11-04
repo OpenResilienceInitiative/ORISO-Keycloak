@@ -25,6 +25,8 @@ public class MailOtpCredentialModel extends CredentialModel {
       var secretData = JsonSerialization.readValue(credentialModel.getSecretData(),
           MailOtpSecretData.class);
       var otpCredentialModel = new MailOtpCredentialModel(credentialData, secretData);
+      otpCredentialModel.setCredentialData(credentialModel.getCredentialData());
+      otpCredentialModel.setSecretData(credentialModel.getSecretData());
       otpCredentialModel.setUserLabel(credentialModel.getUserLabel());
       otpCredentialModel.setCreatedDate(credentialModel.getCreatedDate());
       otpCredentialModel.setType(TYPE);

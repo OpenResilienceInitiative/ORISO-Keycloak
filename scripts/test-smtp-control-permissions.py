@@ -22,7 +22,7 @@ from urllib.request import Request, urlopen
 
 IMAGE = "quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992"
 KEY = b"synthetic-smtp-control-key-00001"  # Exactly 32 bytes; the accepted lower bound.
-ROLES = ["smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical"]
+ROLES = ["config-wizard", "invitation-reservations", "consultant-import", "smtp-sync"]
 AUDIENCES = ["oriso-task-commands", "tenantservice", "agencyservice", "consultingtypeservice", "userservice"]
 SUBJECT = "15438b20-6ab7-473f-93c5-8aac79a9ff81"
 REALM = "smtp-control-fixture"
@@ -48,8 +48,8 @@ def encoded(raw):
 def proof(body, operation="SMTP_APPLY", **changes):
     now = int(time.time())
     claims = {"iss": "oriso-smtp-sync", "aud": "oriso-smtp-control",
-              "purpose": "SMTP_SYNC", "operation": operation, "actor": "MAIL",
-              "realm": REALM, "target": REALM, "taskClient": "backend-mail",
+              "purpose": "SMTP_SYNC", "operation": operation, "actor": "SETUP",
+              "realm": REALM, "target": REALM, "taskClient": "backend-setup",
               "taskSubject": SUBJECT,
               "payloadDigest": hmac.digest(KEY, b"payload\n" + canonical(body), "sha256").hex(),
               "method": "GET" if operation == "SMTP_STATUS" else "PUT",
@@ -101,7 +101,7 @@ class SmtpControlPermissions(unittest.TestCase):
                "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer",
                "-e", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + INSTALLER,
                "-e", "ORISO_SMTP_CONTROL_ENABLED=true", "-e", "ORISO_SMTP_CONTROL_REALM=" + REALM,
-               "-e", "IDENTITY_MAIL_SERVICE_SUBJECT=" + SUBJECT,
+               "-e", "IDENTITY_SETUP_SERVICE_SUBJECT=" + SUBJECT,
                "-e", "ORISO_TASK_CONTEXT_KEY=" + base64.b64encode(KEY).decode()]
         jar = os.environ.get("SMTP_CONTROL_TEST_JAR")
         if jar:
@@ -163,7 +163,7 @@ class SmtpControlPermissions(unittest.TestCase):
 
     def setUp(self):
         self.require_headroom()
-        client = {"clientId": "backend-mail", "secret": SECRET,
+        client = {"clientId": "backend-setup", "secret": SECRET,
                    "publicClient": False, "serviceAccountsEnabled": True,
                    "standardFlowEnabled": False, "directAccessGrantsEnabled": False,
                    "fullScopeAllowed": False, "defaultClientScopes": [], "optionalClientScopes": [],
@@ -182,27 +182,27 @@ class SmtpControlPermissions(unittest.TestCase):
                         "smtpServer": {"host": "before.fixture.internal", "port": "25",
                                        "from": "before@fixture.internal"}, "clients": [client],
                         "roles": {"realm": [{"name": role} for role in ROLES]},
-                        "users": [{"id": SUBJECT, "username": "service-account-backend-mail",
-                                   "enabled": True, "serviceAccountClientId": "backend-mail"}]}, self.installer)
+                        "users": [{"id": SUBJECT, "username": "service-account-backend-setup",
+                                   "enabled": True, "serviceAccountClientId": "backend-setup"}]}, self.installer)
         self.assertEqual(201, status, response)
         self.addCleanup(call, self.base, "DELETE", "/admin/realms/" + REALM, token=self.installer)
-        self.client = self.admin("GET", "/clients?" + urlencode({"clientId": "backend-mail"}))[0]["id"]
+        self.client = self.admin("GET", "/clients?" + urlencode({"clientId": "backend-setup"}))[0]["id"]
         mapped = self.admin("GET", "/users/" + SUBJECT + "/role-mappings/realm")
         if mapped:
             self.admin("DELETE", "/users/" + SUBJECT + "/role-mappings/realm", mapped)
         roles = [self.admin("GET", "/roles/" + role) for role in ROLES]
         self.admin("POST", "/users/" + SUBJECT + "/role-mappings/realm", roles)
         self.admin("POST", "/clients/" + self.client + "/scope-mappings/realm", roles)
-        self.protected_parent, self.technical_group = self.prepare_protected_mail_membership()
+        self.protected_parent, self.technical_group = self.prepare_protected_setup_membership()
 
     def token(self):
         status, response = call(self.base, "POST", "/realms/" + REALM + "/protocol/openid-connect/token",
-                                {"grant_type": "client_credentials", "client_id": "backend-mail",
+                                {"grant_type": "client_credentials", "client_id": "backend-setup",
                                  "client_secret": SECRET}, form=True)
         self.assertEqual(200, status)
         return response["access_token"]
 
-    def prepare_protected_mail_membership(self):
+    def prepare_protected_setup_membership(self):
         self.admin("POST", "/groups", {"name": "protected-admins"})
         parent = self.admin("GET", "/group-by-path/protected-admins")["id"]
         self.admin("POST", "/groups/" + parent + "/children", {"name": "technical-identities"})
@@ -210,7 +210,7 @@ class SmtpControlPermissions(unittest.TestCase):
         self.admin("PUT", "/users/" + SUBJECT + "/groups/" + group)
         return parent, group
 
-    def test_real_canonical_protected_mail_can_apply_and_read_status(self):
+    def test_real_canonical_protected_setup_can_apply_and_read_status(self):
         parent, group = self.protected_parent, self.technical_group
         self.assertEqual([group], [g["id"] for g in self.admin("GET", "/users/" + SUBJECT + "/groups")])
         for gid in (parent, group):
@@ -272,7 +272,7 @@ class SmtpControlPermissions(unittest.TestCase):
         self.admin("DELETE", membership + arbitrary)
         self.assert_unconsumed_revision(token)
 
-    def test_group_and_ancestor_ambient_roles_are_denied_even_for_existing_mail_role(self):
+    def test_group_and_ancestor_ambient_roles_are_denied_even_for_existing_setup_role(self):
         token = self.token()
         role = self.admin("GET", "/roles/smtp-sync")
         for group in (self.technical_group, self.protected_parent):
@@ -328,7 +328,7 @@ class SmtpControlPermissions(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual({"revision": -1, "status": "NOT_APPLIED"}, result)
 
-    def test_ordinary_mail_bearer_without_control_proof_is_denied(self):
+    def test_setup_bearer_without_control_proof_is_denied(self):
         before = self.admin("GET")
         for method, body in (("PUT", PAYLOAD), ("GET", None)):
             with self.subTest(method=method):
@@ -338,11 +338,44 @@ class SmtpControlPermissions(unittest.TestCase):
         self.assertEqual(401, status)
         self.assertEqual(before, self.admin("GET"))
 
+    def test_mail_with_valid_common_key_proof_cannot_configure_smtp(self):
+        # A real canonical MAIL bearer and knowledge of the shared key confer no SETUP authority.
+        before = self.admin("GET")
+        roles = ["system-email-delivery", "notification-dispatch", "notifications-technical"]
+        for role in roles:
+            self.admin("POST", "/roles", {"name": role})
+        client = self.admin("GET", "/clients/" + self.client)
+        client.pop("id")
+        client["clientId"] = "backend-mail"
+        client["secret"] = "synthetic-delivery-secret"
+        client["protocolMappers"] = [m for m in client["protocolMappers"]
+            if m.get("config", {}).get("included.custom.audience") != "oriso-task-commands"]
+        for mapper in client["protocolMappers"]:
+            mapper.pop("id", None)
+        self.admin("POST", "/clients", client)
+        mail_client = self.admin("GET", "/clients?clientId=backend-mail")[0]["id"]
+        subject = self.admin("GET", "/clients/" + mail_client + "/service-account-user")["id"]
+        defaults = self.admin("GET", "/users/" + subject + "/role-mappings/realm")
+        if defaults:
+            self.admin("DELETE", "/users/" + subject + "/role-mappings/realm", defaults)
+        grants = [self.admin("GET", "/roles/" + role) for role in roles]
+        self.admin("POST", "/users/" + subject + "/role-mappings/realm", grants)
+        self.admin("POST", "/clients/" + mail_client + "/scope-mappings/realm", grants)
+        self.admin("PUT", "/users/" + subject + "/groups/" + self.technical_group)
+        status, response = call(self.base, "POST", "/realms/" + REALM + "/protocol/openid-connect/token",
+            {"grant_type": "client_credentials", "client_id": "backend-mail",
+             "client_secret": "synthetic-delivery-secret"}, form=True)
+        self.assertEqual(200, status)
+        token = response["access_token"]
+        for claims in ({"actor": "MAIL", "taskClient": "backend-mail", "taskSubject": subject}, {}):
+            self.assertEqual(403, self.smtp(PAYLOAD, proof(PAYLOAD, **claims), token=token)[0])
+        self.assertEqual(before, self.admin("GET"))
+
     def test_signed_context_is_bound_to_purpose_identity_realm_method_payload_and_ttl(self):
         before = self.admin("GET")
         token = self.token()
         now = int(time.time())
-        changes = [{"purpose": "SYSTEM_EMAIL_DELIVERY"}, {"actor": "SETUP"},
+        changes = [{"purpose": "SYSTEM_EMAIL_DELIVERY"}, {"actor": "MAIL"},
                    {"operation": "SMTP_STATUS"}, {"method": "GET"},
                    {"realm": "foreign"}, {"target": "foreign"},
                    {"taskClient": "backend-runtime"}, {"taskSubject": str(uuid.uuid4())},
@@ -394,7 +427,7 @@ class SmtpControlPermissions(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual({"revision": -1, "status": "NOT_APPLIED"}, result)
 
-    def test_mail_identity_cannot_use_native_realm_user_role_or_policy_administration(self):
+    def test_setup_identity_cannot_use_native_realm_user_role_or_policy_administration(self):
         before = self.admin("GET")
         self.admin("POST", "/users", {"username": "existing-human", "enabled": True})
         human = self.admin("GET", "/users?username=existing-human&exact=true")[0]["id"]

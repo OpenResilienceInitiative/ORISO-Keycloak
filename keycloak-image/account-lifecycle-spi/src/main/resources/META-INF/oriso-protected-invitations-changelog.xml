@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.6.xsd">
+  <changeSet id="oriso-protected-invitations-v1" author="oriso">
+    <createTable tableName="ORISO_PROTECTED_INVITATION_APPROVAL">
+      <column name="ID" type="VARCHAR(100)"><constraints primaryKey="true" nullable="false"/></column>
+      <column name="REALM_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="APPROVAL_ID" type="VARCHAR(36)"><constraints nullable="false"/></column>
+      <column name="WORKFLOW_ID" type="VARCHAR(36)"><constraints nullable="false"/></column>
+      <column name="INVITE_ID" type="VARCHAR(255)"><constraints nullable="false"/></column>
+      <column name="AUTHORIZATION_REVISION" type="BIGINT"><constraints nullable="false"/></column>
+      <column name="REQUEST_JSON" type="TEXT"><constraints nullable="false"/></column>
+      <column name="APPROVAL_REQUEST_DIGEST" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="SCOPE_JSON" type="TEXT"><constraints nullable="false"/></column>
+      <column name="SCOPE_DIGEST" type="VARCHAR(64)"><constraints nullable="false"/></column>
+      <column name="ISSUER_SUBJECT" type="VARCHAR(36)"><constraints nullable="false"/></column>
+      <column name="APPROVAL_RECEIPT" type="TEXT"/>
+      <column name="VALID_UNTIL" type="VARCHAR(30)"><constraints nullable="false"/></column>
+      <column name="STATE" type="VARCHAR(30)"><constraints nullable="false"/></column>
+      <column name="BOUND_ATTEMPT_ID" type="VARCHAR(36)"/>
+      <column name="DELEGATED_SUBJECT" type="VARCHAR(36)"/>
+      <column name="DELEGATION_SNAPSHOT" type="TEXT"/>
+      <column name="VERSION" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+    </createTable>
+    <addUniqueConstraint tableName="ORISO_PROTECTED_INVITATION_APPROVAL" columnNames="REALM_ID,WORKFLOW_ID,INVITE_ID,AUTHORIZATION_REVISION" constraintName="ORISO_PROTECTED_APPROVAL_WORKFLOW"/>
+    <addUniqueConstraint tableName="ORISO_PROTECTED_INVITATION_APPROVAL" columnNames="REALM_ID,DELEGATED_SUBJECT" constraintName="ORISO_PROTECTED_DELEGATED_SUBJECT"/>
+    <addForeignKeyConstraint baseTableName="ORISO_PROTECTED_INVITATION_APPROVAL" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_PROTECTED_APPROVAL_REALM" onDelete="CASCADE"/>
+  </changeSet>
+  <changeSet id="oriso-protected-invitations-cancel-v1" author="oriso">
+    <addColumn tableName="ORISO_PROTECTED_INVITATION_APPROVAL">
+      <column name="CANCELLATION_ID" type="VARCHAR(36)"/>
+      <column name="CANCELLATION_REQUEST" type="TEXT"/>
+      <column name="TRANSITION_RECEIPT" type="TEXT"/>
+    </addColumn>
+  </changeSet>
+</databaseChangeLog>

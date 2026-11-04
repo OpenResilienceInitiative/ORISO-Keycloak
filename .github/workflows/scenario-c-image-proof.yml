@@ -6,12 +6,16 @@ on:
     paths:
       - keycloak-image/**
       - scripts/ci/scenario-c-image-proof.py
+      - scripts/keycloak-apply-2fa-flow.sh
+      - scripts/tests/test_operator_auth_flow.py
       - .github/workflows/scenario-c-image-proof.yml
   push:
-    branches: [dev, feat/367-scenario-c-integration, codex/367-c-receiver-finish-20261021, codex/367-c-foundation-review-20261022]
+    branches: [codex/367-c-receiver-finish-20261021, codex/367-c-maintenance-keycloak-20261021, codex/367-c-contact-email-native-20261025, dev]
     paths:
       - keycloak-image/**
       - scripts/ci/scenario-c-image-proof.py
+      - scripts/keycloak-apply-2fa-flow.sh
+      - scripts/tests/test_operator_auth_flow.py
       - .github/workflows/scenario-c-image-proof.yml
 
 permissions:
@@ -34,6 +38,8 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: 3.12.13
+      - name: Verify operator CLI regression controls before native execution
+        run: python -m unittest discover -s scripts/tests -p test_operator_auth_flow.py -v
       - name: Build the current production Dockerfile without publishing an image
         shell: bash
         run: |

@@ -1,0 +1,238 @@
+"""Actual fresh SELF deactivate and saved-only recovery after losing its success response."""
+import base64
+import copy
+import hashlib
+import hmac
+import json
+import time
+import uuid
+from urllib.request import Request, urlopen
+
+from lifecycle_fixture import ACTORS, CONTEXT_KEY, REALM, SUBJECTS, call, canonical, mac
+from maintenance_human_fixture import HumanMaintenanceFixture
+from profile_transition_operations import committed_kind
+from test_maintenance import MaintenancePermissions
+
+
+def updated(test, helper, body, result):
+    test.assertEqual({'operationId', 'accountId', 'result', 'receipt'}, set(result))
+    test.assertEqual('UPDATED', result['result'])
+    encoded, signature = result['receipt'].split('.')
+    test.assertEqual(hmac.new(CONTEXT_KEY, ('maintenance-operation-receipt\n' + encoded).encode(), hashlib.sha256).hexdigest(), signature)
+    payload = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))
+    expected = {'realmId': helper.realm_id, 'accountId': body['target']['accountId'],
+        'operationId': body['operationId'], 'command': 'deactivate',
+        'ownerClient': ACTORS['ACCOUNT_ADMIN'][0], 'ownerSubject': SUBJECTS['ACCOUNT_ADMIN'],
+        'intentDigest': mac('maintenance-intent', body), 'previousState': body['expectedState'],
+        'tenantId': body['target']['tenantId'], 'originDigest': mac('maintenance-origin', body['target']['origin']), 'result': 'UPDATED'}
+    test.assertEqual(expected, json.loads(payload)); test.assertEqual(canonical(expected), payload)
+
+
+def exercise(test, helper, observed):
+    record = observed['publicPreDeletionOutcome'] = {}
+    original_account, original_creation = helper.account_id, helper.creation_input
+    account, creation = committed_kind(test, helper, 'ASKER', 'user')
+    helper.account_id = account; helper.creation_input = creation
+    try:
+        native = helper.admin('GET', '/users/' + account)
+        test.assertTrue(native['enabled']); test.assertGreater(native['createdTimestamp'], 0)
+        client = helper.admin('GET', '/clients?clientId=protected-human-web')[0]
+        original_client = copy.deepcopy(client)
+        client.setdefault('attributes', {})['access.token.lifespan'] = '15'
+        helper.admin('PUT', '/clients/' + client['id'], client)
+        try:
+            status, login = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
+                {'client_id': 'protected-human-web', 'grant_type': 'password',
+                 'username': native['username'], 'password': creation['account']['password'], 'scope': 'openid'}, form=True)
+            test.assertEqual(200, status)
+            human = login['access_token']; encoded = human.split('.')[1]
+            claims = json.loads(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)))
+            test.assertEqual(account, claims['sub']); test.assertEqual({'user'}, set(claims['realm_access']['roles']))
+            test.assertLessEqual(claims['exp'] - claims['iat'], 15)
+        finally:
+            helper.admin('PUT', '/clients/' + client['id'], original_client)
+        work = str(uuid.uuid4())
+        target = {'accountId': account, 'tenantId': native['attributes']['tenantId'][0], 'origin': {
+            'kind': 'SELF', 'workflowId': work, 'humanSubject': account,
+            'humanIssuer': type(helper).native_issuer, 'humanClient': 'protected-human-web', 'humanAuthority': None}}
+        read_status, current = HumanMaintenanceFixture.invoke(helper, 'read', {'target': target}, human, 200)
+        test.assertEqual(200, read_status); test.assertEqual(account, current['id'])
+        body = {'target': target, 'operationId': work, 'expectedState': current['state'], 'change': {}}
+        before = helper.admin('GET', '/users/' + account)
+        credentials = helper.admin('GET', '/users/' + account + '/credentials')
+        record.update(actualCommittedAsker=True, actualFreshPasswordLogin=True, actualSelfReadStatus=read_status,
+            positiveNativeBirth=True, originalHumanExpiry=claims['exp'])
+
+        def outcome(request=body, actor='ACCOUNT_ADMIN', proof=None, bearer=None):
+            changes = {'operation': 'account.deactivate.outcome'}
+            changes.update(proof or {})
+            return MaintenancePermissions.maintenance(helper, 'deactivate/outcome', account, request,
+                actor=actor, changes=changes, bearer=bearer)
+
+        missing_status, missing = outcome()
+        record['absentStatus'] = missing_status
+        with test.subTest(operation='public-pre-deletion.outcome.absent-is-unknown-without-dispatch'):
+            test.assertEqual(409, missing_status); test.assertNotIn('receipt', missing)
+            test.assertEqual(before, helper.admin('GET', '/users/' + account))
+            test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+
+        helper.admin('PUT', '', {'adminEventsEnabled': True, 'adminEventsDetailsEnabled': False})
+        status, result = HumanMaintenanceFixture.invoke(helper, 'deactivate', body, human, 200)
+        record['freshDeactivateStatus'] = status
+        with test.subTest(operation='public-pre-deletion.fresh-actual-self-disable'):
+            test.assertEqual(200, status); updated(test, helper, body, result)
+        if status != 200:
+            return
+        disabled = helper.admin('GET', '/users/' + account)
+        test.assertFalse(disabled['enabled']); test.assertEqual(native['createdTimestamp'], disabled['createdTimestamp'])
+        test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+        login_status, _ = call(helper.base, 'POST', '/realms/' + REALM + '/protocol/openid-connect/token',
+            {'client_id': 'protected-human-web', 'grant_type': 'password', 'username': native['username'],
+             'password': creation['account']['password'], 'scope': 'openid'}, form=True)
+        test.assertEqual(400, login_status)
+        while time.time() <= claims['exp']:
+            time.sleep(0.1)
+        record['actualHumanExpiryElapsedAfterIntentionalDisable'] = True
+        def native_events():
+            return [event for event in helper.admin('GET', '/admin-events')
+                if event.get('resourcePath') == 'accounts/' + account
+                and event.get('authDetails', {}).get('clientId') == ACTORS['ACCOUNT_ADMIN'][0]]
+        events = native_events()
+        test.assertEqual(1, len(events))
+        test.assertEqual((200, result), outcome())
+        test.assertEqual(disabled, helper.admin('GET', '/users/' + account))
+        test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+        test.assertEqual(events, native_events())
+        record['sameOriginalBodyAndRealReceiptAfterLostReplyAndHumanExpiry'] = True
+        test.assertEqual((200, result), outcome())
+        for actor in ['SETUP', 'ACCOUNT_CREATE', 'MAIL', 'RUNTIME']:
+            denied_status, denied = outcome(actor=actor)
+            test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+        old_proof_status, old_proof = outcome(proof={'operation': 'account.deactivate'})
+        test.assertEqual(403, old_proof_status); test.assertNotIn('receipt', old_proof)
+        for field, value in [('expectedState', '0' * 64), ('operationId', str(uuid.uuid4()))]:
+            wrong = copy.deepcopy(body); wrong[field] = value
+            denied_status, denied = outcome(wrong)
+            test.assertEqual(409, denied_status); test.assertNotIn('receipt', denied)
+        record['wrongOwnerProofBodyAndAbsentOperationNeverMintReceipt'] = True
+
+        def capsule(mode, restore=None):
+            headers = {'Authorization': 'Bearer ' + helper.installer,
+                'X-ORISO-Replay-Reach-Fixture': work, 'X-ORISO-Replay-Reach-Fixture-Mode': mode}
+            if restore is not None:
+                headers['X-ORISO-Replay-Reach-Fixture-Restore'] = restore
+            request = Request(helper.base + '/admin/realms/' + REALM + '/users/' + account, headers=headers)
+            with urlopen(request, timeout=30) as reply:
+                test.assertEqual(200, reply.status)
+                test.assertEqual(mode, reply.headers.get('X-ORISO-Replay-Reach-Fixture-Applied'))
+                return reply.headers.get('X-ORISO-Replay-Reach-Fixture-Value')
+
+        saved_capsule = capsule('OBSERVE')
+        envelope = json.loads(base64.urlsafe_b64decode(saved_capsule + '=' * (-len(saved_capsule) % 4)))
+        test.assertEqual({'v', 'kind', 'binding', 'mac'}, set(envelope))
+        test.assertEqual('SELF_DEACTIVATION_OUTCOME_V1', envelope['kind'])
+        test.assertEqual(native['createdTimestamp'], envelope['binding']['createdTimestamp'])
+        test.assertEqual(claims['exp'], envelope['binding']['profile']['humanValidUntil'])
+        for mode in ['BAD_MAC', 'EXTRA', 'MISSING']:
+            capsule(mode)
+            try:
+                denied_status, denied = outcome()
+                test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+                test.assertEqual(disabled, helper.admin('GET', '/users/' + account))
+            finally:
+                capsule('RESTORE', saved_capsule)
+            test.assertEqual((200, result), outcome())
+        record['missingForeignMacAndExtraCapsuleAreClosed'] = True
+
+        group = helper.group_id('/human-roles/user'); role = helper.admin('GET', '/roles/user')
+        helper.admin('DELETE', '/groups/' + group + '/role-mappings/realm', [role])
+        try:
+            denied_status, denied = outcome()
+            test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+        finally:
+            helper.admin('POST', '/groups/' + group + '/role-mappings/realm', [role])
+        test.assertEqual((200, result), outcome())
+        record['currentProfileGrantWithdrawAndRestoreCheckedWithoutHuman'] = True
+
+        # Reuse the exact actual fixture launch, including original OTP/TLS/provider wrappers.
+        # Only this reviewed nonsecret user profile's SELF grant changes; the saved row cannot
+        # replace a missing current grant, even after the original human has expired.
+        import subprocess
+        original_launch = copy.deepcopy(type(helper).actual_native_launch)
+        test.assertIn(type(helper).data_mount, original_launch)
+        test.assertIn('--memory', original_launch); test.assertEqual('1g', original_launch[original_launch.index('--memory') + 1])
+        test.assertIn('--cpus', original_launch); test.assertEqual('2', original_launch[original_launch.index('--cpus') + 1])
+        prefix = 'ORISO_ACCOUNT_MAINTENANCE_CONFIG='
+        indexes = [index for index, value in enumerate(original_launch) if value.startswith(prefix)]
+        test.assertEqual(1, len(indexes)); selected = indexes[0]
+        policy = json.loads(original_launch[selected][len(prefix):])
+        reduced = copy.deepcopy(policy)
+        user_profile = next(profile for profile in reduced['ordinaryProfiles'] if profile['id'] == 'user-v1')
+        test.assertIn('account.read', user_profile['selfOperations'])
+        user_profile['selfOperations'].remove('account.deactivate')
+        reduced_launch = original_launch.copy()
+        reduced_launch[selected] = prefix + json.dumps(reduced, separators=(',', ':'))
+        test.assertEqual([selected], [index for index, (left, right) in enumerate(zip(original_launch, reduced_launch)) if left != right])
+
+        def relaunch(command, phase):
+            subprocess.run(['docker', 'stop', '-t', '5', type(helper).name], check=True, capture_output=True, timeout=30)
+            subprocess.run(['docker', 'rm', type(helper).name], check=True, capture_output=True, timeout=30)
+            type(helper).memoryStart()
+            subprocess.run(command, check=True, capture_output=True, timeout=60)
+            type(helper).refresh_endpoint(phase); type(helper).ready()
+            helper.base = type(helper).base; helper.installer = type(helper).installer
+
+        try:
+            relaunch(reduced_launch, 'self-deactivation-outcome-grant-withdrawn')
+            denied_status, denied = outcome()
+            test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+            test.assertEqual(disabled, helper.admin('GET', '/users/' + account))
+            test.assertEqual(credentials, helper.admin('GET', '/users/' + account + '/credentials'))
+        finally:
+            relaunch(original_launch, 'self-deactivation-outcome-grant-restored')
+        test.assertEqual((200, result), outcome())
+        record['explicitSelfDeactivationPolicyWithdrawRestoreSameImageVolumeProvidersAndCaps'] = True
+        machine = helper.token('ACCOUNT_ADMIN')
+        machine_groups = helper.admin('GET', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/groups')
+        test.assertEqual(1, len(machine_groups))
+        machine_role = helper.admin('GET', '/roles/account-maintenance')
+        # The sole technical group is deliberately grant-free; native machine roles are direct.
+        test.assertEqual([], helper.admin('GET', '/groups/' + machine_groups[0]['id'] + '/role-mappings/realm'))
+        machine_direct = helper.admin('GET', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/role-mappings/realm')
+        test.assertEqual(set(ACTORS['ACCOUNT_ADMIN'][1]), {role['name'] for role in machine_direct})
+        helper.admin('DELETE', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/role-mappings/realm', [machine_role])
+        try:
+            denied_status, denied = outcome(bearer=machine)
+            test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+        finally:
+            helper.admin('POST', '/users/' + SUBJECTS['ACCOUNT_ADMIN'] + '/role-mappings/realm', [machine_role])
+        test.assertEqual((200, result), outcome())
+        record['currentMachineGrantRevocationChecksEvenPreviouslyValidJwt'] = True
+        test.assertEqual(events, native_events())
+
+        # Same UUID/name/group/tenant is still a different native incarnation after installer replacement.
+        helper.admin('DELETE', '/users/' + account)
+        replacement = copy.deepcopy(disabled)
+        replacement['createdTimestamp'] = native['createdTimestamp'] + 1000
+        replacement.pop('access', None); replacement.pop('userProfileMetadata', None)
+        replacement['credentials'] = [{'type': 'password', 'value': creation['account']['password'], 'temporary': False}]
+        helper.admin('POST', '/partialImport', {'ifResourceExists': 'FAIL', 'users': [replacement]})
+        helper.admin('PUT', '/users/' + account + '/groups/' + group)
+        # PartialImport may attach realm defaults; recreate the SAME original exact grant shape
+        # before the birth counterfactual, otherwise a different guard could explain refusal.
+        direct = helper.admin('GET', '/users/' + account + '/role-mappings/realm')
+        if direct:
+            helper.admin('DELETE', '/users/' + account + '/role-mappings/realm', direct)
+        test.assertEqual([], helper.admin('GET', '/users/' + account + '/role-mappings/realm'))
+        test.assertEqual({group}, {value['id'] for value in helper.admin('GET', '/users/' + account + '/groups')})
+        test.assertEqual({}, helper.admin('GET', '/users/' + account + '/role-mappings').get('clientMappings', {}))
+        fresh = helper.admin('GET', '/users/' + account)
+        for field in ['id', 'username', 'enabled', 'email', 'emailVerified', 'firstName', 'lastName', 'attributes']:
+            test.assertEqual(disabled.get(field), fresh.get(field))
+        test.assertNotEqual(native['createdTimestamp'], fresh['createdTimestamp'])
+        denied_status, denied = outcome()
+        test.assertEqual(403, denied_status); test.assertNotIn('receipt', denied)
+        test.assertEqual(fresh, helper.admin('GET', '/users/' + account))
+        record['recreatedSameUuidAndOtherOriginalFieldsCannotInheritOutcome'] = True
+    finally:
+        helper.account_id, helper.creation_input = original_account, original_creation

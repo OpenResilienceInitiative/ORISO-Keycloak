@@ -38,7 +38,7 @@ final class SmtpAuthorization {
       .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
       .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   private static final Set<String> ROLES = Set.of(
-      "smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical");
+      "config-wizard", "invitation-reservations", "consultant-import", "smtp-sync");
   private static final Set<String> AUDIENCES = Set.of(
       "oriso-task-commands", "consultingtypeservice", "tenantservice", "userservice", "agencyservice");
   private static final Set<String> CLAIMS = Set.of(
@@ -62,12 +62,12 @@ final class SmtpAuthorization {
     var auth = new BearerTokenAuthenticator(session).authenticate();
     if (auth == null) throw new NotAuthorizedException("Bearer");
     var token = auth.getToken();
-    var client = realm.getClientByClientId("backend-mail");
+    var client = realm.getClientByClientId("backend-setup");
     var user = auth.getUser();
     if (client == null || !client.isEnabled() || client.isPublicClient()
         || !client.isServiceAccountsEnabled() || client.isStandardFlowEnabled()
         || client.isDirectAccessGrantsEnabled() || client.isFullScopeAllowed()
-        || !"backend-mail".equals(token.getIssuedFor())
+        || !"backend-setup".equals(token.getIssuedFor())
         || !Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realmName).equals(token.getIssuer())
         || user == null || !user.isEnabled() || !subject.equals(user.getId())
         || !subject.equals(token.getSubject()) || !client.getId().equals(user.getServiceAccountClientLink())
@@ -187,10 +187,10 @@ final class SmtpAuthorization {
           || !"SMTP_SYNC".equals(claims.path("purpose").asText())
           || !operation.equals(claims.path("operation").asText())
           || !method.equals(claims.path("method").asText())
-          || !"MAIL".equals(claims.path("actor").asText())
+          || !"SETUP".equals(claims.path("actor").asText())
           || !realmName.equals(claims.path("realm").asText())
           || !target.equals(claims.path("target").asText())
-          || !"backend-mail".equals(claims.path("taskClient").asText())
+          || !"backend-setup".equals(claims.path("taskClient").asText())
           || !subject.equals(claims.path("taskSubject").asText())
           || !MessageDigest.isEqual(digest.getBytes(StandardCharsets.UTF_8),
                                     claims.path("payloadDigest").asText().getBytes(StandardCharsets.UTF_8))

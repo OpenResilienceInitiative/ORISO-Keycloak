@@ -1,1 +1,4 @@
 org.oriso.keycloak.lifecycle.LifecycleEntities
+org.oriso.keycloak.lifecycle.MaintenanceEntities
+org.oriso.keycloak.lifecycle.ProtectedInvitationEntities
+org.oriso.keycloak.lifecycle.MagicLinkEntities

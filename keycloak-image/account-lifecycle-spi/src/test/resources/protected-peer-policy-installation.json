@@ -1,0 +1,124 @@
+{
+  "realmId": "native-synthetic-realm",
+  "realmName": "synthetic",
+  "issuer": "https://auth.example.test/realms/synthetic",
+  "technicalSubjects": [
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+    "00000000-0000-4000-8000-000000000003",
+    "00000000-0000-4000-8000-000000000004",
+    "00000000-0000-4000-8000-000000000005"
+  ],
+  "technicalGroupIds": [
+    "technical-group"
+  ],
+  "technicalRoles": [
+    "account-maintenance",
+    "account-provisioning",
+    "account-read",
+    "appointment-participant-cleanup",
+    "appointment-sync",
+    "config-wizard",
+    "consultant-import",
+    "invitation-reservations",
+    "matrix-agency",
+    "matrix-agency-provision",
+    "notification-dispatch",
+    "notifications-technical",
+    "otp-config-admin",
+    "runtime-policy",
+    "session-exchange",
+    "smtp-sync",
+    "system-email-delivery"
+  ],
+  "actorSubjects": {
+    "SETUP": "00000000-0000-4000-8000-000000000001",
+    "ACCOUNT_CREATE": "00000000-0000-4000-8000-000000000002",
+    "ACCOUNT_ADMIN": "00000000-0000-4000-8000-000000000003",
+    "MAIL": "00000000-0000-4000-8000-000000000004",
+    "RUNTIME": "00000000-0000-4000-8000-000000000005"
+  },
+  "machineAudienceSets": {
+    "SETUP": [
+      "agencyservice",
+      "consultingtypeservice",
+      "oriso-task-commands",
+      "tenantservice",
+      "userservice"
+    ],
+    "ACCOUNT_CREATE": [
+      "oriso-account-lifecycle",
+      "userservice"
+    ],
+    "ACCOUNT_ADMIN": [
+      "oriso-account-lifecycle",
+      "oriso-otp",
+      "userservice"
+    ]
+  },
+  "bindings": [
+    {
+      "subject": "00000000-0000-4000-8000-000000000006",
+      "authority": "PLATFORM",
+      "authorizerTenantIds": [
+        0
+      ],
+      "humanClientIds": [
+        "protected-human-web"
+      ],
+      "audienceSets": [
+        [
+          "userservice"
+        ]
+      ],
+      "protectedProfileIds": [
+        "platform-v1",
+        "tenant-v1"
+      ],
+      "realmRoles": [
+        "agency-admin",
+        "tenant-admin"
+      ],
+      "clientRoles": {},
+      "version": 1
+    }
+  ],
+  "profiles": [
+    {
+      "id": "platform-v1",
+      "version": 1,
+      "kind": "PLATFORM_ADMIN",
+      "tenantModes": [
+        "EXISTING"
+      ],
+      "groupId": "platform-v1-group",
+      "groupPath": "/protected-admins/platform-v1",
+      "realmRoles": [
+        "agency-admin",
+        "tenant-admin"
+      ],
+      "clientRoles": {},
+      "usernamePolicy": "USERNAME_TRANSCODER_V1",
+      "firstNamePolicy": "INVITE_WITH_EMAIL_LOCAL_PART_FALLBACK",
+      "lastNamePolicy": "INVITE_WITH_ADMIN_FALLBACK"
+    },
+    {
+      "id": "tenant-v1",
+      "version": 1,
+      "kind": "TENANT_ADMIN",
+      "tenantModes": [
+        "EXISTING",
+        "RESERVED_NEW"
+      ],
+      "groupId": "tenant-v1-group",
+      "groupPath": "/protected-admins/tenant-v1",
+      "realmRoles": [
+        "tenant-admin"
+      ],
+      "clientRoles": {},
+      "usernamePolicy": "USERNAME_TRANSCODER_V1",
+      "firstNamePolicy": "INVITE_WITH_EMAIL_LOCAL_PART_FALLBACK",
+      "lastNamePolicy": "INVITE_WITH_ADMIN_FALLBACK"
+    }
+  ]
+}

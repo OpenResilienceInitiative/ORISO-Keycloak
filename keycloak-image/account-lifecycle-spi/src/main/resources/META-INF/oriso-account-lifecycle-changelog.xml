@@ -29,4 +29,9 @@
     </createTable>
     <addForeignKeyConstraint baseTableName="ORISO_ACCOUNT_LIFECYCLE_ATTEMPT" baseColumnNames="REALM_ID" referencedTableName="REALM" referencedColumnNames="ID" constraintName="ORISO_ACCOUNT_LIFECYCLE_REALM" onDelete="CASCADE"/>
   </changeSet>
+  <changeSet id="oriso-account-lifecycle-original-native-v1" author="oriso">
+    <addColumn tableName="ORISO_ACCOUNT_LIFECYCLE_ATTEMPT">
+      <column name="ORIGINAL_NATIVE_JSON" type="VARCHAR(512)"/>
+    </addColumn>
+  </changeSet>
 </databaseChangeLog>

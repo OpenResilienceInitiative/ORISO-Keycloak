@@ -1,6 +1,6 @@
 #!/bin/bash
 # Applies the 2FA direct-grant flow to an EXISTING realm (fresh imports get it
-# from realm.json automatically). Idempotent: deletes and recreates the flow.
+# from realm.json automatically). Reconciles in place, preserving execution IDs.
 #
 # Run inside (or via kubectl exec into) the Keycloak pod, which must run the
 # oriso-keycloak image (stock Keycloak lacks the app-/email-authenticator SPI):
@@ -31,79 +31,129 @@ if [ -n "${KC_ADMIN_USER:-}" ]; then
     --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD"
 fi
 
-# rebind to stock flow first so the old custom flow can be deleted
-$KC update "realms/$REALM" -s 'directGrantFlow=direct grant'
-
-# Before deleting the flow, capture any existing email-otp-config id from the
-# current email-authenticator execution row. Execution rows are FLAT JSON
-# (no nested `config:{...}` block), so a simple grep on the row is
-# parser-safe — whereas scanning the realm's authenticatorConfig array is
-# not, because each entry contains a nested `config` object whose braces
-# defeat regex-based object matching.
-EXISTING_CONFIG_ID=""
-if $KC get "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
-    > /tmp/2fa-old-email-execs.json 2>/dev/null; then
-  OLD_EMAIL_ROW=$(tr -d ' \n' < /tmp/2fa-old-email-execs.json \
-    | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' || true)
-  EXISTING_CONFIG_ID=$(echo "$OLD_EMAIL_ROW" \
-    | grep -o '"authenticationConfig":"[^"]*"' \
-    | sed 's/"authenticationConfig":"\([^"]*\)"/\1/' || true)
-fi
-
-for alias in "$FLOW"; do
-  ID=$($KC get authentication/flows -r "$REALM" --fields id,alias 2>/dev/null \
-    | tr -d ' \n' | grep -o "{\"id\":\"[^\"]*\",\"alias\":\"$alias\"}" \
-    | sed 's/.*"id":"\([^"]*\)".*/\1/' || true)
-  if [ -n "$ID" ]; then
-    $KC delete "authentication/flows/$ID" -r "$REALM"
-    echo "deleted existing flow $alias"
+# Refuse an older image before changing its realm. All three providers ship in
+# the same installed lifecycle module; a partial password-only flow is not a repair.
+PROVIDERS=$($KC get authentication/authenticator-providers -r "$REALM" | tr -d ' \n')
+for provider in oriso-claimed-magic-link oriso-magic-link-ordinary-password oriso-claimed-magic-link-attach; do
+  if ! echo "$PROVIDERS" | grep -q "\"id\":\"$provider\""; then
+    echo "ERROR: required authenticator $provider is not installed; realm unchanged" >&2
+    exit 1
   fi
 done
 
-$KC create authentication/flows -r "$REALM" \
-  -s alias="$FLOW" -s providerId=basic-flow -s topLevel=true -s builtIn=false
-$KC create "authentication/flows/$FLOW/executions/execution" -r "$REALM" -s provider=direct-grant-validate-username
-$KC create "authentication/flows/$FLOW/executions/execution" -r "$REALM" -s provider=direct-grant-validate-password
-$KC create "authentication/flows/$FLOW/executions/flow" -r "$REALM" -s alias="app-otp-conditional" -s type=basic-flow
-$KC create "authentication/flows/app-otp-conditional/executions/execution" -r "$REALM" -s provider=conditional-user-configured
-$KC create "authentication/flows/app-otp-conditional/executions/execution" -r "$REALM" -s provider=app-authenticator
-$KC create "authentication/flows/app-otp-conditional/executions/execution" -r "$REALM" -s provider=direct-grant-validate-otp
-$KC create "authentication/flows/$FLOW/executions/flow" -r "$REALM" -s alias="email-otp-conditional" -s type=basic-flow
-$KC create "authentication/flows/email-otp-conditional/executions/execution" -r "$REALM" -s provider=conditional-user-configured
-$KC create "authentication/flows/email-otp-conditional/executions/execution" -r "$REALM" -s provider=email-authenticator
+# Never delete/recreate a current flow or temporarily bind the stock password
+# flow. Keep its Magic Link, OTP and configuration identities through reruns.
+FLOWS=$($KC get authentication/flows -r "$REALM" --fields id,alias | tr -d ' \n')
+if ! echo "$FLOWS" | grep -q "\"alias\":\"$FLOW\""; then
+  $KC create authentication/flows -r "$REALM" \
+    -s alias="$FLOW" -s providerId=basic-flow -s topLevel=true -s builtIn=false
+fi
 
-# set requirements (subflow rows -> CONDITIONAL, everything else -> REQUIRED)
-$KC get "authentication/flows/$FLOW/executions" -r "$REALM" > /tmp/2fa-execs.json
-# no python/jq in the keycloak image: rewrite requirement per execution with sed
-# on single-object slices produced by kcadm (one GET per execution id).
-ids=$(tr -d ' \n' < /tmp/2fa-execs.json | grep -o '"id":"[^"]*"' | sed 's/"id":"\([^"]*\)"/\1/')
-for id in $ids; do
-  row=$(tr -d ' \n' < /tmp/2fa-execs.json | grep -o "{[^{}]*\"id\":\"$id\"[^{}]*}")
-  if echo "$row" | grep -q '"authenticationFlow":true'; then req=CONDITIONAL; else req=REQUIRED; fi
-  echo "$row" | sed "s/\"requirement\":\"[A-Z]*\"/\"requirement\":\"$req\"/" > /tmp/2fa-one.json
-  $KC update "authentication/flows/$FLOW/executions" -r "$REALM" -f /tmp/2fa-one.json
+execution_rows() {
+  $KC get "authentication/flows/$1/executions" -r "$REALM" | tr -d ' \n'
+}
+
+# The endpoint flattens descendants. Select only the exact immediate execution,
+# so legacy top-level password rows cannot be confused with their replacements.
+execution_row() {
+  local flow="$1" key="$2" value="$3" row level rows
+  rows=$(execution_rows "$flow") || return $?
+  rows=$(echo "$rows" | grep -o '{[^{}]*}' || true)
+  while read -r row; do
+    level=$(echo "$row" | grep -o '"level":[0-9]*' | sed 's/"level"://' || true)
+    [ "${level:-0}" = 0 ] || continue
+    if echo "$row" | grep -q "\"$key\":\"$value\""; then echo "$row"; fi
+  done <<< "$rows"
+}
+
+reconcile_execution() {
+  local flow="$1" key="$2" value="$3" requirement="$4" priority="$5" row count
+  row=$(execution_row "$flow" "$key" "$value")
+  if [ -z "$row" ]; then
+    if [ "$key" = displayName ]; then
+      $KC create "authentication/flows/$flow/executions/flow" -r "$REALM" -s alias="$value" -s type=basic-flow
+    else
+      $KC create "authentication/flows/$flow/executions/execution" -r "$REALM" -s provider="$value"
+    fi
+    row=$(execution_row "$flow" "$key" "$value")
+  fi
+  count=$(echo "$row" | grep -c '"id":')
+  if [ "$count" != 1 ]; then
+    echo "ERROR: expected one $value execution in $flow; refusing ambiguous repair" >&2
+    exit 1
+  fi
+  row=$(echo "$row" | sed "s/\"requirement\":\"[A-Z]*\"/\"requirement\":\"$requirement\"/")
+  if echo "$row" | grep -q '"priority":'; then
+    row=$(echo "$row" | sed "s/\"priority\":[0-9]*/\"priority\":$priority/")
+  else
+    row=$(echo "$row" | sed "s/}$/,\"priority\":$priority}/")
+  fi
+  echo "$row" > /tmp/2fa-one.json
+  $KC update "authentication/flows/$flow/executions" -r "$REALM" -f /tmp/2fa-one.json
+}
+
+reconcile_execution "$FLOW" providerId oriso-claimed-magic-link REQUIRED 0
+reconcile_execution "$FLOW" displayName oriso-ordinary-password CONDITIONAL 10
+reconcile_execution oriso-ordinary-password providerId oriso-magic-link-ordinary-password REQUIRED 0
+reconcile_execution oriso-ordinary-password providerId direct-grant-validate-username REQUIRED 10
+reconcile_execution oriso-ordinary-password providerId direct-grant-validate-password REQUIRED 20
+reconcile_execution "$FLOW" displayName app-otp-conditional CONDITIONAL 30
+reconcile_execution app-otp-conditional providerId conditional-user-configured REQUIRED 10
+reconcile_execution app-otp-conditional providerId app-authenticator REQUIRED 20
+reconcile_execution app-otp-conditional providerId direct-grant-validate-otp REQUIRED 30
+reconcile_execution "$FLOW" displayName email-otp-conditional CONDITIONAL 40
+reconcile_execution email-otp-conditional providerId conditional-user-configured REQUIRED 10
+reconcile_execution email-otp-conditional providerId email-authenticator REQUIRED 20
+reconcile_execution "$FLOW" providerId oriso-claimed-magic-link-attach REQUIRED 50
+
+# Only the legacy password executions move. Their required replacements now
+# exist inside the conditional password flow. No current Magic Link/OTP row is deleted.
+for provider in direct-grant-validate-username direct-grant-validate-password; do
+  row=$(execution_row "$FLOW" providerId "$provider")
+  if [ -n "$row" ]; then
+    if [ "$(echo "$row" | grep -c '"id":')" != 1 ]; then
+      echo "ERROR: duplicate legacy password execution; refusing ambiguous repair" >&2; exit 1
+    fi
+    id=$(echo "$row" | grep -o '"id":"[^"]*"' | sed 's/"id":"\([^\"]*\)"/\1/')
+    $KC delete "authentication/executions/$id" -r "$REALM"
+  fi
 done
 
-# Attach email-otp-config to the freshly recreated email-authenticator execution
-# so the SPI reads length/ttl/senderId/simulation from realm config instead of
-# the fallbacks hard-coded in MemoryOtpService.
-#
-# Truly idempotent: Keycloak does not cascade-delete authenticatorConfig rows
-# when the executions that reference them are removed. If EXISTING_CONFIG_ID
-# was captured above (pre-delete), we reuse and rebind that row so the config
-# id stays stable across reruns. Otherwise we create + attach fresh.
+# Do not claim successful reconciliation while an unknown extra authentication
+# path remains. Every named row above is unique; require the exact direct counts.
+require_execution_count() {
+  local flow="$1" expected="$2" rows row level count=0
+  rows=$(execution_rows "$flow")
+  rows=$(echo "$rows" | grep -o '{[^{}]*}' || true)
+  while read -r row; do
+    [ -n "$row" ] || continue
+    level=$(echo "$row" | grep -o '"level":[0-9]*' | sed 's/"level"://' || true)
+    if [ "${level:-0}" = 0 ]; then count=$((count + 1)); fi
+  done <<< "$rows"
+  if [ "$count" != "$expected" ]; then
+    echo "ERROR: unexpected executions in $flow; inspect them before retrying" >&2; exit 1
+  fi
+}
+require_execution_count "$FLOW" 5
+require_execution_count oriso-ordinary-password 3
+require_execution_count app-otp-conditional 3
+require_execution_count email-otp-conditional 2
 
+# Existing execution and authenticator configuration identities survive migration.
+EXISTING_CONFIG_ID=$(execution_row email-otp-conditional providerId email-authenticator \
+  | grep -o '"authenticationConfig":"[^"]*"' \
+  | sed 's/"authenticationConfig":"\([^\"]*\)"/\1/' || true)
+
+# Reuse the existing email authenticator configuration; create it only when absent.
+# Its identity survives both legacy migration and repeated current-flow repair.
 EMAIL_AUTH_ROW=$($KC get "authentication/flows/email-otp-conditional/executions" -r "$REALM" \
   | tr -d ' \n' \
   | grep -o '{[^{}]*"providerId":"email-authenticator"[^{}]*}' || true)
 EMAIL_AUTH_ID=$(echo "$EMAIL_AUTH_ROW" | grep -o '"id":"[^"]*"' | head -1 \
   | sed 's/"id":"\([^"]*\)"/\1/' || true)
 
-# Deleting the flow takes its authenticatorConfig rows with it, so the id
-# captured before the delete is usually already gone. Reusing it blindly makes
-# the update answer 404 and `set -e` aborts the run BEFORE the flow is bound
-# back to direct-grant-2fa, which leaves the realm on the stock flow with no
-# second factor at all. Only reuse an id the realm still has.
+# A dangling configuration reference can remain from an older failed repair.
+# Only reuse a configuration that the realm still has.
 if [ -n "$EXISTING_CONFIG_ID" ] \
     && ! $KC get "authentication/config/$EXISTING_CONFIG_ID" -r "$REALM" >/dev/null 2>&1; then
   echo "previous email-otp-config ($EXISTING_CONFIG_ID) is gone; creating a fresh one"

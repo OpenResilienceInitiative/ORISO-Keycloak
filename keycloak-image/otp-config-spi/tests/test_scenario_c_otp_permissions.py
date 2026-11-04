@@ -26,11 +26,11 @@ from scenario_c_otp_fixture import (
 
 
 class ScenarioCOtpPermissions(ScenarioCOtpFixture, unittest.TestCase):
-    def test_consultant_app_and_received_mail_protocol_cover_all_five_routes(self):
-        self.positive_protocol("ordinary-consultant", self.ordinary)
+    def test_prior_native_power_over_consultant_is_not_scoped_otp_authority(self):
+        self.denied_prior_native_powers("ordinary-consultant", self.ordinary)
 
-    def test_reviewed_combined_centre_admin_uses_all_five_routes(self):
-        self.positive_protocol("ordinary-centre-admin", self.centre)
+    def test_prior_native_power_over_centre_admin_is_not_scoped_otp_authority(self):
+        self.denied_prior_native_powers("ordinary-centre-admin", self.centre)
 
     def test_protected_target_all_five_routes_have_no_credential_or_mail_effect(self):
         self.denied_routes(self.token(), "protected-platform", self.protected)
@@ -389,7 +389,7 @@ class ScenarioCOtpPermissions(ScenarioCOtpFixture, unittest.TestCase):
             )[0],
         )
         self.assertEqual(
-            200,
+            403,
             self.otp(token, "GET", "fetch-otp-setup-info", "ordinary-consultant")[0],
         )
         self.assertEqual(
