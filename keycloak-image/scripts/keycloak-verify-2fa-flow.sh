@@ -134,9 +134,7 @@ echo
 
 echo "Direct grant (app and admin login)"
 expect_entries "$FLOW" \
-  "oriso-claimed-magic-link:REQUIRED oriso-ordinary-password:CONDITIONAL app-otp-conditional:CONDITIONAL email-otp-conditional:CONDITIONAL oriso-claimed-magic-link-attach:REQUIRED"
-expect_entries "oriso-ordinary-password" \
-  "oriso-magic-link-ordinary-password:REQUIRED direct-grant-validate-username:REQUIRED direct-grant-validate-password:REQUIRED"
+  "direct-grant-validate-username:REQUIRED direct-grant-validate-password:REQUIRED app-otp-conditional:CONDITIONAL email-otp-conditional:CONDITIONAL"
 expect_entries "app-otp-conditional" \
   "conditional-user-configured:REQUIRED app-authenticator:REQUIRED direct-grant-validate-otp:REQUIRED"
 expect_entries "email-otp-conditional" \

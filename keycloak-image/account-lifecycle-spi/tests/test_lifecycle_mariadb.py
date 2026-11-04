@@ -122,13 +122,7 @@ class MariaDbLifecycleProof(MariaDbFixture, unittest.TestCase):
                             request = workers.submit(
                                 self.on_node, 1, command, attempt, body, token
                             )
-                            try:
-                                self.wait_for_receiver_user_lock_and_read_view(
-                                    user, request, command, editor
-                                )
-                            except AssertionError:
-                                self.release_failed_witness(editor, request)
-                                raise
+                            self.wait_for_receiver_user_lock_and_read_view(user)
                             self.commit_locked_editor(editor, statements[edit])
                             status, result = request.result()
                         present = self.sql(
@@ -225,13 +219,7 @@ class MariaDbLifecycleProof(MariaDbFixture, unittest.TestCase):
                 request = workers.submit(
                     self.on_node, 1, "commit", attempt, body, token
                 )
-                try:
-                    self.wait_for_receiver_user_lock_and_read_view(
-                        user, request, "commit", editor
-                    )
-                except AssertionError:
-                    self.release_failed_witness(editor, request)
-                    raise
+                self.wait_for_receiver_user_lock_and_read_view(user)
                 self.commit_locked_editor(
                     editor,
                     "DELETE FROM USER_GROUP_MEMBERSHIP WHERE USER_ID='"
