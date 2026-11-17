@@ -168,6 +168,15 @@
         "attributes": {}
       },
       {
+        "id": "5c0e7a1d-3b8f-4c62-9e4a-71d2f0a8b6c3",
+        "name": "statistics-reader",
+        "description": "Read-only platform statistics and CSV export; created by platform admins only (ORISO-UserService#1666)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "online-beratung",
+        "attributes": {}
+      },
+      {
         "id": "b02a8e11-a4aa-47ee-ab00-dc3fa6211fec",
         "name": "topic-admin",
         "description": "",
