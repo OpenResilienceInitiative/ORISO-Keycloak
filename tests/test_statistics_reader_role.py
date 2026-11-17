@@ -36,6 +36,13 @@ class StatisticsReaderRole(unittest.TestCase):
         subprocess.run(['bash', '-n', str(script)], check=True)
         self.assertIn('statistics-reader', script.read_text())
 
+    def test_apply_script_never_takes_a_password_or_fixed_temp_file(self):
+        text = (ROOT / 'scripts' / 'keycloak-apply-statistics-reader-role.sh').read_text()
+        code = [l for l in text.splitlines() if not l.lstrip().startswith('#')]
+        self.assertFalse(any('--password' in l for l in code))
+        self.assertNotIn('/tmp/', text)
+        self.assertIn('mktemp', text)
+
 
 if __name__ == '__main__':
     unittest.main()

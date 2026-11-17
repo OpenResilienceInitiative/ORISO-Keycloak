@@ -5,8 +5,10 @@
 #
 #   kubectl -n <ns> exec deploy/keycloak -- bash -s < scripts/keycloak-apply-statistics-reader-role.sh
 #
-# Requires admin credentials; export KC_ADMIN_USER / KC_ADMIN_PASSWORD first or
-# log kcadm in beforehand. Realm defaults to online-beratung (override: REALM).
+# Log kcadm in first, interactively, so no password lands in argv or shell
+# history:  kcadm.sh config credentials --server <url> --realm master --user <admin>
+# The script refuses to run without a valid kcadm session.
+# Realm defaults to online-beratung (override: REALM).
 # The role is assigned ONLY by UserService when a platform admin creates a
 # Statistik-Leser; never add it to a default role or group.
 set -euo pipefail
@@ -14,23 +16,25 @@ set -euo pipefail
 KC=/opt/keycloak/bin/kcadm.sh
 REALM="${REALM:-online-beratung}"
 ROLE=statistics-reader
-KC_SERVER="${KC_SERVER:-http://localhost:8080${KC_HTTP_RELATIVE_PATH:-}}"
+ROLE_JSON="$(mktemp)"
+trap 'rm -f "$ROLE_JSON"' EXIT
 
-if [ -n "${KC_ADMIN_USER:-}" ]; then
-  $KC config credentials --server "$KC_SERVER" --realm master \
-    --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD"
+if ! $KC get "realms/$REALM" --fields realm > /dev/null 2>&1; then
+  echo "ERROR: kcadm is not logged in (or realm $REALM does not exist)." >&2
+  echo "Run: $KC config credentials --server <url> --realm master --user <admin>" >&2
+  exit 1
 fi
 
-if $KC get "roles/$ROLE" -r "$REALM" > /tmp/statistics-reader-role.json 2>/dev/null; then
+if $KC get "roles/$ROLE" -r "$REALM" > "$ROLE_JSON" 2>/dev/null; then
   echo "role $ROLE already exists in $REALM"
 else
   $KC create roles -r "$REALM" -s "name=$ROLE" \
     -s 'description=Read-only platform statistics and CSV export; created by platform admins only (ORISO-UserService#1666)'
   echo "created role $ROLE in $REALM"
-  $KC get "roles/$ROLE" -r "$REALM" > /tmp/statistics-reader-role.json
+  $KC get "roles/$ROLE" -r "$REALM" > "$ROLE_JSON"
 fi
 
-if tr -d ' \n' < /tmp/statistics-reader-role.json | grep -q '"composite":true'; then
+if tr -d ' \n' < "$ROLE_JSON" | grep -q '"composite":true'; then
   echo "ERROR: $ROLE is composite; it must not grant any other role" >&2
   exit 1
 fi
