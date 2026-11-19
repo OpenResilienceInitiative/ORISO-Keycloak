@@ -42,6 +42,15 @@ jobs:
           image_id=$(cat "$RUNNER_TEMP/oriso-c-image-id")
           python scripts/ci/scenario-c-image-proof.py "$image_id" \
             --report proof-reports/installed-image.json
+      - name: Scan the exact custom Keycloak image without publishing
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: oriso-keycloak-c-proof:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
       - name: Remove only containers labelled by this diagnostic on its fresh runner
         if: always()
         run: |
