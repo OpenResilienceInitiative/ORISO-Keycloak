@@ -6,7 +6,6 @@ import de.onlineberatung.otp.Otp;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.List;
-import org.jetbrains.annotations.NotNull;
 import org.keycloak.credential.CredentialModel;
 import org.keycloak.util.JsonSerialization;
 
@@ -47,7 +46,6 @@ public class MailOtpCredentialModel extends CredentialModel {
     return serialize(clock, credentialModel);
   }
 
-  @NotNull
   private static MailOtpCredentialModel serialize(Clock clock,
       MailOtpCredentialModel credentialModel) {
     credentialModel.setType(TYPE);
