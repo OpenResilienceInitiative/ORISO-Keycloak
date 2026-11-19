@@ -5,7 +5,7 @@
 # sender renders for email-OTP; the realm's emailTheme must be set to `oriso`.
 
 ARG MAVEN_IMAGE=maven:3.9-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320
-ARG KEYCLOAK_IMAGE=quay.io/keycloak/keycloak:26.6.3@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992
+ARG KEYCLOAK_IMAGE=quay.io/keycloak/keycloak:26.8.2-3@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
 
 FROM ${MAVEN_IMAGE} AS maven-build
 ENV MAVEN_OPTS="-Xmx512m -XX:MaxMetaspaceSize=256m -XX:ActiveProcessorCount=2"
