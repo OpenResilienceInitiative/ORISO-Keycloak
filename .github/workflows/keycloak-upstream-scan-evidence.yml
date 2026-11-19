@@ -1,0 +1,34 @@
+name: Keycloak official upstream image scan evidence
+
+on:
+  push:
+    branches: [evidence/541-keycloak-upstream-images]
+
+permissions: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 26.7.5
+            digest: sha256:37dbaf6f0722c9ec246335f36e1ef8b2e6cb960f7c27e0d8c615121a3d475a85
+          - version: 26.8.2
+            digest: sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
+    steps:
+      - name: Pull one officially published image by digest
+        env:
+          IMAGE: quay.io/keycloak/keycloak@${{ matrix.digest }}
+        run: docker pull --platform linux/amd64 "$IMAGE"
+      - name: Scan with the existing fixable high or critical policy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: quay.io/keycloak/keycloak@${{ matrix.digest }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
