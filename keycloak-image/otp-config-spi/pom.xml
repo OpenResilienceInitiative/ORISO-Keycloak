@@ -70,19 +70,6 @@
       <scope>provided</scope>
     </dependency>
 
-    <!-- prevents log4j dependency from openshift-restclient-java:8.0.0.Final: -->
-    <dependency>
-      <groupId>com.openshift</groupId>
-      <artifactId>openshift-restclient-java</artifactId>
-      <version>9.0.5.Final</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.yaml</groupId>
-          <artifactId>snakeyaml</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-
     <!-- Keycloak >= 24 no longer exposes a JAX-RS RuntimeDelegate transitively;
          tests build jakarta.ws.rs.core.Response and need an implementation. -->
     <dependency>
