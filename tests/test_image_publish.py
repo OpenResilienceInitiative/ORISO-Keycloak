@@ -44,4 +44,4 @@ class ImagePublish(unittest.TestCase):
         self.assertIn("severity: CRITICAL,HIGH", scan)
         self.assertNotRegex(scan, r"(?m)^\s*(if|continue-on-error):")
         self.assertNotRegex(publish, r"always\(\)|continue-on-error:")
-        self.assertIn("type=raw,value=26.6.3-otp,", source)
+        self.assertIn("type=raw,value=26.8.2-otp,", source)
