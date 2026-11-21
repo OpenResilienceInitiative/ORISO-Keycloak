@@ -153,8 +153,10 @@ final class SmtpAuthorization {
       if (stores.getResourceStore().findByResourceServer(server).stream()
           .anyMatch(resource -> !represented.contains(resource.getId()))) denied();
       // Same identity, context, typed permission and native DecisionPermissionCollector
-      // path as Keycloak26.6.3 MgmtPermissions; no local policy/condition solver.
-      var context = new DefaultEvaluationContext(new KeycloakIdentity(token, session, realm), session);
+      // path as Keycloak 26.8 MgmtPermissions (KeycloakIdentity with ignoreTokenRoles=true;
+      // the 3-argument IDToken constructor resolves a service account to its client id,
+      // so user policies would silently not match). No local policy/condition solver.
+      var context = new DefaultEvaluationContext(new KeycloakIdentity(token, session, realm, true), session);
       var decisions = authorization.evaluators().from(inventory.values(), server, context)
           .getDecision(server, null, DecisionPermissionCollector.class);
       if (!decisions.results().isEmpty()) denied();
