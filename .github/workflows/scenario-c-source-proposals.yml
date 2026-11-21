@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           docker info > /dev/null
-          docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
+          docker pull quay.io/keycloak/keycloak@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3 > /dev/null
           python - <<'PY'
           import contextlib, hashlib, importlib.util, io, json, os, pathlib, unittest
           script, jar = pathlib.Path(os.environ["PROOF_SCRIPT"]), pathlib.Path(os.environ["PROOF_JAR"])
