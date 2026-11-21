@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-IMAGE = "quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992"
+IMAGE = "quay.io/keycloak/keycloak@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3"
 REALM = "scenario-c-lifecycle-fixture"
 INSTALLER = "synthetic-lifecycle-installer-password-0001"
 CONTEXT_KEY = bytes(range(32))
@@ -133,7 +133,7 @@ class LifecycleFixture:
             "-e",
             "JAVA_OPTS_APPEND=-Xms128m -Xmx512m -XX:ActiveProcessorCount=2",
             "-e",
-            "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer",
+            "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer", "-e", "KC_SPI_ADMIN__AUDIENCE_CHECK_ENABLED=false",  # Same as the ORISO image (Keycloak#78).
             "-e",
             "KC_BOOTSTRAP_ADMIN_PASSWORD=" + INSTALLER,
             "-e",
