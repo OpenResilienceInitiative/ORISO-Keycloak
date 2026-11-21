@@ -133,7 +133,7 @@ class LifecycleFixture:
             "-e",
             "JAVA_OPTS_APPEND=-Xms128m -Xmx512m -XX:ActiveProcessorCount=2",
             "-e",
-            "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer",
+            "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer", "-e", "KC_SPI_ADMIN__AUDIENCE_CHECK_ENABLED=false",  # Same as the ORISO image (Keycloak#78).
             "-e",
             "KC_BOOTSTRAP_ADMIN_PASSWORD=" + INSTALLER,
             "-e",

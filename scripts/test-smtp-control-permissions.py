@@ -98,7 +98,7 @@ class SmtpControlPermissions(unittest.TestCase):
                "--label", "oriso-smtp-run-id=" + cls.run_id, "--network", cls.network,
                "--memory=768m", "--memory-swap=768m", "--cpus=2", "--pids-limit=256",
                "-p", "127.0.0.1::8080", "-e", "JAVA_OPTS_APPEND=-Xmx384m -XX:ActiveProcessorCount=2",
-               "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer",
+               "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer", "-e", "KC_SPI_ADMIN__AUDIENCE_CHECK_ENABLED=false",  # Same as the ORISO image (Keycloak#78).
                "-e", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + INSTALLER,
                "-e", "ORISO_SMTP_CONTROL_ENABLED=true", "-e", "ORISO_SMTP_CONTROL_REALM=" + REALM,
                "-e", "IDENTITY_MAIL_SERVICE_SUBJECT=" + SUBJECT,

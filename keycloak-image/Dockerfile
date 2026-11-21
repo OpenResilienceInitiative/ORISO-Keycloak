@@ -44,6 +44,12 @@ RUN /opt/keycloak/bin/kc.sh build
 
 FROM ${KEYCLOAK_IMAGE}
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
+# Keycloak 26.8.2 (CVE-2026-19688) rejects Admin API tokens from clients without
+# the new `kc-admin-api` scope. ORISO services call the Admin API through their
+# own clients (backend-admin, backend-technical, task identities), which do not
+# have that scope yet. Keep the 26.6.3 behaviour until the realm assigns the
+# scope; remove this line in that follow-up, before Staging.
+ENV KC_SPI_ADMIN__AUDIENCE_CHECK_ENABLED=false
 # The realm contract check travels with the image so the deploy-time job and the
 # operator run the same file. A copy in the chart would drift from this one the
 # same way a live realm drifts from realm.json.
