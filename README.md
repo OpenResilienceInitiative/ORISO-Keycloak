@@ -45,6 +45,7 @@ The `realm.json` file contains the complete realm configuration including:
   - `agency-admin` - Agency administration role
   - `tenant-admin` - Tenant administration role
   - `technical` - Technical role for service accounts
+  - `statistics-reader` - Read-only platform statistics and CSV export (ORISO-UserService#1666). Running realms: `scripts/keycloak-apply-statistics-reader-role.sh`
 - **Custom Scopes**: `app-custom` (includes username, tenantId, userId claims)
 - **Token Lifespans**:
   - Access Token: 18000s (5 hours)

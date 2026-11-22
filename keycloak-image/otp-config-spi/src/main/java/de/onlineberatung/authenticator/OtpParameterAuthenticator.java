@@ -10,7 +10,6 @@ import jakarta.ws.rs.core.Response.Status;
 import java.util.Collections;
 import java.util.List;
 import org.keycloak.authentication.AuthenticationFlowContext;
-import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.authenticators.directgrant.AbstractDirectGrantAuthenticator;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.AuthenticationExecutionModel.Requirement;
@@ -41,11 +40,15 @@ public class OtpParameterAuthenticator extends AbstractDirectGrantAuthenticator 
     if (otpOfRequest == null || otpOfRequest.isBlank()) {
       Challenge challengeResponse = new Challenge().error("invalid_grant")
           .errorDescription("Missing totp").otpType(OtpType.APP);
-      context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,
-          Response.status(Status.BAD_REQUEST).entity(challengeResponse)
+      context.challenge(Response.status(Status.BAD_REQUEST).entity(challengeResponse)
               .type(MediaType.APPLICATION_JSON_TYPE).build());
       return;
     }
+
+    // Keycloak's stock direct-grant OTP validator reads only "totp". Keep the public
+    // "otp" alias, but pass the exact selected value to that validator so it still owns
+    // credential verification. If both aliases are present, "otp" wins consistently.
+    context.getHttpRequest().getDecodedFormParameters().putSingle("totp", otpOfRequest);
     context.success();
   }
 

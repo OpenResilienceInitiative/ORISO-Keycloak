@@ -23,6 +23,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Verify backend service-client export
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
       - name: Compile and Package Java application
         uses: ./.github/actions/maven-build
         with:

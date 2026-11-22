@@ -73,6 +73,9 @@ public class OtpMailAuthenticatorParameterizedTest {
     decodedFormParams.put("otp", Collections.singletonList("765432"));
     when(httpRequest.getDecodedFormParameters()).thenReturn(decodedFormParams);
     otpService = mock(OtpService.class);
+    // A mock would answer 0, and then the first wrong code would already be the last
+    // one and start a lockout. The real service tolerates three.
+    when(otpService.maxFailedValidations()).thenReturn(3);
     RealmModel realm = mock(RealmModel.class);
     when(authFlow.getRealm()).thenReturn(realm);
     UserModel user = mock(UserModel.class);
@@ -102,7 +105,7 @@ public class OtpMailAuthenticatorParameterizedTest {
       assertThat(responseCaptor.getValue().getStatus()).isEqualTo(httpStatusExpected);
     } else {
       verify(authFlow).success();
-      verify(credentialService).invalidate(credentialModel, credentialContext);
+      verify(credentialService).acceptCode(credentialModel, credentialContext);
     }
   }
 }

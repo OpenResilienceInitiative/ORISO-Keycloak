@@ -1,0 +1,39 @@
+{
+  "warning": "PUBLIC SYNTHETIC PROTOCOL TEST KEY; NEVER A RUNTIME CREDENTIAL",
+  "testKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "roles": [
+    "consultant",
+    "group-chat-consultant"
+  ],
+  "payload": {
+    "v": 1,
+    "realmName": "scenario-c-lifecycle-fixture",
+    "realmId": "00000000-0000-0000-0000-000000000001",
+    "attemptId": "00000000-0000-0000-0000-000000000004",
+    "accountId": "00000000-0000-0000-0000-000000000003",
+    "ownerClient": "backend-account-create",
+    "ownerSubject": "00000000-0000-0000-0000-000000000002",
+    "scope": {
+      "tenantId": "11",
+      "registrationKind": "CONSULTANT",
+      "initialGroup": "/human-roles/consultant",
+      "origin": {
+        "kind": "HUMAN_ADMIN",
+        "workflowId": "fixture-workflow-1",
+        "provenance": "verified-ü-workflow",
+        "humanIssuer": "https://fixture-human.invalid/realms/fixture",
+        "humanSubject": "fixture-human",
+        "humanAuthority": "user-admin",
+        "agencyIds": [
+          "27"
+        ]
+      }
+    },
+    "initialGroupId": "00000000-0000-0000-0000-000000000005",
+    "initialRoleFingerprint": "295beed5a63cad8df5daefbc6c9c3c0f828e690b95a7f1cdbe01b940bd19ca8e",
+    "creationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "encodedPayload": "eyJhY2NvdW50SWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDMiLCJhdHRlbXB0SWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDQiLCJjcmVhdGlvbkZpbmdlcnByaW50IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImluaXRpYWxHcm91cElkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDA1IiwiaW5pdGlhbFJvbGVGaW5nZXJwcmludCI6IjI5NWJlZWQ1YTYzY2FkOGRmNWRhZWZiYzZjOWMzYzBmODI4ZTY5MGI5NWE3ZjFjZGJlMDFiOTQwYmQxOWNhOGUiLCJvd25lckNsaWVudCI6ImJhY2tlbmQtYWNjb3VudC1jcmVhdGUiLCJvd25lclN1YmplY3QiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDIiLCJyZWFsbUlkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAxIiwicmVhbG1OYW1lIjoic2NlbmFyaW8tYy1saWZlY3ljbGUtZml4dHVyZSIsInNjb3BlIjp7ImluaXRpYWxHcm91cCI6Ii9odW1hbi1yb2xlcy9jb25zdWx0YW50Iiwib3JpZ2luIjp7ImFnZW5jeUlkcyI6WyIyNyJdLCJodW1hbkF1dGhvcml0eSI6InVzZXItYWRtaW4iLCJodW1hbklzc3VlciI6Imh0dHBzOi8vZml4dHVyZS1odW1hbi5pbnZhbGlkL3JlYWxtcy9maXh0dXJlIiwiaHVtYW5TdWJqZWN0IjoiZml4dHVyZS1odW1hbiIsImtpbmQiOiJIVU1BTl9BRE1JTiIsInByb3ZlbmFuY2UiOiJ2ZXJpZmllZC3DvC13b3JrZmxvdyIsIndvcmtmbG93SWQiOiJmaXh0dXJlLXdvcmtmbG93LTEifSwicmVnaXN0cmF0aW9uS2luZCI6IkNPTlNVTFRBTlQiLCJ0ZW5hbnRJZCI6IjExIn0sInYiOjF9",
+  "signature": "VoVyLsvM4UrnBLM641EQYwma5OtCMT--7pPiEfSuQfc",
+  "creationProof": "eyJhY2NvdW50SWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDMiLCJhdHRlbXB0SWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDQiLCJjcmVhdGlvbkZpbmdlcnByaW50IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImluaXRpYWxHcm91cElkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDA1IiwiaW5pdGlhbFJvbGVGaW5nZXJwcmludCI6IjI5NWJlZWQ1YTYzY2FkOGRmNWRhZWZiYzZjOWMzYzBmODI4ZTY5MGI5NWE3ZjFjZGJlMDFiOTQwYmQxOWNhOGUiLCJvd25lckNsaWVudCI6ImJhY2tlbmQtYWNjb3VudC1jcmVhdGUiLCJvd25lclN1YmplY3QiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDIiLCJyZWFsbUlkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAxIiwicmVhbG1OYW1lIjoic2NlbmFyaW8tYy1saWZlY3ljbGUtZml4dHVyZSIsInNjb3BlIjp7ImluaXRpYWxHcm91cCI6Ii9odW1hbi1yb2xlcy9jb25zdWx0YW50Iiwib3JpZ2luIjp7ImFnZW5jeUlkcyI6WyIyNyJdLCJodW1hbkF1dGhvcml0eSI6InVzZXItYWRtaW4iLCJodW1hbklzc3VlciI6Imh0dHBzOi8vZml4dHVyZS1odW1hbi5pbnZhbGlkL3JlYWxtcy9maXh0dXJlIiwiaHVtYW5TdWJqZWN0IjoiZml4dHVyZS1odW1hbiIsImtpbmQiOiJIVU1BTl9BRE1JTiIsInByb3ZlbmFuY2UiOiJ2ZXJpZmllZC3DvC13b3JrZmxvdyIsIndvcmtmbG93SWQiOiJmaXh0dXJlLXdvcmtmbG93LTEifSwicmVnaXN0cmF0aW9uS2luZCI6IkNPTlNVTFRBTlQiLCJ0ZW5hbnRJZCI6IjExIn0sInYiOjF9.VoVyLsvM4UrnBLM641EQYwma5OtCMT--7pPiEfSuQfc"
+}

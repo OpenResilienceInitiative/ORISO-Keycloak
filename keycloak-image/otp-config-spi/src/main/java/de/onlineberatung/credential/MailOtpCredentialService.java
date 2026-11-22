@@ -3,6 +3,7 @@ package de.onlineberatung.credential;
 import static java.util.Objects.nonNull;
 
 import de.onlineberatung.otp.Otp;
+import de.onlineberatung.otp.OtpFailureLockout;
 import java.time.Clock;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,6 +42,38 @@ public class MailOtpCredentialService {
     credentialModel.setActive();
     credentialModel.updateFailedVerifications(0);
     credentialModel.invalidateCode();
+    credentialModel.clearLockout();
+    credentialModel.updateInternalModel();
+    credentialProvider.updateCredential(context.getUser(), credentialModel);
+  }
+
+  /**
+   * Starts the failed-attempt lockout, or escalates it to the next step of the ladder.
+   *
+   * <p>The spent code goes with it: leaving it live would let the guessing continue the moment
+   * the lockout ends, against a code the attacker has already had a day to work on. The attempt
+   * counter is cleared at the same time, so the next code starts with its full three attempts
+   * rather than being refused for a limit that was already paid for with a lockout.
+   */
+  public void lockOut(MailOtpCredentialModel credentialModel, CredentialContext context,
+      OtpFailureLockout.Lock lock) {
+    credentialModel.lockOut(lock.getLockedUntil(), lock.getLevel());
+    credentialModel.updateFailedVerifications(0);
+    credentialModel.invalidateCode();
+    credentialModel.updateInternalModel();
+    credentialProvider.updateCredential(context.getUser(), credentialModel);
+  }
+
+  /**
+   * The code was right: burn it and clear the lockout ladder.
+   *
+   * <p>Separate from {@link #invalidate} because that one also runs when a mail could not be
+   * sent, and a failed mail must not be a way out of a lockout.
+   */
+  public void acceptCode(MailOtpCredentialModel credentialModel, CredentialContext context) {
+    credentialModel.updateFailedVerifications(0);
+    credentialModel.invalidateCode();
+    credentialModel.clearLockout();
     credentialModel.updateInternalModel();
     credentialProvider.updateCredential(context.getUser(), credentialModel);
   }

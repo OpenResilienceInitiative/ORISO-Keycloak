@@ -5,7 +5,7 @@ import static org.keycloak.util.JsonSerialization.writeValueAsString;
 import de.onlineberatung.otp.Otp;
 import java.io.IOException;
 import java.time.Clock;
-import org.jetbrains.annotations.NotNull;
+import java.util.List;
 import org.keycloak.credential.CredentialModel;
 import org.keycloak.util.JsonSerialization;
 
@@ -46,7 +46,6 @@ public class MailOtpCredentialModel extends CredentialModel {
     return serialize(clock, credentialModel);
   }
 
-  @NotNull
   private static MailOtpCredentialModel serialize(Clock clock,
       MailOtpCredentialModel credentialModel) {
     credentialModel.setType(TYPE);
@@ -87,6 +86,40 @@ public class MailOtpCredentialModel extends CredentialModel {
     return this;
   }
 
+  /** When the last code mails went out (epoch millis); null for a credential never mailed. */
+  public List<Long> getMailsSentAt() {
+    return credentialData.getMailsSentAt();
+  }
+
+  /** Replaces the stored code and records the mail history that comes with it. */
+  public MailOtpCredentialModel updateFrom(Otp otp, List<Long> mailsSentAt) {
+    credentialData.setMailsSentAt(mailsSentAt);
+    return updateFrom(otp);
+  }
+
+  /** Puts back a mail history, e.g. when the mail it recorded could not be sent. */
+  public MailOtpCredentialModel restoreMailsSentAt(List<Long> mailsSentAt) {
+    credentialData.setMailsSentAt(mailsSentAt);
+    updateInternalModel();
+    return this;
+  }
+
+  /** When the failed-attempt lockout ends (epoch millis); null for a credential never locked. */
+  public Long getLockedUntil() {
+    return credentialData.getLockedUntil();
+  }
+
+  /** Which step of the lockout ladder the last lockout was; 0 when there was none. */
+  public int getLockoutLevel() {
+    return credentialData.getLockoutLevel();
+  }
+
+  /** Whether the stored code can still be typed in: neither used nor expired. */
+  public boolean hasLiveCode(Clock clock) {
+    var code = secretData.getCode();
+    return code != null && !INVALIDATED.equals(code) && secretData.getExpiry() >= clock.millis();
+  }
+
   public boolean isActive() {
     return credentialData.isActive();
   }
@@ -101,6 +134,16 @@ public class MailOtpCredentialModel extends CredentialModel {
 
   void invalidateCode() {
     this.secretData.setCode(INVALIDATED);
+  }
+
+  void lockOut(long lockedUntil, int level) {
+    this.credentialData.setLockedUntil(lockedUntil);
+    this.credentialData.setLockoutLevel(level);
+  }
+
+  void clearLockout() {
+    this.credentialData.setLockedUntil(null);
+    this.credentialData.setLockoutLevel(0);
   }
 
   void updateInternalModel() {

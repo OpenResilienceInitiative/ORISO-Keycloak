@@ -237,6 +237,10 @@ components:
 
     Challenge:
       type: object
+      description: >
+        Body of the token endpoint's answer when a second factor is missing (HTTP 400,
+        error_description "Missing totp") or when no further e-mail code may be sent for now
+        (HTTP 429, error_description "Too many codes requested", plus a Retry-After header).
       properties:
         error:
           type: string
@@ -244,6 +248,15 @@ components:
           type: string
         otpType:
           $ref: "#/components/schemas/OtpType"
+        resendAvailableInSeconds:
+          type: integer
+          format: int32
+          minimum: 0
+          description: >
+            Only for otpType EMAIL. Seconds until a token request without a code will mail a
+            new code; a request before that sends nothing and the last mailed code stays valid.
+            Optional: clients that do not know it keep working, and must fall back to their
+            own wait when it is absent.
 
     Success:
       type: object

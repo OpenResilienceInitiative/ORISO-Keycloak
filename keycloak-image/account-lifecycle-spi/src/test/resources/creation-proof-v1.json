@@ -1,0 +1,38 @@
+{
+  "fixtureOnly": true,
+  "description": "Public deterministic non-production shared Python/Java wire vector. Never use this key in an environment.",
+  "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "initialRoles": [
+    "user"
+  ],
+  "payload": {
+    "v": 1,
+    "realmName": "synthetic",
+    "realmId": "realm-synthetic",
+    "attemptId": "22222222-2222-4222-8222-222222222222",
+    "accountId": "33333333-3333-4333-8333-333333333333",
+    "ownerClient": "backend-account-create",
+    "ownerSubject": "11111111-1111-4111-8111-111111111111",
+    "scope": {
+      "tenantId": "7",
+      "registrationKind": "ASKER",
+      "initialGroup": "/ordinary/asker",
+      "origin": {
+        "kind": "REGISTRATION",
+        "workflowId": "22222222-2222-4222-8222-222222222222",
+        "provenance": "registration-agency:12",
+        "humanIssuer": null,
+        "humanSubject": null,
+        "humanAuthority": null,
+        "agencyIds": [
+          "12"
+        ]
+      }
+    },
+    "initialGroupId": "group-synthetic",
+    "initialRoleFingerprint": "1a2633973fb022f4be83bd01163937bf2c1a35f0b662d4c39ed72c990869f042",
+    "creationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "canonicalPayload": "{\"accountId\":\"33333333-3333-4333-8333-333333333333\",\"attemptId\":\"22222222-2222-4222-8222-222222222222\",\"creationFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"initialGroupId\":\"group-synthetic\",\"initialRoleFingerprint\":\"1a2633973fb022f4be83bd01163937bf2c1a35f0b662d4c39ed72c990869f042\",\"ownerClient\":\"backend-account-create\",\"ownerSubject\":\"11111111-1111-4111-8111-111111111111\",\"realmId\":\"realm-synthetic\",\"realmName\":\"synthetic\",\"scope\":{\"initialGroup\":\"/ordinary/asker\",\"origin\":{\"agencyIds\":[\"12\"],\"humanAuthority\":null,\"humanIssuer\":null,\"humanSubject\":null,\"kind\":\"REGISTRATION\",\"provenance\":\"registration-agency:12\",\"workflowId\":\"22222222-2222-4222-8222-222222222222\"},\"registrationKind\":\"ASKER\",\"tenantId\":\"7\"},\"v\":1}",
+  "proof": "eyJhY2NvdW50SWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJhdHRlbXB0SWQiOiIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJjcmVhdGlvbkZpbmdlcnByaW50IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImluaXRpYWxHcm91cElkIjoiZ3JvdXAtc3ludGhldGljIiwiaW5pdGlhbFJvbGVGaW5nZXJwcmludCI6IjFhMjYzMzk3M2ZiMDIyZjRiZTgzYmQwMTE2MzkzN2JmMmMxYTM1ZjBiNjYyZDRjMzllZDcyYzk5MDg2OWYwNDIiLCJvd25lckNsaWVudCI6ImJhY2tlbmQtYWNjb3VudC1jcmVhdGUiLCJvd25lclN1YmplY3QiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJyZWFsbUlkIjoicmVhbG0tc3ludGhldGljIiwicmVhbG1OYW1lIjoic3ludGhldGljIiwic2NvcGUiOnsiaW5pdGlhbEdyb3VwIjoiL29yZGluYXJ5L2Fza2VyIiwib3JpZ2luIjp7ImFnZW5jeUlkcyI6WyIxMiJdLCJodW1hbkF1dGhvcml0eSI6bnVsbCwiaHVtYW5Jc3N1ZXIiOm51bGwsImh1bWFuU3ViamVjdCI6bnVsbCwia2luZCI6IlJFR0lTVFJBVElPTiIsInByb3ZlbmFuY2UiOiJyZWdpc3RyYXRpb24tYWdlbmN5OjEyIiwid29ya2Zsb3dJZCI6IjIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiJ9LCJyZWdpc3RyYXRpb25LaW5kIjoiQVNLRVIiLCJ0ZW5hbnRJZCI6IjcifSwidiI6MX0.gRIWsvwxoxPC5yvwwGjRIIB4UtOq8EpeDXFDZ4Bomeg"
+}
