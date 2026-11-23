@@ -214,7 +214,7 @@ public final class ScenarioCOtpPolicy {
           .anyMatch(resource -> !represented.contains(resource.getId()))) denied();
       var context =
           new DefaultEvaluationContext(
-              new KeycloakIdentity(auth.getToken(), session, realm), session);
+              new KeycloakIdentity(auth.getToken(), session, realm, true), session);
       var decisions =
           authorization
               .evaluators()

@@ -301,9 +301,10 @@ final class LifecycleAuthorization {
       if (stores.getResourceStore().findByResourceServer(server).stream()
           .anyMatch(resource -> !represented.contains(resource.getId()))) deny();
       // Same identity, context, typed permission and native DecisionPermissionCollector
-      // path as Keycloak26.6.3 MgmtPermissions; no local policy/condition solver.
+      // path as Keycloak 26.8 MgmtPermissions (KeycloakIdentity with ignoreTokenRoles=true);
+      // no local policy/condition solver.
       var context =
-          new DefaultEvaluationContext(new KeycloakIdentity(token, session, realm), session);
+          new DefaultEvaluationContext(new KeycloakIdentity(token, session, realm, true), session);
       var decisions =
           authorization
               .evaluators()
