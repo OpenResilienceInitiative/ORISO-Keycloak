@@ -1,6 +1,7 @@
 # ORISO Keycloak image (stock + otp-config SPI)
 
-Custom Keycloak image: stock `quay.io/keycloak/keycloak:26.6.3` plus the
+Custom Keycloak image: stock `quay.io/keycloak/keycloak:26.8.2-3` (pinned by
+digest) plus the
 onlineBeratung **otp-config SPI**, which provides
 
 - `GET/PUT/POST/DELETE /realms/<realm>/otp-config/**` — the REST endpoints the
@@ -29,10 +30,17 @@ as the ORISO services). Local changes for Keycloak 26.6.3:
 
 All 53 upstream unit tests pass against 26.6.3.
 
+The runtime and all three SPI modules were moved to Keycloak 26.8.2 so the
+image passes the unchanged Trivy gate. The stock 26.8.2 image still bundles
+Guava 33.6.0-jre (fixed in 33.7.2-jre, upstream keycloak/keycloak#54855), so
+the Dockerfile replaces that jar in place with the checksum-pinned 33.7.2-jre
+from Maven Central before `kc.sh build`. Drop that step once the pinned
+upstream image ships the fixed Guava.
+
 ## Build
 
 ```sh
-docker build -t ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp keycloak-image/
+docker build -t ghcr.io/openresilienceinitiative/oriso-keycloak:26.8.2-otp keycloak-image/
 ```
 
 CI builds and pushes on changes under `keycloak-image/**` (see
@@ -94,7 +102,7 @@ Local run:
 docker run -e ORISO_APP_BASE_URL=http://localhost:9001 \
   -e EMAIL_BRANDING_NAME='Care Portal' \
   -e EMAIL_LEGAL_ORGANISATION_NAME='Example Foundation e.V.' -p 8080:8080 \
-  ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp start-dev
+  ghcr.io/openresilienceinitiative/oriso-keycloak:26.8.2-otp start-dev
 ```
 
 The theme is generated in ORISO-Frontend (`npm run emails:keycloak`) and

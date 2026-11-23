@@ -18,7 +18,7 @@ OTP configuration SPI and ORISO email OTP theme from `keycloak-image/`.
 
 The GitHub workflow `.github/workflows/keycloak-image.yml` builds and publishes:
 
-- `ghcr.io/openresilienceinitiative/oriso-keycloak:26.6.3-otp`
+- `ghcr.io/openresilienceinitiative/oriso-keycloak:26.8.2-otp`
 - branch tags such as `dev` and `pre-dev` on branch pushes
 
 The ORISO Helm chart should reference the published image only; SPI source,
