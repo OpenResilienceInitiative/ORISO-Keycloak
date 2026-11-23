@@ -5,10 +5,16 @@
 # Run inside (or via kubectl exec into) the Keycloak pod, which must run the
 # oriso-keycloak image (stock Keycloak lacks the app-/email-authenticator SPI):
 #
-#   kubectl -n <ns> exec deploy/keycloak -- bash -s < scripts/keycloak-apply-2fa-flow.sh
+#   { echo 'export KC_ADMIN_USER="$KEYCLOAK_ADMIN" KC_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"'; \
+#     cat scripts/keycloak-apply-2fa-flow.sh; } \
+#     | kubectl -n <ns> exec -i deploy/keycloak -- bash -s
 #
-# Requires admin credentials; export KC_ADMIN_USER / KC_ADMIN_PASSWORD first or
-# log kcadm in beforehand. Realm defaults to online-beratung (override: REALM).
+# Note the -i: without it kubectl does not forward stdin and the script never
+# reaches bash. The pod already carries the admin credentials in its own env,
+# so this maps them in rather than passing secrets on the command line.
+#
+# Alternatively log kcadm in beforehand and leave KC_ADMIN_USER unset. Realm
+# defaults to online-beratung (override: REALM); server URL override: KC_SERVER.
 #
 # To see WHETHER a realm has drifted before changing anything, run the read-only
 # check instead — it ships inside the image and names each failing expectation:
