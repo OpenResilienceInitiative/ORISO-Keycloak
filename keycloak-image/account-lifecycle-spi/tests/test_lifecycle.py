@@ -1104,11 +1104,7 @@ class LifecyclePermissions(LifecycleFixture, unittest.TestCase):
             self.installer,
         )
         self.assertEqual(201, status)
-        self.addCleanup(
-            lambda: call(
-                self.base, "DELETE", "/admin/realms/" + foreign, token=self.installer
-            )
-        )
+        self.addCleanup(self.delete_realm, foreign)
         status, issued = call(
             self.base,
             "POST",

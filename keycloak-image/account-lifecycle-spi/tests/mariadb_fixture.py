@@ -45,6 +45,8 @@ if MARIADB_IMAGE not in {
 
 
 class MariaDbFixture(LifecycleFixture):
+    RECEIVER_WAIT_SECONDS = 15
+
     @classmethod
     def setUpClass(cls):
         jar = Path(os.environ.get("LIFECYCLE_C_TEST_JAR", ""))
@@ -235,8 +237,9 @@ class MariaDbFixture(LifecycleFixture):
         print("Lifecycle provider jar sha256:", cls.jar_sha256)
 
     def setUp(self):
-        # Master admin-cli tokens live60seconds; the expanded class now exceeds
-        # that duration. Keep ordinary actor tokens and realm policies unchanged.
+        # Confirm both replicas still answer before each test. The installer token
+        # itself is renewed on use (LifecycleFixture.installer), because a single
+        # method with many subtests outlives the 60-second master token.
         type(self).ready()
         super().setUp()
 
@@ -326,8 +329,29 @@ class MariaDbFixture(LifecycleFixture):
             editor.terminate()
             editor.communicate(timeout=10)
 
-    def wait_for_receiver_user_lock_and_read_view(self, user):
-        deadline = time.monotonic() + 15
+    def receiver_timeout_detail(self, request):
+        if request is None:
+            receiver = "receiver request not supplied"
+        elif not request.done():
+            receiver = "receiver request still running"
+        else:
+            try:
+                status, result = request.result()
+                receiver = "receiver request already returned HTTP " + str(status)
+                if isinstance(result, dict) and result.get("error"):
+                    receiver += " (" + str(result["error"])[:200] + ")"
+            except Exception as error:  # noqa: BLE001 - reported, not handled
+                receiver = "receiver request raised " + type(error).__name__
+        try:
+            sessions = self.sql(
+                "SELECT ID, COMMAND, COALESCE(STATE,''), TIME FROM information_schema.PROCESSLIST WHERE USER='keycloak' AND COMMAND<>'Sleep'"
+            )
+        except Exception as error:  # noqa: BLE001 - diagnostics must not mask the failure
+            sessions = "unavailable (" + type(error).__name__ + ")"
+        return receiver + "; active keycloak sessions: " + (sessions or "none")
+
+    def wait_for_receiver_user_lock_and_read_view(self, user, request=None):
+        deadline = time.monotonic() + self.RECEIVER_WAIT_SECONDS
         while time.monotonic() < deadline:
             rows = self.sql(
                 "SELECT t.trx_mysql_thread_id, p.USER, t.trx_isolation_level FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id JOIN information_schema.INNODB_TRX t ON w.requesting_trx_id=t.trx_id JOIN information_schema.PROCESSLIST p ON p.ID=t.trx_mysql_thread_id WHERE l.lock_table LIKE '%USER_ENTITY%' AND l.lock_data LIKE '%"
@@ -363,4 +387,7 @@ class MariaDbFixture(LifecycleFixture):
                 )
                 return
             time.sleep(0.05)
-        self.fail("Receiver did not reach the actual target-user InnoDB wait")
+        self.fail(
+            "Receiver did not reach the actual target-user InnoDB wait: "
+            + self.receiver_timeout_detail(request)
+        )
