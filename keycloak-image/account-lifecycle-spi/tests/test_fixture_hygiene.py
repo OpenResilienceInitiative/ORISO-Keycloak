@@ -122,6 +122,13 @@ class ReceiverWitnessTest(unittest.TestCase):
         self.assertIn("l.lock_data LIKE '%synthetic-user%'", witness[0])
         self.assertIn("OR b.trx_mysql_thread_id=41)", witness[0])
 
+    def test_the_lock_marker_carries_the_editor_connection_on_one_line(self):
+        proof = Replica("run")
+        self.assertEqual("41", proof.lock_holder("USER_LOCK_HELD 41"))
+        for line in ("USER_LOCK_HELD", "41", "ERROR 1205 USER_LOCK_HELD"):
+            with self.assertRaises(AssertionError):
+                proof.lock_holder(line)
+
     def test_without_an_owned_editor_only_lock_data_identifies_the_wait(self):
         proof = Replica("run")
         queries = []
