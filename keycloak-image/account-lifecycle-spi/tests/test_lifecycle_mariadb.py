@@ -470,7 +470,7 @@ class MariaDbLifecycleProof(MariaDbFixture, unittest.TestCase):
                         self.fail(
                             "Delete latch ended before the native grant reached a measured database outcome"
                         )
-                    time.sleep(0.05)
+                    time.sleep(self.INNODB_VIEW_POLL_SECONDS)
                 self.assertEqual(200, cleanup.result()[0])
                 self.assertEqual(204, grant.result()[0])
             read_status, actual_roles = call(
