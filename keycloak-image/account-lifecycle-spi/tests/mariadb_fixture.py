@@ -294,17 +294,15 @@ class MariaDbFixture(LifecycleFixture):
             bufsize=1,
         )
         self.addCleanup(self.stop_locked_editor, editor)
+        # One output line per marker: select() only sees unread pipe data, so a
+        # second line already pulled into readline()'s buffer would time out.
         editor.stdin.write(
-            "SELECT CONNECTION_ID()//\nSTART TRANSACTION//\nSELECT ID INTO @held_user FROM USER_ENTITY WHERE ID='"
+            "START TRANSACTION//\nSELECT ID INTO @held_user FROM USER_ENTITY WHERE ID='"
             + user
-            + "' FOR UPDATE//\nSELECT 'USER_LOCK_HELD'//\n"
+            + "' FOR UPDATE//\nSELECT CONCAT('USER_LOCK_HELD ', CONNECTION_ID())//\n"
         )
         editor.stdin.flush()
-        holder = self.editor_line(editor)
-        self.assertTrue(
-            holder.isdigit(), "Owned editor did not report its connection id"
-        )
-        self.editor_marker(editor, "USER_LOCK_HELD")
+        holder = self.lock_holder(self.editor_line(editor))
         # The witness recognises the receiver's wait by this lock holder too:
         # MariaDB does not always report the locked row's key in lock_data.
         self.user_lock_holders = {
@@ -312,6 +310,18 @@ class MariaDbFixture(LifecycleFixture):
             user: holder,
         }
         return editor
+
+    def lock_holder(self, line):
+        marker, _, holder = line.partition(" ")
+        self.assertEqual(
+            "USER_LOCK_HELD",
+            marker,
+            "Owned editor failed before its expected database latch",
+        )
+        self.assertTrue(
+            holder.isdigit(), "Owned editor did not report its connection id"
+        )
+        return holder
 
     def editor_line(self, editor):
         ready, _, _ = select.select([editor.stdout], [], [], 15)
