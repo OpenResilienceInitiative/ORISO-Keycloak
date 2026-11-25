@@ -14,9 +14,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-IMAGE = "quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992"
+IMAGE = "quay.io/keycloak/keycloak@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3"
 REALM = "scenario-c-lifecycle-fixture"
 INSTALLER = "synthetic-lifecycle-installer-password-0001"
+# Master admin-cli access tokens live 60 seconds. A single test method with many
+# subtests outlives that, so the installer token is renewed well before expiry.
+INSTALLER_TOKEN_RENEW_SECONDS = 30
 CONTEXT_KEY = bytes(range(32))
 ACTORS = {
     "SETUP": (
@@ -104,6 +107,8 @@ def call(base, method, path, body=None, token=None, form=False, proof=None):
 
 class LifecycleFixture:
     ENABLED = True
+    _installer_token = None
+    _installer_issued_at = float("-inf")
 
     @classmethod
     def setUpClass(cls):
@@ -133,7 +138,7 @@ class LifecycleFixture:
             "-e",
             "JAVA_OPTS_APPEND=-Xms128m -Xmx512m -XX:ActiveProcessorCount=2",
             "-e",
-            "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer",
+            "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer", "-e", "KC_SPI_ADMIN__AUDIENCE_CHECK_ENABLED=false",  # Same as the ORISO image (Keycloak#78).
             "-e",
             "KC_BOOTSTRAP_ADMIN_PASSWORD=" + INSTALLER,
             "-e",
@@ -194,27 +199,57 @@ class LifecycleFixture:
         print("Lifecycle endpoint receipt:", json.dumps(receipt, sort_keys=True))
 
     @classmethod
+    def issue_installer_token(cls):
+        """Fetch a fresh master installer token; keep the current one on failure."""
+        try:
+            status, value = call(
+                cls.base,
+                "POST",
+                "/realms/master/protocol/openid-connect/token",
+                {
+                    "client_id": "admin-cli",
+                    "grant_type": "password",
+                    "username": "synthetic-installer",
+                    "password": INSTALLER,
+                },
+                form=True,
+            )
+        except (URLError, OSError, TimeoutError):
+            return False
+        if status != 200:
+            return False
+        cls._installer_token = value["access_token"]
+        cls._installer_issued_at = time.monotonic()
+        return True
+
+    @property
+    def installer(self):
+        fixture = type(self)
+        if (
+            time.monotonic() - fixture._installer_issued_at
+            >= INSTALLER_TOKEN_RENEW_SECONDS
+        ):
+            # A failed renewal (for example while a test restarts the database)
+            # keeps the previous token; the next access tries again.
+            fixture.issue_installer_token()
+        return fixture._installer_token
+
+    def delete_realm(self, realm):
+        status, _ = call(
+            self.base, "DELETE", "/admin/realms/" + realm, token=self.installer
+        )
+        # A silently failed delete leaks the realm and turns every later setUp
+        # into a 409, hiding the original failure behind unrelated ones.
+        self.assertIn(
+            status, (204, 404), "Cleanup of realm " + realm + " returned " + str(status)
+        )
+
+    @classmethod
     def ready(cls):
         deadline = time.monotonic() + 180
         while True:
-            try:
-                status, value = call(
-                    cls.base,
-                    "POST",
-                    "/realms/master/protocol/openid-connect/token",
-                    {
-                        "client_id": "admin-cli",
-                        "grant_type": "password",
-                        "username": "synthetic-installer",
-                        "password": INSTALLER,
-                    },
-                    form=True,
-                )
-                if status == 200:
-                    cls.installer = value["access_token"]
-                    return
-            except (URLError, OSError, TimeoutError):
-                pass
+            if cls.issue_installer_token():
+                return
             running = subprocess.run(
                 ["docker", "inspect", "--format", "{{.State.Running}}", cls.name],
                 capture_output=True,
@@ -382,11 +417,7 @@ class LifecycleFixture:
             self.installer,
         )
         self.assertEqual(201, status)
-        self.addCleanup(
-            lambda: call(
-                self.base, "DELETE", "/admin/realms/" + REALM, token=self.installer
-            )
-        )
+        self.addCleanup(self.delete_realm, REALM)
         self.realm_id = self.admin("GET")["id"]
         self.client_ids = {}
         for actor, (name, roles) in ACTORS.items():

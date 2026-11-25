@@ -122,7 +122,7 @@ class MariaDbLifecycleProof(MariaDbFixture, unittest.TestCase):
                             request = workers.submit(
                                 self.on_node, 1, command, attempt, body, token
                             )
-                            self.wait_for_receiver_user_lock_and_read_view(user)
+                            self.wait_for_receiver_user_lock_and_read_view(user, request)
                             self.commit_locked_editor(editor, statements[edit])
                             status, result = request.result()
                         present = self.sql(
@@ -219,7 +219,7 @@ class MariaDbLifecycleProof(MariaDbFixture, unittest.TestCase):
                 request = workers.submit(
                     self.on_node, 1, "commit", attempt, body, token
                 )
-                self.wait_for_receiver_user_lock_and_read_view(user)
+                self.wait_for_receiver_user_lock_and_read_view(user, request)
                 self.commit_locked_editor(
                     editor,
                     "DELETE FROM USER_GROUP_MEMBERSHIP WHERE USER_ID='"
@@ -470,7 +470,7 @@ class MariaDbLifecycleProof(MariaDbFixture, unittest.TestCase):
                         self.fail(
                             "Delete latch ended before the native grant reached a measured database outcome"
                         )
-                    time.sleep(0.05)
+                    time.sleep(self.INNODB_VIEW_POLL_SECONDS)
                 self.assertEqual(200, cleanup.result()[0])
                 self.assertEqual(204, grant.result()[0])
             read_status, actual_roles = call(

@@ -45,6 +45,14 @@ if MARIADB_IMAGE not in {
 
 
 class MariaDbFixture(LifecycleFixture):
+    RECEIVER_WAIT_SECONDS = 15
+    # InnoDB refreshes its INNODB_TRX / INNODB_LOCKS / INNODB_LOCK_WAITS
+    # snapshot only after 100 ms without any read of it. Polling faster keeps
+    # the snapshot from before the wait began, so a real lock wait is never
+    # seen (reproduced on MariaDB 11.0.6: 0 of 120 polls at 50 ms saw a 6 s
+    # wait). Poll these views at least this far apart.
+    INNODB_VIEW_POLL_SECONDS = 0.25
+
     @classmethod
     def setUpClass(cls):
         jar = Path(os.environ.get("LIFECYCLE_C_TEST_JAR", ""))
@@ -139,7 +147,7 @@ class MariaDbFixture(LifecycleFixture):
                 "-e",
                 "JAVA_OPTS_APPEND=-Xms128m -Xmx512m -XX:ActiveProcessorCount=2",
                 "-e",
-                "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer",
+                "KC_BOOTSTRAP_ADMIN_USERNAME=synthetic-installer", "-e", "KC_SPI_ADMIN__AUDIENCE_CHECK_ENABLED=false",  # Same as the ORISO image (Keycloak#78).
                 "-e",
                 "KC_BOOTSTRAP_ADMIN_PASSWORD=" + INSTALLER,
                 "-e",
@@ -235,8 +243,9 @@ class MariaDbFixture(LifecycleFixture):
         print("Lifecycle provider jar sha256:", cls.jar_sha256)
 
     def setUp(self):
-        # Master admin-cli tokens live60seconds; the expanded class now exceeds
-        # that duration. Keep ordinary actor tokens and realm policies unchanged.
+        # Confirm both replicas still answer before each test. The installer token
+        # itself is renewed on use (LifecycleFixture.installer), because a single
+        # method with many subtests outlives the 60-second master token.
         type(self).ready()
         super().setUp()
 
@@ -291,23 +300,46 @@ class MariaDbFixture(LifecycleFixture):
             bufsize=1,
         )
         self.addCleanup(self.stop_locked_editor, editor)
+        # One output line per marker: select() only sees unread pipe data, so a
+        # second line already pulled into readline()'s buffer would time out.
         editor.stdin.write(
             "START TRANSACTION//\nSELECT ID INTO @held_user FROM USER_ENTITY WHERE ID='"
             + user
-            + "' FOR UPDATE//\nSELECT 'USER_LOCK_HELD'//\n"
+            + "' FOR UPDATE//\nSELECT CONCAT('USER_LOCK_HELD ', CONNECTION_ID())//\n"
         )
         editor.stdin.flush()
-        self.editor_marker(editor, "USER_LOCK_HELD")
+        holder = self.lock_holder(self.editor_line(editor))
+        # The witness recognises the receiver's wait by this lock holder too:
+        # MariaDB does not always report the locked row's key in lock_data.
+        self.user_lock_holders = {
+            **getattr(self, "user_lock_holders", {}),
+            user: holder,
+        }
         return editor
 
-    def editor_marker(self, editor, expected):
+    def lock_holder(self, line):
+        marker, _, holder = line.partition(" ")
+        self.assertEqual(
+            "USER_LOCK_HELD",
+            marker,
+            "Owned editor failed before its expected database latch",
+        )
+        self.assertTrue(
+            holder.isdigit(), "Owned editor did not report its connection id"
+        )
+        return holder
+
+    def editor_line(self, editor):
         ready, _, _ = select.select([editor.stdout], [], [], 15)
         self.assertTrue(
             ready, "Owned editor did not reach its deterministic database latch"
         )
+        return editor.stdout.readline().strip()
+
+    def editor_marker(self, editor, expected):
         self.assertEqual(
             expected,
-            editor.stdout.readline().strip(),
+            self.editor_line(editor),
             "Owned editor failed before its expected database latch",
         )
 
@@ -326,13 +358,55 @@ class MariaDbFixture(LifecycleFixture):
             editor.terminate()
             editor.communicate(timeout=10)
 
-    def wait_for_receiver_user_lock_and_read_view(self, user):
-        deadline = time.monotonic() + 15
+    def receiver_timeout_detail(self, request):
+        if request is None:
+            receiver = "receiver request not supplied"
+        elif not request.done():
+            receiver = "receiver request still running"
+        else:
+            try:
+                status, result = request.result()
+                receiver = "receiver request already returned HTTP " + str(status)
+                if isinstance(result, dict) and result.get("error"):
+                    receiver += " (" + str(result["error"])[:200] + ")"
+            except Exception as error:  # noqa: BLE001 - reported, not handled
+                receiver = "receiver request raised " + type(error).__name__
+        try:
+            sessions = self.sql(
+                "SELECT ID, COMMAND, COALESCE(STATE,''), TIME FROM information_schema.PROCESSLIST WHERE USER='keycloak' AND COMMAND<>'Sleep'"
+            )
+        except Exception as error:  # noqa: BLE001 - diagnostics must not mask the failure
+            sessions = "unavailable (" + type(error).__name__ + ")"
+        try:
+            waits = self.sql(
+                "SELECT w.requesting_trx_id, w.blocking_trx_id, l.lock_table, COALESCE(l.lock_index,'<NULL>'), l.lock_mode, COALESCE(l.lock_data,'<NULL>') FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id"
+            )
+        except Exception as error:  # noqa: BLE001 - diagnostics must not mask the failure
+            waits = "unavailable (" + type(error).__name__ + ")"
+        return (
+            receiver
+            + "; active keycloak sessions: "
+            + (sessions or "none")
+            + "; InnoDB lock waits: "
+            + (" | ".join(waits.splitlines()) if waits else "none")
+        )
+
+    def wait_for_receiver_user_lock_and_read_view(self, user, request=None):
+        deadline = time.monotonic() + self.RECEIVER_WAIT_SECONDS
+        # The wait is on the target user's row when lock_data names it, or when
+        # the lock is held by the owned editor, which locks only that row.
+        # MariaDB 11.0 can report lock_data as NULL for the same wait.
+        holder = getattr(self, "user_lock_holders", {}).get(user)
+        held_by_editor = (
+            " OR b.trx_mysql_thread_id=" + holder if holder else ""
+        )
         while time.monotonic() < deadline:
             rows = self.sql(
-                "SELECT t.trx_mysql_thread_id, p.USER, t.trx_isolation_level FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id JOIN information_schema.INNODB_TRX t ON w.requesting_trx_id=t.trx_id JOIN information_schema.PROCESSLIST p ON p.ID=t.trx_mysql_thread_id WHERE l.lock_table LIKE '%USER_ENTITY%' AND l.lock_data LIKE '%"
+                "SELECT t.trx_mysql_thread_id, p.USER, t.trx_isolation_level FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id JOIN information_schema.INNODB_TRX t ON w.requesting_trx_id=t.trx_id LEFT JOIN information_schema.INNODB_TRX b ON w.blocking_trx_id=b.trx_id JOIN information_schema.PROCESSLIST p ON p.ID=t.trx_mysql_thread_id WHERE l.lock_table LIKE '%USER_ENTITY%' AND (l.lock_data LIKE '%"
                 + user
                 + "%'"
+                + held_by_editor
+                + ")"
             )
             if rows:
                 connection, account, isolation = rows.splitlines()[0].split("\t")
@@ -362,5 +436,8 @@ class MariaDbFixture(LifecycleFixture):
                     "Actual receiver must hold an established consistent-read view before acquiring the target lock",
                 )
                 return
-            time.sleep(0.05)
-        self.fail("Receiver did not reach the actual target-user InnoDB wait")
+            time.sleep(self.INNODB_VIEW_POLL_SECONDS)
+        self.fail(
+            "Receiver did not reach the actual target-user InnoDB wait: "
+            + self.receiver_timeout_detail(request)
+        )
