@@ -96,6 +96,41 @@ class ReceiverTimeoutDetailTest(unittest.TestCase):
                 "synthetic-user", request
             )
 
+    def test_timeout_reports_the_current_innodb_lock_waits(self):
+        proof = Replica("run")
+        proof.sql = lambda sql: (
+            "7\t8\t`keycloak`.`USER_ENTITY`\tPRIMARY\tX\t<NULL>"
+            if sql.startswith("SELECT w.requesting_trx_id")
+            else ""
+        )
+        with self.assertRaisesRegex(
+            AssertionError, r"InnoDB lock waits: 7\t8\t`keycloak`.`USER_ENTITY`\tPRIMARY\tX\t<NULL>"
+        ):
+            proof.wait_for_receiver_user_lock_and_read_view("synthetic-user", Future())
+
+
+class ReceiverWitnessTest(unittest.TestCase):
+    def test_a_wait_on_the_owned_editor_lock_counts_without_lock_data(self):
+        proof = Replica("run")
+        proof.user_lock_holders = {"synthetic-user": "41"}
+        queries = []
+        proof.sql = lambda sql: queries.append(sql) or ""
+        with self.assertRaises(AssertionError):
+            proof.wait_for_receiver_user_lock_and_read_view("synthetic-user", Future())
+        witness = [q for q in queries if "INNODB_TRX t" in q]
+        self.assertTrue(witness)
+        self.assertIn("l.lock_data LIKE '%synthetic-user%'", witness[0])
+        self.assertIn("OR b.trx_mysql_thread_id=41)", witness[0])
+
+    def test_without_an_owned_editor_only_lock_data_identifies_the_wait(self):
+        proof = Replica("run")
+        queries = []
+        proof.sql = lambda sql: queries.append(sql) or ""
+        with self.assertRaises(AssertionError):
+            proof.wait_for_receiver_user_lock_and_read_view("synthetic-user", Future())
+        witness = [q for q in queries if "INNODB_TRX t" in q]
+        self.assertNotIn("b.trx_mysql_thread_id", witness[0])
+
 
 if __name__ == "__main__":
     unittest.main()

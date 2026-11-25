@@ -295,22 +295,35 @@ class MariaDbFixture(LifecycleFixture):
         )
         self.addCleanup(self.stop_locked_editor, editor)
         editor.stdin.write(
-            "START TRANSACTION//\nSELECT ID INTO @held_user FROM USER_ENTITY WHERE ID='"
+            "SELECT CONNECTION_ID()//\nSTART TRANSACTION//\nSELECT ID INTO @held_user FROM USER_ENTITY WHERE ID='"
             + user
             + "' FOR UPDATE//\nSELECT 'USER_LOCK_HELD'//\n"
         )
         editor.stdin.flush()
+        holder = self.editor_line(editor)
+        self.assertTrue(
+            holder.isdigit(), "Owned editor did not report its connection id"
+        )
         self.editor_marker(editor, "USER_LOCK_HELD")
+        # The witness recognises the receiver's wait by this lock holder too:
+        # MariaDB does not always report the locked row's key in lock_data.
+        self.user_lock_holders = {
+            **getattr(self, "user_lock_holders", {}),
+            user: holder,
+        }
         return editor
 
-    def editor_marker(self, editor, expected):
+    def editor_line(self, editor):
         ready, _, _ = select.select([editor.stdout], [], [], 15)
         self.assertTrue(
             ready, "Owned editor did not reach its deterministic database latch"
         )
+        return editor.stdout.readline().strip()
+
+    def editor_marker(self, editor, expected):
         self.assertEqual(
             expected,
-            editor.stdout.readline().strip(),
+            self.editor_line(editor),
             "Owned editor failed before its expected database latch",
         )
 
@@ -348,15 +361,36 @@ class MariaDbFixture(LifecycleFixture):
             )
         except Exception as error:  # noqa: BLE001 - diagnostics must not mask the failure
             sessions = "unavailable (" + type(error).__name__ + ")"
-        return receiver + "; active keycloak sessions: " + (sessions or "none")
+        try:
+            waits = self.sql(
+                "SELECT w.requesting_trx_id, w.blocking_trx_id, l.lock_table, COALESCE(l.lock_index,'<NULL>'), l.lock_mode, COALESCE(l.lock_data,'<NULL>') FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id"
+            )
+        except Exception as error:  # noqa: BLE001 - diagnostics must not mask the failure
+            waits = "unavailable (" + type(error).__name__ + ")"
+        return (
+            receiver
+            + "; active keycloak sessions: "
+            + (sessions or "none")
+            + "; InnoDB lock waits: "
+            + (" | ".join(waits.splitlines()) if waits else "none")
+        )
 
     def wait_for_receiver_user_lock_and_read_view(self, user, request=None):
         deadline = time.monotonic() + self.RECEIVER_WAIT_SECONDS
+        # The wait is on the target user's row when lock_data names it, or when
+        # the lock is held by the owned editor, which locks only that row.
+        # MariaDB 11.0 can report lock_data as NULL for the same wait.
+        holder = getattr(self, "user_lock_holders", {}).get(user)
+        held_by_editor = (
+            " OR b.trx_mysql_thread_id=" + holder if holder else ""
+        )
         while time.monotonic() < deadline:
             rows = self.sql(
-                "SELECT t.trx_mysql_thread_id, p.USER, t.trx_isolation_level FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id JOIN information_schema.INNODB_TRX t ON w.requesting_trx_id=t.trx_id JOIN information_schema.PROCESSLIST p ON p.ID=t.trx_mysql_thread_id WHERE l.lock_table LIKE '%USER_ENTITY%' AND l.lock_data LIKE '%"
+                "SELECT t.trx_mysql_thread_id, p.USER, t.trx_isolation_level FROM information_schema.INNODB_LOCK_WAITS w JOIN information_schema.INNODB_LOCKS l ON w.requested_lock_id=l.lock_id JOIN information_schema.INNODB_TRX t ON w.requesting_trx_id=t.trx_id LEFT JOIN information_schema.INNODB_TRX b ON w.blocking_trx_id=b.trx_id JOIN information_schema.PROCESSLIST p ON p.ID=t.trx_mysql_thread_id WHERE l.lock_table LIKE '%USER_ENTITY%' AND (l.lock_data LIKE '%"
                 + user
                 + "%'"
+                + held_by_editor
+                + ")"
             )
             if rows:
                 connection, account, isolation = rows.splitlines()[0].split("\t")
