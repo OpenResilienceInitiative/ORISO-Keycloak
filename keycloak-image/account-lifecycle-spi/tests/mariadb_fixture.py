@@ -46,6 +46,12 @@ if MARIADB_IMAGE not in {
 
 class MariaDbFixture(LifecycleFixture):
     RECEIVER_WAIT_SECONDS = 15
+    # InnoDB refreshes its INNODB_TRX / INNODB_LOCKS / INNODB_LOCK_WAITS
+    # snapshot only after 100 ms without any read of it. Polling faster keeps
+    # the snapshot from before the wait began, so a real lock wait is never
+    # seen (reproduced on MariaDB 11.0.6: 0 of 120 polls at 50 ms saw a 6 s
+    # wait). Poll these views at least this far apart.
+    INNODB_VIEW_POLL_SECONDS = 0.25
 
     @classmethod
     def setUpClass(cls):
@@ -430,7 +436,7 @@ class MariaDbFixture(LifecycleFixture):
                     "Actual receiver must hold an established consistent-read view before acquiring the target lock",
                 )
                 return
-            time.sleep(0.05)
+            time.sleep(self.INNODB_VIEW_POLL_SECONDS)
         self.fail(
             "Receiver did not reach the actual target-user InnoDB wait: "
             + self.receiver_timeout_detail(request)
